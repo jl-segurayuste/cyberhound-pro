@@ -503,7 +503,7 @@ class CyberHoundServer:
         runner = web.AppRunner(app)
         await runner.setup()
 
-        # ── TLS: auto-signed por defecto, certificado externo si se configura ──
+        # ── TLS ───────────────────────────────────────────────────────────────
         ssl_ctx = None
         try:
             ssl_ctx = TLSManager.create_ssl_context(
@@ -513,10 +513,7 @@ class CyberHoundServer:
             proto = "https"
         except Exception as e:
             logger.error(
-                "No se pudo activar TLS: %s\n"
-                "El servidor arrancará en HTTP — INSEGURO para producción.\n"
-                "Instala 'cryptography' para TLS automático: pip install cryptography",
-                e,
+                "No se pudo activar TLS: %s — arrancando en HTTP (inseguro)", e
             )
             proto = "http"
 
@@ -526,14 +523,39 @@ class CyberHoundServer:
             self.cfg.server.port,
             ssl_context=ssl_ctx,
         )
-        await site.start()
+
+        # ── Arrancar con error claro si el puerto está ocupado ────────────────
+        try:
+            await site.start()
+        except OSError as e:
+            if e.errno == 98:  # Address already in use
+                import subprocess
+                proc = subprocess.run(
+                    ["ss", "-tlnp", f"sport = :{self.cfg.server.port}"],
+                    capture_output=True, text=True,
+                )
+                who = proc.stdout.strip() or "proceso desconocido"
+                logger.error(
+                    "Puerto %d ya en uso.\n"
+                    "Para liberar el puerto: sudo pkill -f 'cyberhound web'\n"
+                    "O usa otro puerto: sudo cyberhound web --port 9443\n"
+                    "Proceso actual en ese puerto:\n%s",
+                    self.cfg.server.port, who,
+                )
+                print(
+                    f"\n❌ El puerto {self.cfg.server.port} ya está en uso.\n"
+                    f"   Liberar: sudo pkill -f 'cyberhound web'\n"
+                    f"   O usar otro puerto: sudo cyberhound web --port 9443\n"
+                )
+                raise SystemExit(1)
+            raise
 
         cert_info = ""
         if ssl_ctx and not self.cfg.server.tls_cert:
             cert_path, _ = TLSManager.cert_paths()
             cert_info = (
                 f"\n   Certificado : {cert_path} (auto-firmado)"
-                f"\n   ⚠ Para evitar avisos del navegador, importa el cert o usa Let's Encrypt"
+                f"\n   ⚠ Importa el cert en tu navegador para evitar avisos"
             )
 
         logger.info(
@@ -545,6 +567,6 @@ class CyberHoundServer:
             f"{proto}://{self.cfg.server.host}:{self.cfg.server.port}"
             f"{cert_info}"
             f"\n   Login: usuario='{self.cfg.auth.username}'"
-            f"\n   Cambia la contraseña con: cyberhound setup\n"
+            f"\n   Cambiar contraseña: sudo cyberhound setup\n"
         )
         await asyncio.Event().wait()

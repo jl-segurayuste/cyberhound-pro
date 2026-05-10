@@ -233,6 +233,157 @@ sudo sed -i "s/password_hash:.*/password_hash: $HASH/" /root/.cyberhound/config.
 
 ## Módulos en detalle
 
+## Checks de Hardening — Detalle completo
+
+Cuando ejecutas **🔍 Análisis de seguridad**, CyberHound realiza los siguientes checks en el servidor local. Cada check está implementado en `cyberhound/scanners/hardening.py`.
+
+---
+
+### 🔐 SSH (`/etc/ssh/sshd_config`)
+
+| ID | Parámetro verificado | Valor inseguro | Severidad | Fix automático |
+|----|---------------------|----------------|-----------|----------------|
+| `ssh_PermitRootLogin` | PermitRootLogin | yes | High | ✅ `PermitRootLogin no` |
+| `ssh_PasswordAuthentication` | PasswordAuthentication | yes | High | ✅ `PasswordAuthentication no` |
+| `ssh_PermitEmptyPasswords` | PermitEmptyPasswords | yes | Critical | ✅ `PermitEmptyPasswords no` |
+| `ssh_X11Forwarding` | X11Forwarding | yes | Medium | ✅ `X11Forwarding no` |
+| `ssh_MaxAuthTries` | MaxAuthTries | > 4 | Medium | ✅ `MaxAuthTries 4` |
+| `ssh_protocol1` | Protocol | 1 | Critical | ✅ Eliminar `Protocol 1` |
+
+**Cómo funciona:** Lee `/etc/ssh/sshd_config` con `read_file_async()` y busca con regex línea por línea. Tras aplicar el fix, ejecuta `systemctl reload sshd`.
+
+---
+
+### 🔥 Firewall
+
+| ID | Qué verifica | Severidad | Fix automático |
+|----|-------------|-----------|----------------|
+| `fw_ufw_inactive` | UFW instalado pero inactivo (`ufw status` → inactive) | Critical | ✅ `ufw --force enable` |
+| `fw_firewalld_inactive` | firewalld instalado pero inactivo | Critical | ✅ `systemctl enable --now firewalld` |
+| `fw_none` | Ni UFW ni firewalld detectados | Critical | ❌ Manual |
+
+---
+
+### ⚙️ Parámetros del Kernel (`/proc/sys/`)
+
+Lee directamente desde `/proc/sys/` sin ejecutar `sysctl`. Tras el fix, persiste en `/etc/sysctl.d/99-cyberhound.conf`.
+
+| ID | Parámetro | Valor esperado | Severidad | Descripción |
+|----|-----------|---------------|-----------|-------------|
+| `kernel_net_ipv4_ip_forward` | net.ipv4.ip_forward | 0 | High | Previene que el servidor actúe como router no intencionado |
+| `kernel_net_ipv4_tcp_syncookies` | net.ipv4.tcp_syncookies | 1 | High | Protección contra ataques SYN flood |
+| `kernel_kernel_randomize_va_space` | kernel.randomize_va_space | 2 | High | ASLR completo activado (mitigación de exploits) |
+| `kernel_net_ipv4_conf_all_accept_source_route` | net.ipv4.conf.all.accept_source_route | 0 | High | Deshabilita enrutamiento por origen (IP spoofing) |
+| `kernel_net_ipv4_conf_all_send_redirects` | net.ipv4.conf.all.send_redirects | 0 | High | Deshabilita envío de ICMP redirects |
+| `kernel_net_ipv4_conf_all_log_martians` | net.ipv4.conf.all.log_martians | 1 | Medium | Loguea paquetes con IPs imposibles |
+| `kernel_net_ipv4_conf_all_rp_filter` | net.ipv4.conf.all.rp_filter | 1 | Medium | Filtro de ruta inversa anti-spoofing |
+| `kernel_kernel_dmesg_restrict` | kernel.dmesg_restrict | 1 | Medium | Restringe acceso a dmesg sin privilegios |
+| `kernel_kernel_perf_event_paranoid` | kernel.perf_event_paranoid | 2 | Medium | Restringe acceso a eventos de rendimiento |
+| `kernel_net_ipv6_conf_all_disable_ipv6` | net.ipv6.conf.all.disable_ipv6 | 1 | Info | IPv6 activo (revisar si se usa) |
+
+---
+
+### 🔒 Autenticación y contraseñas
+
+| ID | Qué verifica | Archivo | Severidad | Fix automático |
+|----|-------------|---------|-----------|----------------|
+| `no_pam_faillock` | pam_faillock configurado en PAM | `/etc/pam.d/common-auth` | High | ✅ Inserta `auth required pam_faillock.so deny=5 unlock_time=600` |
+| `login_defs_PASS_MAX_DAYS` | Caducidad máxima contraseñas ≤ 90 días | `/etc/login.defs` | Medium | ✅ `PASS_MAX_DAYS 90` |
+| `login_defs_PASS_MIN_DAYS` | Días mínimos antes de cambiar ≥ 1 | `/etc/login.defs` | Low | ✅ `PASS_MIN_DAYS 1` |
+| `login_defs_PASS_WARN_AGE` | Aviso de expiración ≥ 7 días | `/etc/login.defs` | Low | ✅ `PASS_WARN_AGE 7` |
+| `login_defs_LOGIN_RETRIES` | Intentos de login ≤ 5 | `/etc/login.defs` | Medium | ✅ `LOGIN_RETRIES 5` |
+
+**pam_faillock:** Bloquea la cuenta tras 5 intentos fallidos durante 600 segundos. También añade `account required pam_faillock.so` en `common-account`.
+
+---
+
+### 📁 Sistema de ficheros
+
+| ID | Qué verifica | Severidad | Fix automático |
+|----|-------------|-----------|----------------|
+| `ww_<ruta>` | Fichero world-writable en `/etc`, `/usr/bin`, `/sbin`, etc. | High | ✅ `chmod o-w <ruta>` |
+| `log_perm_<nombre>` | Fichero de log en `/var/log` legible por todos | Low | ✅ `chmod o-r <ruta>` |
+
+**World-writable:** Escanea `/etc`, `/usr/bin`, `/usr/sbin`, `/bin`, `/sbin`, `/usr/local/bin`. Genera un Finding individual por fichero (máx. configurable con `scan.max_ww_files`). Los ficheros bajo `/var/lib/kubelet/` y `/var/lib/docker/` se ignoran automáticamente.
+
+---
+
+### 🛡️ Control de Acceso Obligatorio (MAC)
+
+| ID | Qué verifica | Severidad | Fix automático |
+|----|-------------|-----------|----------------|
+| `apparmor_inactive` | AppArmor instalado pero no activo | Medium | ✅ `systemctl enable --now apparmor` |
+
+**Nota:** Si el sistema usa SELinux en lugar de AppArmor, este check no aplica y no genera hallazgo.
+
+---
+
+### 📋 Auditoría del sistema
+
+| ID | Qué verifica | Severidad | Fix automático |
+|----|-------------|-----------|----------------|
+| `no_auditd` | auditd no instalado | High | ✅ `apt install auditd && systemctl enable --now auditd` |
+| `auditd_inactive` | auditd instalado pero inactivo | High | ✅ `systemctl enable --now auditd` |
+| `no_aide` | AIDE (monitor de integridad) no instalado | High | ✅ `apt install aide` |
+| `aide_db_missing` | AIDE instalado pero base de datos no inicializada | High | ✅ `aideinit` + renombrar DB |
+
+---
+
+### ⚠️ Servicios inseguros
+
+Detecta servicios activos con vulnerabilidades conocidas o protocolos obsoletos:
+
+| ID | Servicio | Por qué es inseguro | Severidad | Fix automático |
+|----|---------|--------------------|-----------|----|
+| `svc_telnet` | telnet | Credenciales en texto plano | High | ✅ `systemctl disable --now telnet` |
+| `svc_rsh` | rsh | Sin cifrado, vulnerable | High | ✅ |
+| `svc_rlogin` | rlogin | Sin cifrado, vulnerable | High | ✅ |
+| `svc_finger` | finger | Expone información de usuarios | High | ✅ |
+| `svc_talk` | talk | Protocolo obsoleto sin cifrado | High | ✅ |
+| `svc_tftp` | tftp | Sin autenticación | High | ✅ |
+| `svc_xinetd` | xinetd | Reemplazado por systemd | High | ✅ |
+| `svc_nis` | nis | Protocolo obsoleto, vulnerable a MITM | High | ✅ |
+
+---
+
+### 🔑 Privilegios (sudo)
+
+| ID | Qué verifica | Archivos | Severidad | Fix automático |
+|----|-------------|---------|-----------|----------------|
+| `sudoers_nopasswd_<archivo>_<línea>` | Entradas NOPASSWD en sudoers | `/etc/sudoers`, `/etc/sudoers.d/*` | High | ❌ Requiere revisión manual |
+
+**Por qué no tiene fix automático:** Eliminar un NOPASSWD incorrecto podría romper scripts de automatización legítimos. Se reporta con la línea exacta para revisión manual.
+
+---
+
+### 🖥️ Sistema general
+
+| ID | Qué verifica | Severidad | Fix automático |
+|----|-------------|-----------|----------------|
+| `core_dumps_enabled` | Core dumps no deshabilitados en `limits.conf` | Medium | ✅ Añade `* hard core 0` + `sysctl fs.suid_dumpable=0` |
+| `usb_storage_enabled` | Módulo `usb-storage` no bloqueado | Medium | ✅ Crea `/etc/modprobe.d/cyberhound-usb.conf` |
+| `ctrlaltdel_enabled` | Ctrl+Alt+Del puede reiniciar el sistema | Medium | ✅ `systemctl mask ctrl-alt-del.target` |
+| `cron_unrestricted` | Sin `/etc/cron.allow` ni `/etc/cron.deny` | Low | ❌ Requiere definir usuarios autorizados |
+| `no_unattended_upgrades` | Actualizaciones automáticas no configuradas | Medium | ✅ `apt install unattended-upgrades` + reconfigurar |
+
+---
+
+### 📊 Cálculo de la puntuación de seguridad
+
+La puntuación (0-100) se calcula en el dashboard restando penalizaciones por cada hallazgo:
+
+| Severidad | Penalización |
+|-----------|-------------|
+| Critical | -20 puntos |
+| High | -10 puntos |
+| Medium | -4 puntos |
+| Low | -1 punto |
+| Info | -0 puntos |
+
+Una instalación limpia recién configurada suele tener entre 40-60 puntos. Aplicar todos los fixes automáticos típicamente lleva la puntuación por encima de 85.
+
+---
+
 ### `core/models.py` — Modelos de datos
 
 ```python
