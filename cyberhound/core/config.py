@@ -141,12 +141,18 @@ class CyberHoundConfig:
 
     def save(self, path: Path = DEFAULT_CONFIG_PATH) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
+        # Generar secret persistente si no existe
+        if not self.auth.secret:
+            import secrets as _s
+            self.auth.secret = _s.token_hex(32)
+            logger.info("JWT secret generado y guardado en config")
         data = {
             "api_keys": {k: v for k, v in self.api_keys.__dict__.items() if v},
             "auth": {
                 "mode":            self.auth.mode,
                 "username":        self.auth.username,
                 "password_hash":   self.auth.password_hash,
+                "secret":          self.auth.secret,
                 "token_ttl_hours": self.auth.token_ttl_hours,
             },
             "scan": self.scan.__dict__,
@@ -154,6 +160,8 @@ class CyberHoundConfig:
         }
         with open(path, "w", encoding="utf-8") as f:
             yaml.dump(data, f, default_flow_style=False, allow_unicode=True)
+        # Permisos restrictivos — contiene el JWT secret
+        path.chmod(0o600)
         logger.info("Configuración guardada en %s", path)
 
     @staticmethod
