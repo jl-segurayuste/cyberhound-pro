@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Entornos virtuales
+.venv/
+venv/
+env/
+
+# Datos locales sensibles
+.cyberhound/
+.env
+*.log
+*.db
+*.sqlite
+
+# Tests
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Editores
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Docker
+.docker/

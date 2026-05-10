@@ -1,0 +1,41 @@
+# Control de versiones
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.egg-info
+.eggs
+dist/
+build/
+*.egg
+
+# Entornos virtuales
+.venv
+venv
+env
+
+# Tests
+tests/
+.pytest_cache
+.coverage
+htmlcov/
+
+# Editores
+.vscode
+.idea
+*.swp
+*.swo
+.DS_Store
+
+# Datos locales (no van en la imagen)
+.cyberhound/
+*.log
+*.db
+
+# Documentación (no necesaria en runtime)
+docs/
+*.md
