@@ -1,11 +1,12 @@
 """
 Configuración centralizada de CyberHound.
-Fuentes (en orden de precedencia): variables de entorno > config.yaml > defaults.
+Fuentes (orden de precedencia): variables de entorno > config.yaml > defaults.
 """
 from __future__ import annotations
 
 import hashlib
 import os
+import secrets
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -17,6 +18,7 @@ from cyberhound.core.logging import get_logger
 logger = get_logger("config")
 
 DEFAULT_CONFIG_PATH = Path.home() / ".cyberhound" / "config.yaml"
+DEFAULT_DB_PATH     = Path.home() / ".cyberhound" / "cyberhound.db"
 
 
 @dataclass
@@ -31,12 +33,12 @@ class APIKeys:
 
 @dataclass
 class AuthSettings:
-    mode:           str  = "jwt"       # jwt | basic | none
-    username:       str  = "admin"
-    password_hash:  Optional[str] = None  # SHA-256 hex
-    secret:         Optional[str] = None
-    token_ttl_hours:int  = 8
-    localhost_only: bool = False
+    mode:            str  = "jwt"
+    username:        str  = "admin"
+    password_hash:   Optional[str] = None
+    secret:          Optional[str] = None
+    token_ttl_hours: int  = 8
+    localhost_only:  bool = False
 
 
 @dataclass
@@ -46,7 +48,7 @@ class ScanSettings:
     ssh_key_path:     Optional[str] = None
     nmap_timeout:     int  = 120
     ssh_concurrency:  int  = 5
-    max_ww_files:     int  = 500       # límite de findings world-writable
+    max_ww_files:     int  = 200
     hash_scan_max:    int  = 50
 
 
@@ -54,23 +56,54 @@ class ScanSettings:
 class ServerSettings:
     host:     str  = "0.0.0.0"
     port:     int  = 8443
-    tls_cert: Optional[str] = None    # ruta a cert PEM
-    tls_key:  Optional[str] = None    # ruta a key PEM
+    tls_cert: Optional[str] = None
+    tls_key:  Optional[str] = None
     log_dir:  str  = "/var/log/cyberhound"
 
 
 @dataclass
+class SchedulerSettings:
+    enabled:         bool = True
+    audit_enabled:   bool = True
+    audit_hour:      int  = 2
+    audit_minute:    int  = 0
+    malware_enabled: bool = True
+    malware_hour:    int  = 3
+    malware_minute:  int  = 0
+    malware_day:     int  = 0    # 0=lunes
+    network_enabled: bool = True
+    network_hour:    int  = 4
+    network_minute:  int  = 0
+
+
+@dataclass
+class NotificationSettings:
+    email_enabled:   bool  = False
+    smtp_host:       str   = "smtp.gmail.com"
+    smtp_port:       int   = 587
+    smtp_user:       str   = ""
+    smtp_password:   str   = ""
+    email_from:      str   = ""
+    email_to:        list  = field(default_factory=list)
+    webhook_enabled: bool  = False
+    webhook_url:     str   = ""
+    min_level:       str   = "warning"
+
+
+@dataclass
 class CyberHoundConfig:
-    api_keys:   APIKeys       = field(default_factory=APIKeys)
-    auth:       AuthSettings  = field(default_factory=AuthSettings)
-    scan:       ScanSettings  = field(default_factory=ScanSettings)
-    server:     ServerSettings = field(default_factory=ServerSettings)
+    api_keys:      APIKeys              = field(default_factory=APIKeys)
+    auth:          AuthSettings         = field(default_factory=AuthSettings)
+    scan:          ScanSettings         = field(default_factory=ScanSettings)
+    server:        ServerSettings       = field(default_factory=ServerSettings)
+    scheduler:     SchedulerSettings    = field(default_factory=SchedulerSettings)
+    notifications: NotificationSettings = field(default_factory=NotificationSettings)
+    db_path:       str = field(default_factory=lambda: str(DEFAULT_DB_PATH))
 
     @classmethod
     def load(cls, path: Path = DEFAULT_CONFIG_PATH) -> "CyberHoundConfig":
         cfg = cls()
         raw: dict = {}
-
         if path.exists():
             try:
                 with open(path, encoding="utf-8") as f:
@@ -79,92 +112,115 @@ class CyberHoundConfig:
             except Exception as e:
                 logger.error("Error leyendo config %s: %s", path, e)
 
-        # API keys desde YAML
-        keys_raw = raw.get("api_keys", {})
+        # API keys
+        kr = raw.get("api_keys", {})
         cfg.api_keys = APIKeys(
-            shodan=     keys_raw.get("shodan"),
-            virustotal= keys_raw.get("virustotal"),
-            abuseipdb=  keys_raw.get("abuseipdb"),
-            greynoise=  keys_raw.get("greynoise"),
-            otx=        keys_raw.get("otx"),
-            hibp=       keys_raw.get("hibp"),
+            shodan=kr.get("shodan"), virustotal=kr.get("virustotal"),
+            abuseipdb=kr.get("abuseipdb"), greynoise=kr.get("greynoise"),
+            otx=kr.get("otx"), hibp=kr.get("hibp"),
         )
-
-        # Variables de entorno tienen prioridad sobre YAML
-        env_map = {
-            "SHODAN_API_KEY":   "shodan",
-            "VT_API_KEY":       "virustotal",
-            "ABUSEIPDB_KEY":    "abuseipdb",
-            "GREYNOISE_KEY":    "greynoise",
-            "OTX_KEY":          "otx",
-            "HIBP_API_KEY":     "hibp",
-        }
-        for env_var, attr in env_map.items():
-            val = os.environ.get(env_var)
-            if val:
-                setattr(cfg.api_keys, attr, val)
+        for env, attr in [
+            ("SHODAN_API_KEY","shodan"), ("VT_API_KEY","virustotal"),
+            ("ABUSEIPDB_KEY","abuseipdb"), ("GREYNOISE_KEY","greynoise"),
+            ("OTX_KEY","otx"), ("HIBP_API_KEY","hibp"),
+        ]:
+            if v := os.environ.get(env):
+                setattr(cfg.api_keys, attr, v)
 
         # Auth
-        auth_raw = raw.get("auth", {})
+        ar = raw.get("auth", {})
         cfg.auth = AuthSettings(
-            mode=           auth_raw.get("mode", "jwt"),
-            username=       auth_raw.get("username", "admin"),
-            password_hash=  auth_raw.get("password_hash"),
-            secret=         auth_raw.get("secret") or os.environ.get("CH_SECRET"),
-            token_ttl_hours=auth_raw.get("token_ttl_hours", 8),
-            localhost_only= auth_raw.get("localhost_only", False),
+            mode=ar.get("mode", "jwt"),
+            username=ar.get("username", "admin"),
+            password_hash=ar.get("password_hash"),
+            secret=ar.get("secret") or os.environ.get("CH_SECRET"),
+            token_ttl_hours=ar.get("token_ttl_hours", 8),
+            localhost_only=ar.get("localhost_only", False),
         )
 
         # Scan
-        scan_raw = raw.get("scan", {})
+        sr = raw.get("scan", {})
         cfg.scan = ScanSettings(
-            ssh_default_user=scan_raw.get("ssh_default_user", "root"),
-            ssh_default_port=scan_raw.get("ssh_default_port", 22),
-            ssh_key_path=    scan_raw.get("ssh_key_path"),
-            nmap_timeout=    scan_raw.get("nmap_timeout", 120),
-            ssh_concurrency= scan_raw.get("ssh_concurrency", 5),
-            max_ww_files=    scan_raw.get("max_ww_files", 500),
-            hash_scan_max=   scan_raw.get("hash_scan_max", 50),
+            ssh_default_user=sr.get("ssh_default_user", "root"),
+            ssh_default_port=sr.get("ssh_default_port", 22),
+            ssh_key_path=sr.get("ssh_key_path"),
+            nmap_timeout=sr.get("nmap_timeout", 120),
+            ssh_concurrency=sr.get("ssh_concurrency", 5),
+            max_ww_files=sr.get("max_ww_files", 200),
+            hash_scan_max=sr.get("hash_scan_max", 50),
         )
 
         # Server
-        srv_raw = raw.get("server", {})
+        svr = raw.get("server", {})
         cfg.server = ServerSettings(
-            host=    srv_raw.get("host", "0.0.0.0"),
-            port=    int(srv_raw.get("port", 8443)),
-            tls_cert=srv_raw.get("tls_cert"),
-            tls_key= srv_raw.get("tls_key"),
-            log_dir= srv_raw.get("log_dir", "/var/log/cyberhound"),
+            host=svr.get("host", "0.0.0.0"),
+            port=int(svr.get("port", 8443)),
+            tls_cert=svr.get("tls_cert"),
+            tls_key=svr.get("tls_key"),
+            log_dir=svr.get("log_dir", "/var/log/cyberhound"),
         )
 
+        # Scheduler
+        schr = raw.get("scheduler", {})
+        cfg.scheduler = SchedulerSettings(
+            enabled=schr.get("enabled", True),
+            audit_enabled=schr.get("audit_enabled", True),
+            audit_hour=schr.get("audit_hour", 2),
+            audit_minute=schr.get("audit_minute", 0),
+            malware_enabled=schr.get("malware_enabled", True),
+            malware_hour=schr.get("malware_hour", 3),
+            malware_minute=schr.get("malware_minute", 0),
+            malware_day=schr.get("malware_day", 0),
+            network_enabled=schr.get("network_enabled", True),
+            network_hour=schr.get("network_hour", 4),
+            network_minute=schr.get("network_minute", 0),
+        )
+
+        # Notifications
+        nr = raw.get("notifications", {})
+        cfg.notifications = NotificationSettings(
+            email_enabled=nr.get("email_enabled", False),
+            smtp_host=nr.get("smtp_host", "smtp.gmail.com"),
+            smtp_port=nr.get("smtp_port", 587),
+            smtp_user=nr.get("smtp_user", ""),
+            smtp_password=nr.get("smtp_password", os.environ.get("CH_SMTP_PASSWORD", "")),
+            email_from=nr.get("email_from", ""),
+            email_to=nr.get("email_to", []),
+            webhook_enabled=nr.get("webhook_enabled", False),
+            webhook_url=nr.get("webhook_url", os.environ.get("CH_WEBHOOK_URL", "")),
+            min_level=nr.get("min_level", "warning"),
+        )
+
+        cfg.db_path = raw.get("db_path", str(DEFAULT_DB_PATH))
         return cfg
 
     def save(self, path: Path = DEFAULT_CONFIG_PATH) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        # Generar secret persistente si no existe
         if not self.auth.secret:
-            import secrets as _s
-            self.auth.secret = _s.token_hex(32)
-            logger.info("JWT secret generado y guardado en config")
+            self.auth.secret = secrets.token_hex(32)
         data = {
             "api_keys": {k: v for k, v in self.api_keys.__dict__.items() if v},
             "auth": {
-                "mode":            self.auth.mode,
-                "username":        self.auth.username,
-                "password_hash":   self.auth.password_hash,
-                "secret":          self.auth.secret,
+                "mode": self.auth.mode,
+                "username": self.auth.username,
+                "password_hash": self.auth.password_hash,
+                "secret": self.auth.secret,
                 "token_ttl_hours": self.auth.token_ttl_hours,
             },
-            "scan": self.scan.__dict__,
-            "server": self.server.__dict__,
+            "scan": {k: v for k, v in self.scan.__dict__.items()},
+            "server": {k: v for k, v in self.server.__dict__.items()},
+            "scheduler": {k: v for k, v in self.scheduler.__dict__.items()},
+            "notifications": {
+                k: v for k, v in self.notifications.__dict__.items()
+                if k != "smtp_password"  # no guardar contraseña SMTP en YAML
+            },
+            "db_path": self.db_path,
         }
         with open(path, "w", encoding="utf-8") as f:
             yaml.dump(data, f, default_flow_style=False, allow_unicode=True)
-        # Permisos restrictivos — contiene el JWT secret
         path.chmod(0o600)
         logger.info("Configuración guardada en %s", path)
 
     @staticmethod
     def hash_password(password: str) -> str:
-        """Genera el hash SHA-256 para guardar en config.yaml."""
         return hashlib.sha256(password.encode()).hexdigest()
