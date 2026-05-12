@@ -224,3 +224,72 @@ class CyberHoundConfig:
     @staticmethod
     def hash_password(password: str) -> str:
         return hashlib.sha256(password.encode()).hexdigest()
+
+    def validate(self) -> list[str]:
+        """
+        Valida la configuración al arrancar.
+        Devuelve lista de errores. Lista vacía = config válida.
+        """
+        errors = []
+
+        # Auth
+        if self.auth.mode not in ("jwt", "basic", "none"):
+            errors.append(f"auth.mode inválido: '{self.auth.mode}'. Valores: jwt, basic, none")
+        if not self.auth.username:
+            errors.append("auth.username no puede estar vacío")
+        if self.auth.token_ttl_hours < 1 or self.auth.token_ttl_hours > 168:
+            errors.append(f"auth.token_ttl_hours fuera de rango: {self.auth.token_ttl_hours} (1-168)")
+
+        # Server
+        if not 1 <= self.server.port <= 65535:
+            errors.append(f"server.port fuera de rango: {self.server.port}")
+        if self.server.tls_cert and not Path(self.server.tls_cert).exists():
+            errors.append(f"server.tls_cert no existe: {self.server.tls_cert}")
+        if self.server.tls_key and not Path(self.server.tls_key).exists():
+            errors.append(f"server.tls_key no existe: {self.server.tls_key}")
+        if bool(self.server.tls_cert) != bool(self.server.tls_key):
+            errors.append("server.tls_cert y server.tls_key deben especificarse juntos")
+
+        # Scan
+        if self.scan.ssh_concurrency < 1 or self.scan.ssh_concurrency > 50:
+            errors.append(f"scan.ssh_concurrency fuera de rango: {self.scan.ssh_concurrency} (1-50)")
+        if self.scan.max_ww_files < 10:
+            errors.append(f"scan.max_ww_files demasiado bajo: {self.scan.max_ww_files}")
+        if self.scan.ssh_key_path:
+            key = Path(self.scan.ssh_key_path).expanduser()
+            if not key.exists():
+                errors.append(f"scan.ssh_key_path no existe: {key}")
+            elif oct(key.stat().st_mode & 0o777) not in ("0o600", "0o400"):
+                errors.append(
+                    f"scan.ssh_key_path tiene permisos inseguros: {key} "
+                    f"(actual: {oct(key.stat().st_mode & 0o777)}, requerido: 600)"
+                )
+
+        # Scheduler
+        for field, val in [
+            ("audit_hour", self.scheduler.audit_hour),
+            ("malware_hour", self.scheduler.malware_hour),
+            ("network_hour", self.scheduler.network_hour),
+        ]:
+            if not 0 <= val <= 23:
+                errors.append(f"scheduler.{field} fuera de rango: {val} (0-23)")
+        if not 0 <= self.scheduler.malware_day <= 6:
+            errors.append(f"scheduler.malware_day fuera de rango: {self.scheduler.malware_day} (0-6)")
+
+        # Notificaciones
+        if self.notifications.email_enabled:
+            if not self.notifications.smtp_host:
+                errors.append("notifications.smtp_host requerido cuando email_enabled=true")
+            if not self.notifications.email_to:
+                errors.append("notifications.email_to requerido cuando email_enabled=true")
+            if not self.notifications.smtp_user:
+                errors.append("notifications.smtp_user requerido cuando email_enabled=true")
+        if self.notifications.webhook_enabled:
+            if not self.notifications.webhook_url:
+                errors.append("notifications.webhook_url requerido cuando webhook_enabled=true")
+            elif not self.notifications.webhook_url.startswith("https://"):
+                errors.append("notifications.webhook_url debe usar HTTPS")
+        if self.notifications.min_level not in ("info", "warning", "critical"):
+            errors.append(f"notifications.min_level inválido: '{self.notifications.min_level}'")
+
+        return errors
