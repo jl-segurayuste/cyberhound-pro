@@ -3,30 +3,29 @@ requires = ["setuptools>=61", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "cyberhound"
-version = "6.0.0"
-description = "Plataforma de seguridad y auditoría para PYMEs"
+name = "cyberhound-pro"
+version = "6.1.0"
+description = "Plataforma de auditoría y seguridad para PYMEs"
 requires-python = ">=3.11"
 dependencies = [
     "aiohttp>=3.9",
-    "aiosqlite>=0.20",
-    "asyncssh>=2.14",          # SSH sin credenciales en texto plano
-    "aiofiles>=23.0",          # I/O de disco sin bloquear el event loop
+    "aiosqlite>=0.19",
+    "aiofiles>=23.0",
     "pyyaml>=6.0",
-    "colorama>=0.4",
-    "fpdf2>=2.7",
-    "jinja2>=3.1",
-    "beautifulsoup4>=4.12",
-    "PyJWT>=2.8",              # Autenticación JWT
-    "cryptography>=42.0",      # TLS, claves, mTLS
-    "python-multipart>=0.0.9",
+    "PyJWT>=2.8",
+    "cryptography>=41.0",
+    "asyncssh>=2.14",
     "tenacity>=8.0",
-    "python-dotenv>=1.0",
+    "colorama>=0.4",
 ]
 
 [project.optional-dependencies]
-yara = ["yara-python>=4.3"]
-dev  = ["pytest", "pytest-asyncio", "ruff", "mypy"]
+test = [
+    "pytest>=7.4",
+    "pytest-asyncio>=0.23",
+    "pytest-cov>=4.1",
+    "pytest-timeout>=2.2",
+]
 
 [project.scripts]
 cyberhound = "cyberhound.__main__:main"
@@ -36,8 +35,18 @@ where = ["."]
 include = ["cyberhound*"]
 
 [tool.setuptools.package-data]
-"cyberhound.ui.static" = ["*.html", "*.css", "*.js", "*.ico", "*.png"]
+"cyberhound.ui.static" = ["*.html", "*.css", "*.js"]
 
-[tool.ruff]
-line-length = 100
-target-version = "py311"
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+timeout = 30
+addopts = ["-v", "--tb=short", "--no-header"]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::pytest.PytestUnraisableExceptionWarning",
+]
+
+[tool.coverage.run]
+source = ["cyberhound"]
+omit = ["tests/*", "cyberhound/ui/*"]
