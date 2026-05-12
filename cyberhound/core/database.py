@@ -187,12 +187,23 @@ class Database:
         for f in findings:
             if f.severity in counts:
                 counts[f.severity] += 1
+
         if score is None:
-            score = max(0, 100
-                        - counts["critical"] * 20
-                        - counts["high"] * 10
-                        - counts["medium"] * 4
-                        - counts["low"])
+            try:
+                from cyberhound.core.scoring import compute_score
+                result = compute_score(findings)
+                score = result.score
+                logger.debug(
+                    "Scoring avanzado: %d (%s) | exposición=%.1fx",
+                    score, result.grade, result.context.exposure_multiplier,
+                )
+            except Exception as e:
+                logger.warning("Scoring avanzado falló, usando básico: %s", e)
+                score = max(0, 100
+                            - counts["critical"] * 20
+                            - counts["high"] * 10
+                            - counts["medium"] * 4
+                            - counts["low"])
         now = _now()
         async with aiosqlite.connect(str(self.path)) as db:
             async with db.execute(

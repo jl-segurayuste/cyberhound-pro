@@ -125,6 +125,22 @@ class CyberHoundServer:
             ),
             db=self.db,
         )
+        # SIEM integration
+        from cyberhound.core.siem import SIEMConfig, SIEMIntegration
+        self.siem = SIEMIntegration(SIEMConfig(
+            wazuh_enabled=cfg.siem.wazuh_enabled,
+            wazuh_host=cfg.siem.wazuh_host,
+            wazuh_port=cfg.siem.wazuh_port,
+            wazuh_api_url=cfg.siem.wazuh_api_url,
+            elk_enabled=cfg.siem.elk_enabled,
+            elk_url=cfg.siem.elk_url,
+            elk_index=cfg.siem.elk_index,
+            elk_api_key=cfg.siem.elk_api_key,
+            splunk_enabled=cfg.siem.splunk_enabled,
+            splunk_hec_url=cfg.siem.splunk_hec_url,
+            splunk_hec_token=cfg.siem.splunk_hec_token,
+            min_severity=cfg.siem.min_severity,
+        ))
         self.scheduler: Optional[Scheduler] = None
 
     def build_app(self) -> web.Application:
@@ -137,7 +153,7 @@ class CyberHoundServer:
         app = web.Application(
             middlewares=[
                 security_headers_middleware, request_logger_middleware,
-                CsrfProtection().middleware_factory(), auth_middleware,
+                CsrfProtection().middleware_factory(is_https=True), auth_middleware,
             ],
             client_max_size=10 * 1024 * 1024,
         )
@@ -163,6 +179,7 @@ class CyberHoundServer:
         app.router.add_get("/api/history/{scan_id}",     self.api_history_detail)
         app.router.add_get("/api/history/{scan_id}/compare", self.api_compare)
         app.router.add_get("/api/score/trend",           self.api_score_trend)
+        app.router.add_get("/api/score/detail",          self.api_score_detail)
         app.router.add_get("/api/dashboard",             self.api_dashboard)
 
         # ── Inventario de red ────────────────────────────────────────────────
@@ -192,6 +209,9 @@ class CyberHoundServer:
         app.router.add_get ("/api/config/notifications",self.api_get_notifications_cfg)
         app.router.add_post("/api/config/notifications",self.api_save_notifications_cfg)
         app.router.add_post("/api/config/notifications/test", self.api_test_notifications)
+        app.router.add_get ("/api/config/siem",         self.api_get_siem)
+        app.router.add_post("/api/config/siem",         self.api_save_siem)
+        app.router.add_post("/api/config/siem/test",    self.api_test_siem)
 
         self._app = app
         return app
@@ -290,6 +310,13 @@ class CyberHoundServer:
         sev_order = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
         for f in sorted(findings, key=lambda x: sev_order.get(x.severity, 5)):
             await send({"type": "finding", "data": f.to_dict()})
+            # Enviar al SIEM en background (no bloquea si falla)
+            if any([self.cfg.siem.wazuh_enabled,
+                    self.cfg.siem.elk_enabled,
+                    self.cfg.siem.splunk_enabled]):
+                asyncio.ensure_future(
+                    self.siem.send_finding(f, self._scan_id_cache.get(ws_id, "unknown"))
+                )
             await asyncio.sleep(0)  # yield al event loop entre findings
 
         history = await self.db.get_scan_history(limit=1)
@@ -553,6 +580,33 @@ class CyberHoundServer:
         trend = await self.db.get_score_trend(scan_type, days)
         return web.json_response(trend)
 
+    async def api_score_detail(self, request: web.Request) -> web.Response:
+        """Devuelve el score detallado con desglose contextual del último audit."""
+        try:
+            scan_id_str = request.rel_url.query.get("scan_id")
+            if scan_id_str:
+                scan_id = int(scan_id_str)
+            else:
+                history = await self.db.get_scan_history("audit", limit=1)
+                if not history:
+                    return web.json_response({"error": "Sin scans"}, status=404)
+                scan_id = history[0]["id"]
+
+            findings_raw = await self.db.get_scan_findings(scan_id)
+            from cyberhound.core.models import Finding
+            from cyberhound.core.scoring import compute_score, ScoringContext
+            findings = [Finding(
+                id=f["finding_id"], category=f["category"], severity=f["severity"],
+                title=f["title"], description=f.get("description", ""),
+                remediation=f.get("remediation", ""),
+                auto_fix=bool(f.get("auto_fix")),
+            ) for f in findings_raw]
+            result = compute_score(findings)
+            return web.json_response(result.to_dict())
+        except Exception as e:
+            logger.error("api_score_detail: %s", e, exc_info=True)
+            return web.json_response({"error": str(e)}, status=500)
+
     async def api_dashboard(self, request: web.Request) -> web.Response:
         stats = await self.db.get_dashboard_stats()
         return web.json_response(stats)
@@ -753,6 +807,59 @@ class CyberHoundServer:
 
     async def api_test_notifications(self, request: web.Request) -> web.Response:
         results = await self.notification_manager.test()
+        return web.json_response(results)
+
+    async def api_get_siem(self, request: web.Request) -> web.Response:
+        s = self.cfg.siem
+        return web.json_response({
+            "wazuh_enabled": s.wazuh_enabled,
+            "wazuh_host":    s.wazuh_host,
+            "wazuh_port":    s.wazuh_port,
+            "wazuh_api_url": s.wazuh_api_url,
+            "elk_enabled":   s.elk_enabled,
+            "elk_url":       s.elk_url,
+            "elk_index":     s.elk_index,
+            "splunk_enabled":   s.splunk_enabled,
+            "splunk_hec_url":   s.splunk_hec_url,
+            "splunk_index":     s.splunk_index,
+            "min_severity":     s.min_severity,
+            # Tokens/passwords nunca se devuelven
+        })
+
+    async def api_save_siem(self, request: web.Request) -> web.Response:
+        try:
+            body = await request.json()
+            s = self.cfg.siem
+            for field in ("wazuh_enabled", "wazuh_host", "wazuh_port", "wazuh_api_url",
+                          "wazuh_api_user", "elk_enabled", "elk_url", "elk_index",
+                          "elk_user", "elk_api_key", "splunk_enabled", "splunk_hec_url",
+                          "splunk_index", "min_severity"):
+                if field in body:
+                    setattr(s, field, body[field])
+            # Passwords solo si no están vacíos
+            for env_field, cfg_field in [
+                ("wazuh_api_pass", "wazuh_api_pass"),
+                ("elk_pass", "elk_pass"),
+                ("splunk_hec_token", "splunk_hec_token"),
+            ]:
+                if body.get(env_field):
+                    setattr(s, cfg_field, body[env_field])
+            self.cfg.save()
+            # Reinicializar SIEM en caliente
+            from cyberhound.core.siem import SIEMConfig, SIEMIntegration
+            self.siem = SIEMIntegration(SIEMConfig(
+                wazuh_enabled=s.wazuh_enabled, wazuh_host=s.wazuh_host,
+                wazuh_port=s.wazuh_port, elk_enabled=s.elk_enabled,
+                elk_url=s.elk_url, elk_api_key=s.elk_api_key,
+                splunk_enabled=s.splunk_enabled, splunk_hec_url=s.splunk_hec_url,
+                splunk_hec_token=s.splunk_hec_token, min_severity=s.min_severity,
+            ))
+            return web.json_response({"ok": True})
+        except Exception as e:
+            return web.json_response({"ok": False, "error": str(e)}, status=500)
+
+    async def api_test_siem(self, request: web.Request) -> web.Response:
+        results = await self.siem.test()
         return web.json_response(results)
 
     # ── Informes ──────────────────────────────────────────────────────────────
