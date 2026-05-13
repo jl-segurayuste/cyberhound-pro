@@ -384,3 +384,155 @@ tbody td { padding: 10px 12px; font-size: .85rem; vertical-align: top; }
 ::-webkit-scrollbar { width: 5px; height: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+/* ── Config tabs ── */
+.cfg-tab {
+  background: none; border: none; color: var(--text2);
+  padding: 8px 14px; border-bottom: 2px solid transparent;
+  font-size: .88rem; cursor: pointer; transition: all .15s;
+}
+.cfg-tab:hover { color: var(--text); }
+.cfg-tab.active { color: var(--blue); border-bottom-color: var(--blue); font-weight: 600; }
+.cfg-panel { display: none; padding: 0 24px 24px; }
+.cfg-panel.active { display: block; }
+
+/* ── History table ── */
+.score-pill {
+  display: inline-block; padding: 2px 10px; border-radius: 10px;
+  font-weight: 700; font-size: .8rem;
+}
+.score-good   { background: rgba(63,185,80,.18);  color: var(--green); }
+.score-medium { background: rgba(210,153,34,.18); color: var(--medium); }
+.score-bad    { background: rgba(248,81,73,.18);  color: var(--red); }
+
+.finding-bar { display: flex; gap: 2px; height: 8px; border-radius: 4px; overflow: hidden; min-width: 80px; }
+.finding-bar span { display: block; }
+
+/* ── Trend chart ── */
+.trend-bar {
+  flex: 1; min-width: 8px; border-radius: 3px 3px 0 0;
+  background: var(--blue); opacity: .6; transition: opacity .15s;
+  cursor: pointer; position: relative;
+}
+.trend-bar:hover { opacity: 1; }
+.trend-bar .tip {
+  display: none; position: absolute; bottom: 110%; left: 50%;
+  transform: translateX(-50%); background: var(--bg3); color: var(--text);
+  padding: 3px 8px; border-radius: 4px; font-size: .72rem; white-space: nowrap;
+  border: 1px solid var(--border);
+}
+.trend-bar:hover .tip { display: block; }
+
+/* ── Scheduler cards ── */
+.sched-card {
+  background: var(--bg2); border: 1px solid var(--border);
+  border-radius: 8px; padding: 14px 16px;
+  display: flex; align-items: center; gap: 14px;
+}
+.sched-card .sched-info { flex: 1; }
+.sched-card .sched-name { font-weight: 600; font-size: .9rem; }
+.sched-card .sched-meta { font-size: .78rem; color: var(--text2); margin-top: 3px; }
+.sched-card .sched-actions { display: flex; gap: 6px; }
+.toggle-btn {
+  padding: 5px 14px; border-radius: 6px; font-size: .8rem;
+  cursor: pointer; border: 1px solid var(--border); background: var(--bg3); color: var(--text);
+}
+.toggle-btn.active { background: rgba(63,185,80,.18); border-color: var(--green); color: var(--green); }
+
+/* ── Comparison badges ── */
+.comp-new      { color: var(--red);    font-weight: 600; }
+.comp-resolved { color: var(--green);  font-weight: 600; }
+.comp-same     { color: var(--text2); }
+
+/* ── New asset alert ── */
+.new-asset-alert {
+  background: rgba(210,153,34,.12); border: 1px solid var(--medium);
+  border-radius: 6px; padding: 8px 14px; font-size: .82rem;
+  color: var(--medium); margin: 8px 16px;
+}
+
+/* ── Fixed badge ── */
+.fixed-badge {
+  display: inline-block; background: rgba(63,185,80,.15);
+  color: var(--green); border-radius: 6px; padding: 2px 8px;
+  font-size: .72rem; font-weight: 600;
+}
+
+/* ── LOGO CORPORATIVO ── */
+.logo { display:flex; align-items:center; gap:8px; flex-shrink:0; }
+.logo-text { font-size:1.05rem; font-weight:700; color:var(--text); letter-spacing:.01em; }
+.logo-pro { color:var(--blue); font-weight:800; }
+
+/* ── PANEL DE ACTIVIDAD EN TIEMPO REAL ── */
+#activity-panel {
+  position:fixed; right:0; top:56px; bottom:0; width:320px;
+  background:var(--bg2); border-left:1px solid var(--border);
+  display:flex; flex-direction:column; z-index:50;
+  transform:translateX(100%); transition:transform .25s ease;
+}
+#activity-panel.open { transform:translateX(0); }
+#activity-panel-toggle {
+  position:fixed; right:0; top:50%; transform:translateY(-50%);
+  background:var(--blue); color:#0d1117; border:none; border-radius:6px 0 0 6px;
+  padding:8px 5px; cursor:pointer; font-size:.7rem; writing-mode:vertical-rl;
+  z-index:51; transition:right .25s ease;
+}
+body.activity-open #activity-panel-toggle { right:320px; }
+body.activity-open #main { margin-right:320px; }
+
+#activity-header {
+  padding:12px 16px; border-bottom:1px solid var(--border);
+  font-size:.82rem; font-weight:600; color:var(--text2);
+  display:flex; justify-content:space-between; align-items:center;
+}
+#activity-feed {
+  flex:1; overflow-y:auto; padding:8px 0;
+}
+.activity-item {
+  padding:8px 14px; border-bottom:1px solid var(--bg3);
+  font-size:.78rem; display:flex; gap:8px; align-items:flex-start;
+}
+.activity-item .ai-icon { font-size:.95rem; flex-shrink:0; margin-top:1px; }
+.activity-item .ai-body { flex:1; min-width:0; }
+.activity-item .ai-title { font-weight:600; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.activity-item .ai-desc { color:var(--text2); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.activity-item .ai-time { color:var(--text2); font-size:.72rem; flex-shrink:0; }
+.activity-item.critical { border-left:3px solid var(--critical); }
+.activity-item.high     { border-left:3px solid var(--high); }
+.activity-item.medium   { border-left:3px solid var(--medium); }
+.activity-item.ok       { border-left:3px solid var(--green); }
+.activity-item.info     { border-left:3px solid var(--border); }
+
+/* ── PROGRESO DE SCAN EN TIEMPO REAL ── */
+.scan-progress {
+  background:var(--bg2); border:1px solid var(--border);
+  border-radius:8px; padding:14px; margin-bottom:12px;
+}
+.scan-progress-header {
+  display:flex; justify-content:space-between; align-items:center;
+  margin-bottom:8px;
+}
+.scan-progress-title { font-weight:600; font-size:.88rem; }
+.scan-progress-count { font-size:.78rem; color:var(--text2); }
+.scan-progress-bar {
+  height:4px; background:var(--bg3); border-radius:2px; overflow:hidden;
+  margin-bottom:8px;
+}
+.scan-progress-bar-fill {
+  height:100%; background:var(--blue); border-radius:2px;
+  transition:width .3s ease; animation:pulse-bar 1.5s infinite;
+}
+@keyframes pulse-bar {
+  0%,100%{ opacity:1; } 50%{ opacity:.6; }
+}
+.scan-progress-details {
+  display:flex; gap:8px; flex-wrap:wrap;
+}
+.scan-stat {
+  background:var(--bg3); padding:3px 8px; border-radius:4px;
+  font-size:.72rem; color:var(--text2);
+}
+.scan-stat.has-value { color:var(--text); }
+
+/* ── PARALLEL SCANS ── */
+#parallel-scans { padding:0 0 16px; }
