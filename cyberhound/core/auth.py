@@ -161,13 +161,18 @@ async def auth_middleware(request: web.Request, handler):
     # Modo JWT
     token = _extract_token(request)
     if not token:
-        if "text/html" in request.headers.get("Accept", ""):
+        if "text/html" in request.headers.get("Accept", "") or request.path == "/":
             raise web.HTTPFound("/login")
         raise web.HTTPUnauthorized(reason="Token JWT requerido")
 
     payload = cfg.verify_jwt(token)
     if not payload:
         audit_log.auth_failure(str(request.remote), "JWT inválido o expirado")
+        # Si es una petición de navegador, redirigir al login con mensaje
+        if "text/html" in request.headers.get("Accept", "") or request.path == "/":
+            response = web.HTTPFound("/login?error=Sesión+expirada.+Inicia+sesión+de+nuevo.")
+            response.del_cookie(AUTH_COOKIE)  # limpiar cookie inválida
+            return response
         raise web.HTTPUnauthorized(reason="Token JWT inválido o expirado")
 
     audit_log.auth_success(str(request.remote), payload["sub"])

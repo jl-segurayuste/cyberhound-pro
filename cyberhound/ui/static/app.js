@@ -48,6 +48,11 @@ function showCfgTab(name) {
   document.querySelectorAll('.cfg-panel').forEach(p => p.classList.remove('active'));
   document.querySelector(`[data-cfg="${name}"]`)?.classList.add('active');
   document.getElementById('cfg-' + name)?.classList.add('active');
+  // Cargar datos al activar tabs que los necesitan
+  if (name === 'siem')         loadSIEM();
+  if (name === 'users')        loadUsers();
+  if (name === 'suppressions') loadSuppressions();
+  if (name === 'scheduler')    loadScheduler();
 }
 
 // ── Status ────────────────────────────────────────────────────────────────
@@ -1262,89 +1267,4 @@ function renderTrendChart(containerId, data) {
     </svg>`;
 }
 
-// ── Integración en loadDashboard ──────────────────────────────────────────────
-const _origLoadDashboard = typeof loadDashboard === 'function' ? loadDashboard : null;
 
-async function loadDashboard() {
-  try {
-    const r = await fetch('/api/dashboard');
-    const d = await r.json();
-
-    // Score y grade
-    const lastAudit = d.last_scans?.audit;
-    if (lastAudit) {
-      const score = lastAudit.score ?? 0;
-      const scoreEl = document.getElementById('score-num');
-      const scoreCircle = document.getElementById('score-circle');
-      const scoreLabel  = document.getElementById('score-label');
-      const scoreHint   = document.getElementById('score-hint');
-      if (scoreEl) scoreEl.textContent = score;
-      const color = score>=80?'#3fb950':score>=60?'#d29922':'#f85149';
-      if (scoreCircle) scoreCircle.style.borderColor = color;
-      if (scoreLabel) { scoreLabel.style.color=color; scoreLabel.textContent=score>=80?'Bueno':score>=60?'Mejorable':'Crítico'; }
-      if (scoreHint) {
-        const dt = new Date(lastAudit.started_at).toLocaleDateString('es',{day:'2-digit',month:'2-digit'});
-        scoreHint.textContent = `Último audit: ${dt}`;
-      }
-    }
-
-    // Contadores
-    if (lastAudit) {
-      ['critical','high','medium','low'].forEach(s => {
-        const el = document.getElementById(`cnt-${s}`);
-        if (el) el.textContent = lastAudit[s] ?? 0;
-      });
-    }
-
-    // Assets
-    const devEl   = document.getElementById('dash-devices-count');
-    const unauthEl = document.getElementById('dash-unauth');
-    if (devEl) devEl.textContent = d.total_assets || 0;
-    if (unauthEl && d.unauthorized_assets > 0) {
-      unauthEl.textContent = `⚠ ${d.unauthorized_assets} dispositivo(s) no autorizado(s)`;
-    }
-
-    // Trend chart
-    const trend = await fetch('/api/score/trend?days=30').then(r=>r.json());
-    if (trend.length) {
-      document.getElementById('history-trend-wrap') && (document.getElementById('history-trend-wrap').style.display='');
-      renderTrendChart('trend-chart', trend);
-      renderTrendChart('history-trend-chart', trend);
-    }
-
-    // Hallazgos críticos
-    const critList = document.getElementById('dash-critical-list');
-    if (critList && d.critical_findings?.length) {
-      critList.innerHTML = d.critical_findings.slice(0,6).map(f => `
-        <div class="critical-item">
-          <span>${sevBadge(f.severity)}</span>
-          <div>
-            <div class="item-title">${esc(f.title)}</div>
-            <div class="item-fix">${esc((f.remediation||'').substring(0,80))}</div>
-          </div>
-        </div>`).join('');
-    }
-
-    // Score breakdown
-    await loadScoreBreakdown();
-  } catch(e) {
-    appendLog('warn', 'No se pudo cargar el dashboard: ' + e);
-  }
-}
-
-// ── Mostrar tab SIEM al activarlo ─────────────────────────────────────────────
-const _origShowCfgTab = showCfgTab;
-function showCfgTab(name) {
-  _origShowCfgTab(name);
-  if (name === 'siem') loadSIEM();
-}
-
-// ── Init ampliado ─────────────────────────────────────────────────────────────
-document.addEventListener('DOMContentLoaded', () => {
-  setStatus('idle', 'Listo');
-  appendLog('info', 'CyberHound Pro v6.1.0 iniciado.');
-  loadKeys();
-  loadDashboard();
-  // Polling del dashboard cada 5 minutos
-  setInterval(loadDashboard, 5 * 60 * 1000);
-});
