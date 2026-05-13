@@ -59,7 +59,7 @@ async def _docker_available() -> bool:
 async def _docker_json(args: list[str]) -> Optional[list | dict]:
     proc = await run_command(["docker"] + args, timeout=30, check=False)
     if proc.returncode != 0:
-        logger.debug("docker %s falló: %s", " ".join(args[:3]), proc.stderr[:100])
+        logger.warning("docker %s respondió %d: %s", " ".join(args[:3]), proc.returncode, proc.stderr[:80])
         return None
     try:
         return json.loads(proc.stdout)
@@ -420,35 +420,49 @@ class DockerScanner:
     async def full_scan(
         scan_images_cve: bool = True,
         image_list: Optional[list[str]] = None,
+        scan_k8s: bool = True,
     ) -> list[Finding]:
+        docker_findings: list[Finding] = []
+
         if not await _docker_available():
-            return [Finding(
+            docker_findings.append(Finding(
                 id="docker_unavailable", category="docker", severity="info",
                 title="Docker no disponible en este sistema",
                 description="Docker no está instalado o el daemon no está activo.",
                 remediation="apt install docker.io && systemctl enable --now docker",
-            )]
+            ))
+        else:
+            logger.info("Docker scan iniciado")
+            tasks = {
+                "containers_root":  check_containers_as_root(),
+                "privileged":       check_privileged_containers(),
+                "docker_socket":    check_docker_socket_mounted(),
+                "env_secrets":      check_secret_env_vars(),
+                "dangerous_mounts": check_dangerous_mounts(),
+                "old_images":       check_old_images(),
+            }
+            if scan_images_cve:
+                tasks["images_cve"] = check_images_cve(image_list)
 
-        logger.info("Docker scan iniciado")
-        tasks = {
-            "containers_root":      check_containers_as_root(),
-            "privileged":           check_privileged_containers(),
-            "docker_socket":        check_docker_socket_mounted(),
-            "env_secrets":          check_secret_env_vars(),
-            "dangerous_mounts":     check_dangerous_mounts(),
-            "old_images":           check_old_images(),
-        }
-        if scan_images_cve:
-            tasks["images_cve"] = check_images_cve(image_list)
+            results = await asyncio.gather(*tasks.values(), return_exceptions=True)
+            for module, result in zip(tasks.keys(), results):
+                if isinstance(result, list):
+                    docker_findings.extend(result)
+                    logger.info("  docker/%s: %d hallazgos", module, len(result))
+                else:
+                    logger.error("  docker/%s error: %s", module, result)
 
-        results = await asyncio.gather(*tasks.values(), return_exceptions=True)
-        findings: list[Finding] = []
-        for module, result in zip(tasks.keys(), results):
-            if isinstance(result, list):
-                findings.extend(result)
-                logger.info("  docker/%s: %d hallazgos", module, len(result))
-            else:
-                logger.error("  docker/%s error: %s", module, result)
+        # Kubernetes scan (opcional, no falla si no está disponible)
+        k8s_findings: list[Finding] = []
+        if scan_k8s:
+            try:
+                from cyberhound.scanners.kubernetes_scan import KubernetesScanner
+                k8s_findings = await KubernetesScanner.full_scan()
+            except Exception as e:
+                logger.warning("Kubernetes scan error: %s", e)
 
-        logger.info("Docker scan: %d hallazgos totales", len(findings))
-        return findings
+        all_findings = docker_findings + k8s_findings
+        logger.info("Docker+K8s scan: %d hallazgos totales "
+                    "(%d docker, %d kubernetes)",
+                    len(all_findings), len(docker_findings), len(k8s_findings))
+        return all_findings
