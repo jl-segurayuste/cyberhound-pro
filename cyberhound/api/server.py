@@ -34,6 +34,58 @@ from cyberhound.core.security import (
 
 logger = get_logger("api")
 
+# ── Repositorios de reglas YARA públicos ──────────────────────────────────────
+YARA_SOURCES = {
+    "default": [
+        ("https://raw.githubusercontent.com/Yara-Rules/rules/master/malware/MALW_Ransomware.yar",
+         "ransomware.yar"),
+        ("https://raw.githubusercontent.com/Yara-Rules/rules/master/malware/MALW_webshell.yar",
+         "webshells.yar"),
+        ("https://raw.githubusercontent.com/elastic/protections-artifacts/main/yara/rules/Linux_Backdoor.yar",
+         "linux_backdoor.yar"),
+    ],
+    "community": [
+        ("https://raw.githubusercontent.com/Yara-Rules/rules/master/malware/MALW_Coinminer.yar",
+         "coinminer.yar"),
+    ],
+}
+
+
+async def _update_yara_rules(sources: list[str]) -> dict:
+    """Descarga reglas YARA de repositorios públicos."""
+    import aiohttp
+    yara_dir = Path.home() / ".cyberhound" / "yara"
+    yara_dir.mkdir(parents=True, exist_ok=True)
+
+    results = {"updated": [], "errors": [], "skipped": []}
+    urls: list[tuple[str, str]] = []
+    for src in sources:
+        urls.extend(YARA_SOURCES.get(src, []))
+
+    if not urls:
+        return {"error": f"Fuente desconocida: {sources}"}
+
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
+        for url, filename in urls:
+            dest = yara_dir / filename
+            try:
+                async with session.get(url) as resp:
+                    if resp.status == 200:
+                        content = await resp.text()
+                        # Verificar que es YARA válido (tiene al menos una rule)
+                        if "rule " in content:
+                            dest.write_text(content, encoding="utf-8")
+                            results["updated"].append(filename)
+                            logger.info("YARA actualizado: %s (%d bytes)", filename, len(content))
+                        else:
+                            results["errors"].append(f"{filename}: contenido no parece YARA válido")
+                    else:
+                        results["errors"].append(f"{filename}: HTTP {resp.status}")
+            except Exception as e:
+                results["errors"].append(f"{filename}: {e}")
+
+    return results
+
 # Roles y sus permisos
 ROLE_PERMISSIONS = {
     "admin":    {"scan", "fix", "config", "users", "view"},
@@ -142,6 +194,16 @@ class CyberHoundServer:
             min_severity=cfg.siem.min_severity,
         ))
         self.scheduler: Optional[Scheduler] = None
+        # Modo agente
+        from cyberhound.core.agent import AgentConfig, AgentManager, AgentReporter
+        agent_cfg = AgentConfig(
+            mode=cfg.agent.mode,
+            manager_url=cfg.agent.manager_url,
+            agent_key=cfg.agent.agent_key,
+            agent_name=cfg.agent.agent_name,
+        )
+        self.agent_manager  = AgentManager(self.db, agent_cfg)
+        self.agent_reporter = AgentReporter(agent_cfg) if cfg.agent.mode == "agent" else None
 
     def build_app(self) -> web.Application:
         auth_cfg = AuthConfig(
@@ -213,6 +275,21 @@ class CyberHoundServer:
         app.router.add_post("/api/config/siem",         self.api_save_siem)
         app.router.add_post("/api/config/siem/test",    self.api_test_siem)
 
+        # ── Modo agente ───────────────────────────────────────────────────────
+        app.router.add_post("/api/agent/report",     self.api_agent_report)
+        app.router.add_post("/api/agent/heartbeat",  self.api_agent_heartbeat)
+        app.router.add_get ("/api/agent/list",       self.api_agent_list)
+
+        # ── 2FA / TOTP ────────────────────────────────────────────────────────
+        app.router.add_post("/api/auth/2fa/setup",    self.api_2fa_setup)
+        app.router.add_post("/api/auth/2fa/activate", self.api_2fa_activate)
+        app.router.add_post("/api/auth/2fa/disable",  self.api_2fa_disable)
+        app.router.add_get ("/api/auth/2fa/status",   self.api_2fa_status)
+
+        # ── YARA update ───────────────────────────────────────────────────────
+        app.router.add_post("/api/yara/update",        self.api_yara_update)
+        app.router.add_get ("/api/yara/rules",         self.api_yara_list)
+
         self._app = app
         return app
 
@@ -277,6 +354,8 @@ class CyberHoundServer:
                 await self._run_intel_scan(msg, ws_id, send, log, scan_id)
             elif task == "docker":
                 await self._run_docker_scan(msg, ws_id, send, log, scan_id)
+            elif task == "services":
+                await self._run_services_audit(msg, ws_id, send, log, scan_id)
             else:
                 await send({"type": "error", "text": f"Tarea desconocida: {task}"})
         except Exception as e:
@@ -322,6 +401,13 @@ class CyberHoundServer:
         history = await self.db.get_scan_history(limit=1)
         score = history[0]["score"] if history else None
         await send({"type": "done", "count": len(findings), "scan_id": scan_id, "score": score})
+
+        # En modo agente: enviar al manager en background
+        if self.agent_reporter:
+            scan_type = self._scan_id_cache.get(ws_id, "audit")
+            asyncio.ensure_future(
+                self.agent_reporter.report_scan(findings, str(scan_type), score)
+            )
 
     async def _stream_findings(
         self,
@@ -370,6 +456,14 @@ class CyberHoundServer:
             scan_images_cve=scan_images,
             scan_k8s=scan_k8s,
         )
+        await self._emit_findings(findings, ws_id, send, scan_id)
+
+    async def _run_services_audit(self, params, ws_id, send, log, scan_id):
+        from cyberhound.scanners.services_audit import ServicesAuditor
+        services = params.get("services") or None
+        svc_str = ", ".join(services) if services else "nginx, apache, mysql, postgresql, redis, mongodb"
+        await log("section", f"Auditando servicios: {svc_str}…")
+        findings = await ServicesAuditor.full_audit(services=services)
         await self._emit_findings(findings, ws_id, send, scan_id)
 
     async def _run_malware_scan(self, params, ws_id, send, log, scan_id):
@@ -865,6 +959,112 @@ class CyberHoundServer:
     async def api_test_siem(self, request: web.Request) -> web.Response:
         results = await self.siem.test()
         return web.json_response(results)
+
+    # ── Modo agente ───────────────────────────────────────────────────────────
+
+    async def api_agent_report(self, request: web.Request) -> web.Response:
+        """Recibe hallazgos enviados por un agente remoto."""
+        # Verificar clave del agente (no JWT)
+        auth  = request.headers.get("Authorization", "")
+        key   = self.agent_manager.extract_agent_key(auth)
+        if not self.agent_manager.verify_agent_key(key):
+            return web.json_response({"error": "Clave de agente inválida"}, status=401)
+        try:
+            payload = await request.json()
+            result  = await self.agent_manager.receive_report(payload)
+            return web.json_response(result)
+        except Exception as e:
+            logger.error("api_agent_report: %s", e, exc_info=True)
+            return web.json_response({"error": str(e)}, status=500)
+
+    async def api_agent_heartbeat(self, request: web.Request) -> web.Response:
+        auth = request.headers.get("Authorization", "")
+        key  = self.agent_manager.extract_agent_key(auth)
+        if not self.agent_manager.verify_agent_key(key):
+            return web.json_response({"error": "Clave inválida"}, status=401)
+        payload = await request.json()
+        await self.agent_manager.receive_heartbeat(payload)
+        return web.json_response({"ok": True})
+
+    async def api_agent_list(self, request: web.Request) -> web.Response:
+        return web.json_response(self.agent_manager.list_agents())
+
+    # ── 2FA / TOTP ────────────────────────────────────────────────────────────
+
+    async def api_2fa_setup(self, request: web.Request) -> web.Response:
+        """Inicia la configuración de 2FA — devuelve QR y secreto."""
+        user = request.get("auth_user", "")
+        if not user:
+            return web.json_response({"error": "Sin sesión"}, status=401)
+        from cyberhound.core.totp import TOTPManager
+        mgr = TOTPManager(self.db)
+        data = await mgr.setup_2fa(user)
+        return web.json_response({
+            "secret":         data["secret"],
+            "uri":            data["uri"],
+            "qr_svg":         data["qr_svg"],
+            "recovery_codes": data["recovery_codes"],
+        })
+
+    async def api_2fa_activate(self, request: web.Request) -> web.Response:
+        """Activa el 2FA verificando el primer código."""
+        user = request.get("auth_user", "")
+        try:
+            body = await request.json()
+            code = str(body.get("code", "")).strip()
+        except Exception:
+            return web.json_response({"ok": False, "error": "Body inválido"}, status=400)
+        from cyberhound.core.totp import TOTPManager
+        ok = await TOTPManager(self.db).activate_2fa(user, code)
+        if ok:
+            logger.info("2FA activado para '%s'", user)
+        return web.json_response({"ok": ok, "error": None if ok else "Código incorrecto"})
+
+    async def api_2fa_disable(self, request: web.Request) -> web.Response:
+        """Desactiva el 2FA del usuario actual."""
+        user = request.get("auth_user", "")
+        from cyberhound.core.totp import TOTPManager
+        await TOTPManager(self.db).disable_2fa(user)
+        logger.info("2FA desactivado para '%s'", user)
+        return web.json_response({"ok": True})
+
+    async def api_2fa_status(self, request: web.Request) -> web.Response:
+        """Devuelve el estado del 2FA del usuario actual."""
+        user = request.get("auth_user", "")
+        db_user = await self.db.get_user(user) if user else None
+        enabled = bool(db_user.get("totp_enabled")) if db_user else False
+        return web.json_response({"enabled": enabled, "user": user})
+
+    # ── YARA update ───────────────────────────────────────────────────────────
+
+    async def api_yara_update(self, request: web.Request) -> web.Response:
+        """Descarga y actualiza reglas YARA desde repositorios públicos."""
+        try:
+            body = await request.json()
+            sources = body.get("sources", ["default"])
+        except Exception:
+            sources = ["default"]
+
+        results = await _update_yara_rules(sources)
+        return web.json_response(results)
+
+    async def api_yara_list(self, request: web.Request) -> web.Response:
+        """Lista las reglas YARA disponibles."""
+        yara_dir = Path.home() / ".cyberhound" / "yara"
+        yara_dir.mkdir(exist_ok=True)
+        rules = []
+        for f in sorted(yara_dir.glob("*.yar")) + sorted(yara_dir.glob("*.yara")):
+            try:
+                stat = f.stat()
+                rules.append({
+                    "name": f.name,
+                    "path": str(f),
+                    "size_kb": round(stat.st_size / 1024, 1),
+                    "modified": stat.st_mtime,
+                })
+            except OSError:
+                pass
+        return web.json_response(rules)
 
     # ── Informes ──────────────────────────────────────────────────────────────
 

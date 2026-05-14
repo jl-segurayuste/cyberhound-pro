@@ -230,4 +230,45 @@ def build_scheduler(app_ref, cfg) -> Scheduler:
             minute=getattr(cfg, "network_minute", 0),
         ))
 
+    if getattr(cfg, "yara_update_enabled", False):
+        async def _yara_update():
+            try:
+                import aiohttp
+                from pathlib import Path
+                from cyberhound.scanners.malware import YARA_SOURCES_DEFAULT
+            except ImportError:
+                pass
+            logger.info("Actualizando reglas YARA automáticamente…")
+            yara_dir = Path.home() / ".cyberhound" / "yara"
+            yara_dir.mkdir(exist_ok=True)
+            sources = [
+                ("https://raw.githubusercontent.com/Yara-Rules/rules/master/malware/MALW_Ransomware.yar",
+                 "ransomware.yar"),
+                ("https://raw.githubusercontent.com/Yara-Rules/rules/master/malware/MALW_webshell.yar",
+                 "webshells.yar"),
+            ]
+            updated = 0
+            async with aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=60)
+            ) as session:
+                for url, fname in sources:
+                    try:
+                        async with session.get(url) as resp:
+                            if resp.status == 200:
+                                content_yara = await resp.text()
+                                if "rule " in content_yara:
+                                    (yara_dir / fname).write_text(content_yara)
+                                    updated += 1
+                    except Exception as e:
+                        logger.warning("YARA update %s: %s", fname, e)
+            logger.info("YARA: %d reglas actualizadas", updated)
+
+        s.add(ScheduleEntry(
+            name="weekly_yara_update",
+            task_fn=_yara_update,
+            hour=1,
+            minute=30,
+            days=[0],  # lunes madrugada
+        ))
+
     return s

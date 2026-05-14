@@ -92,12 +92,16 @@ CREATE TABLE IF NOT EXISTS suppressions (
     expires_at          TEXT
 );
 CREATE TABLE IF NOT EXISTS users (
-    username      TEXT PRIMARY KEY,
-    password_hash TEXT NOT NULL,
-    role          TEXT NOT NULL DEFAULT 'viewer',
-    created_at    TEXT NOT NULL,
-    last_login    TEXT,
-    active        INTEGER DEFAULT 1
+    username           TEXT PRIMARY KEY,
+    password_hash      TEXT NOT NULL,
+    role               TEXT NOT NULL DEFAULT 'viewer',
+    created_at         TEXT NOT NULL,
+    last_login         TEXT,
+    active             INTEGER DEFAULT 1,
+    totp_enabled       INTEGER DEFAULT 0,
+    totp_secret        TEXT,
+    totp_pending_secret TEXT,
+    recovery_codes_json TEXT DEFAULT '[]'
 );
 CREATE TABLE IF NOT EXISTS notifications (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -569,3 +573,60 @@ class Database:
             "score_trend":         score_trend,
             "critical_findings":   critical_findings,
         }
+
+    # ── TOTP / 2FA ────────────────────────────────────────────────────────────
+
+    async def set_totp_pending(
+        self, username: str, secret: str, recovery_codes: list[str]
+    ) -> None:
+        """Guarda el secreto TOTP pendiente de verificación (2FA no activo aún)."""
+        import json as _json
+        from cyberhound.core.totp import hash_recovery_code
+        hashes = [hash_recovery_code(c) for c in recovery_codes]
+        async with aiosqlite.connect(str(self.path)) as db:
+            await db.execute(
+                "UPDATE users SET totp_pending_secret=?, recovery_codes_json=? WHERE username=?",
+                (secret, _json.dumps(hashes), username),
+            )
+            await db.commit()
+
+    async def get_totp_pending(self, username: str) -> Optional[dict]:
+        """Devuelve el secreto TOTP pendiente para verificar la activación."""
+        async with aiosqlite.connect(str(self.path)) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                "SELECT totp_pending_secret FROM users WHERE username=?", (username,)
+            ) as cur:
+                row = await cur.fetchone()
+                if row and row["totp_pending_secret"]:
+                    return {"secret": row["totp_pending_secret"]}
+        return None
+
+    async def activate_totp(self, username: str) -> None:
+        """Activa el 2FA moviendo el secreto pendiente al activo."""
+        async with aiosqlite.connect(str(self.path)) as db:
+            await db.execute(
+                "UPDATE users SET totp_enabled=1, totp_secret=totp_pending_secret, "
+                "totp_pending_secret=NULL WHERE username=?",
+                (username,),
+            )
+            await db.commit()
+
+    async def disable_totp(self, username: str) -> None:
+        async with aiosqlite.connect(str(self.path)) as db:
+            await db.execute(
+                "UPDATE users SET totp_enabled=0, totp_secret=NULL, "
+                "totp_pending_secret=NULL WHERE username=?",
+                (username,),
+            )
+            await db.commit()
+
+    async def update_recovery_codes(self, username: str, hashes: list[str]) -> None:
+        import json as _json
+        async with aiosqlite.connect(str(self.path)) as db:
+            await db.execute(
+                "UPDATE users SET recovery_codes_json=? WHERE username=?",
+                (_json.dumps(hashes), username),
+            )
+            await db.commit()
+
