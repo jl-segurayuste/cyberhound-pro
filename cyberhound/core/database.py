@@ -26,7 +26,25 @@ from cyberhound.core.models import Finding
 
 logger = get_logger("database")
 
-DB_VERSION = 3
+DB_VERSION = 4
+
+# Migraciones incrementales — se aplican en orden sobre BDs existentes
+MIGRATIONS: list[tuple[int, str]] = [
+    (2, """
+        ALTER TABLE scans ADD COLUMN triggered_by TEXT DEFAULT 'manual';
+    """),
+    (3, """
+        ALTER TABLE findings ADD COLUMN source_host TEXT DEFAULT '';
+        ALTER TABLE findings ADD COLUMN fixed_at TEXT;
+        ALTER TABLE findings ADD COLUMN fixed_by TEXT;
+    """),
+    (4, """
+        ALTER TABLE users ADD COLUMN totp_enabled INTEGER DEFAULT 0;
+        ALTER TABLE users ADD COLUMN totp_secret TEXT;
+        ALTER TABLE users ADD COLUMN totp_pending_secret TEXT;
+        ALTER TABLE users ADD COLUMN recovery_codes_json TEXT DEFAULT '[]';
+    """),
+]
 DEFAULT_DB_PATH = Path.home() / ".cyberhound" / "cyberhound.db"
 
 SCHEMA = """
@@ -159,14 +177,35 @@ class Database:
             async with db.execute("SELECT MAX(version) FROM schema_version") as cur:
                 row = await cur.fetchone()
                 current = row[0] if row and row[0] else 0
-            if current < DB_VERSION:
-                await db.execute(
-                    "INSERT OR IGNORE INTO schema_version VALUES (?,?)",
-                    (DB_VERSION, _now()),
-                )
+
+            # Aplicar migraciones pendientes
+            for version, migration_sql in MIGRATIONS:
+                if current < version:
+                    # Cada ALTER TABLE por separado para que un fallo no aborte todo
+                    for stmt in migration_sql.strip().split(";"):
+                        stmt = stmt.strip()
+                        if not stmt:
+                            continue
+                        try:
+                            await db.execute(stmt)
+                            logger.debug("Migración v%d aplicada: %s", version, stmt[:60])
+                        except Exception as e:
+                            # La columna ya existe — OK (puede pasar si la BD fue
+                            # creada con el esquema nuevo pero la versión es antigua)
+                            if "duplicate column" in str(e).lower() or \
+                               "already exists" in str(e).lower():
+                                logger.debug("Columna ya existe (OK): %s", stmt[:60])
+                            else:
+                                logger.warning("Migración v%d: %s — %s", version, stmt[:60], e)
+                    await db.execute(
+                        "INSERT OR REPLACE INTO schema_version VALUES (?,?)",
+                        (version, _now()),
+                    )
+                    current = version
+
             await db.commit()
         self.path.chmod(0o600)
-        logger.info("Base de datos inicializada: %s", self.path)
+        logger.info("Base de datos inicializada (v%d): %s", current, self.path)
 
     # ── Scans ─────────────────────────────────────────────────────────────────
 
