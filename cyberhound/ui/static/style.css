@@ -744,3 +744,36 @@ body.activity-open #main { margin-right:320px; }
   table { border-collapse: collapse; }
   td, th { border: 1px solid #ddd; }
 }
+
+/* ── Búsqueda global ─────────────────────────────────────────────────────── */
+#global-search:focus {
+  border-color: var(--blue) !important;
+  box-shadow: 0 0 0 2px rgba(88,166,255,.15);
+}
+#global-search-results::-webkit-scrollbar { width: 4px; }
+#global-search-results::-webkit-scrollbar-track { background: var(--bg2); }
+#global-search-results::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+/* ── Atajos de teclado ────────────────────────────────────────────────────── */
+kbd {
+  display: inline-block;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-family: monospace;
+  font-size: .75rem;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+/* ── Toast mejorado con borde de tipo ─────────────────────────────────────── */
+#toast {
+  transition: opacity .25s, transform .25s;
+  border-left: 3px solid var(--blue);
+}
+
+/* ── Dropdown de búsqueda ─────────────────────────────────────────────────── */
+@media (max-width: 600px) {
+  #global-search-wrap { display: none; }
+}

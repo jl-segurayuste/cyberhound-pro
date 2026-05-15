@@ -42,6 +42,19 @@
     <button class="nav-tab" data-panel="reports"   onclick="showPanel('reports')">📊 Informes</button>
     <button class="nav-tab" data-panel="settings"  onclick="showPanel('settings')">⚙️ Config</button>
   </nav>
+  <!-- Búsqueda global -->
+  <div id="global-search-wrap" style="position:relative;margin:0 8px">
+    <input type="text" id="global-search" placeholder="🔎 Buscar hallazgos…"
+      style="background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:5px 10px;border-radius:6px;font-size:.78rem;width:200px;outline:none"
+      oninput="globalSearch(this.value)"
+      onkeydown="if(event.key==='Escape'){this.value='';closeGlobalSearch()}"
+      onfocus="this.style.borderColor='var(--blue)'"
+      onblur="this.style.borderColor='var(--border)'">
+    <div id="global-search-results"
+      style="display:none;position:absolute;top:calc(100%+4px);left:0;width:380px;background:var(--bg2);
+             border:1px solid var(--border);border-radius:8px;z-index:200;max-height:320px;overflow-y:auto;box-shadow:0 8px 24px rgba(0,0,0,.4)">
+    </div>
+  </div>
   <button id="log-toggle" onclick="toggleLog()">📋 Log</button>
   <a href="/api/docs" target="_blank" class="btn-secondary" style="font-size:.72rem;padding:4px 10px;text-decoration:none" title="Documentación API">📖 API</a>
   <a href="/logout" class="logout-btn">Salir</a>
@@ -104,14 +117,25 @@
         <div style="margin-top:8px;font-size:.75rem;color:var(--text2)" id="score-exposure"></div>
       </div>
 
+      <!-- Compliance mini -->
+      <div class="dash-card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <h3 style="margin:0">⚖️ Cumplimiento</h3>
+          <button class="btn-secondary small" onclick="showPanel('reports');showCfgTab && setTimeout(()=>showPanel('reports'),0)">Ver detalle</button>
+        </div>
+        <div id="dash-compliance-mini">
+          <div style="color:var(--text2);font-size:.8rem">Cargando…</div>
+        </div>
+      </div>
+
       <!-- Trend chart -->
       <div class="dash-card wide" id="trend-card">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
           <h3>📈 Evolución del score (30 días)</h3>
           <button class="btn-secondary small" onclick="loadDashboard()">↻</button>
         </div>
-        <div id="trend-chart" style="height:80px;position:relative">
-          <div style="color:var(--text2);font-size:.82rem;text-align:center;padding-top:28px">Sin datos todavía — ejecuta el primer análisis</div>
+        <div id="dash-trend-chart" style="height:80px;position:relative;display:flex;align-items:flex-end;gap:2px;padding-top:4px">
+          <div style="color:var(--text2);font-size:.82rem;text-align:center;padding-top:28px;width:100%">Sin datos todavía — ejecuta el primer análisis</div>
         </div>
       </div>
 
@@ -169,6 +193,7 @@
         <button class="filter" data-sev="medium" onclick="filterTable('network','medium',this)">Medio</button>
         <input type="text" placeholder="🔎 Buscar…" oninput="searchTable('network-findings-tbody',this.value)">
         <button class="btn-secondary small" onclick="exportJSON('network')">⬇ JSON</button>
+        <button class="btn-secondary small" onclick="exportCSV('network')">⬇ CSV</button>
       </div>
       <table><thead><tr><th>Equipo</th><th>Severidad</th><th>Problema</th><th>Solución</th><th></th></tr></thead>
         <tbody id="network-findings-tbody"></tbody></table>
@@ -195,6 +220,7 @@
         <input type="text" placeholder="🔎 Buscar…" oninput="searchTable('audit-tbody',this.value)">
         <button class="btn-primary small" id="btn-fix-all" onclick="fixAll('audit')" style="display:none">⚡ Corregir todo</button>
         <button class="btn-secondary small" onclick="exportJSON('audit')">⬇ JSON</button>
+        <button class="btn-secondary small" onclick="exportCSV('audit')">⬇ CSV</button>
       </div>
       <table><thead><tr><th style="width:100px">Severidad</th><th>Qué ocurre</th><th>Descripción</th><th style="width:120px">Acción</th></tr></thead>
         <tbody id="audit-tbody"></tbody></table>
@@ -233,6 +259,7 @@
         <button class="filter" data-sev="medium" onclick="filterTable('malware','medium',this)">Medio</button>
         <input type="text" placeholder="🔎 Buscar…" oninput="searchTable('malware-tbody',this.value)">
         <button class="btn-secondary small" onclick="exportJSON('malware')">⬇ JSON</button>
+        <button class="btn-secondary small" onclick="exportCSV('malware')">⬇ CSV</button>
       </div>
       <table><thead><tr><th>Severidad</th><th>Tipo</th><th>Descripción</th><th>Fichero</th><th>Acción</th></tr></thead>
         <tbody id="malware-tbody"></tbody></table>
@@ -1075,7 +1102,27 @@
   </div>
 </aside>
 
-<div id="toast"></div>
+<div id="keyboard-help" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:300;display:none;align-items:center;justify-content:center">
+    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:24px;min-width:320px;max-width:480px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+        <h3 style="margin:0">⌨️ Atajos de teclado</h3>
+        <button onclick="document.getElementById('keyboard-help').style.display='none'" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:1.2rem">✕</button>
+      </div>
+      <div style="display:grid;grid-template-columns:auto 1fr;gap:6px 16px;font-size:.82rem">
+        <kbd>?</kbd><span>Mostrar esta ayuda</span>
+        <kbd>g d</kbd><span>Ir al Dashboard</span>
+        <kbd>g a</kbd><span>Ir al Audit</span>
+        <kbd>g n</kbd><span>Ir a Network</span>
+        <kbd>g m</kbd><span>Ir a Malware</span>
+        <kbd>g r</kbd><span>Ir a Historial</span>
+        <kbd>/</kbd><span>Búsqueda global</span>
+        <kbd>Esc</kbd><span>Cerrar / cancelar</span>
+        <kbd>R</kbd><span>Recargar dashboard</span>
+        <kbd>F</kbd><span>Aplicar fix rápido</span>
+      </div>
+    </div>
+  </div>
+  <div id="toast"></div>
 <script src="/static/app.js"></script>
 </body>
 </html>
