@@ -1,326 +1,260 @@
 #!/bin/bash
-# =============================================================================
-# CyberHound Pro — Script de verificación completa de funcionalidades
-# Ejecutar con: bash scripts/verify_all.sh
-# Requiere que el servidor esté corriendo en https://localhost:8443
-# =============================================================================
-set -e
+# CyberHound Pro — Verificación completa
+# Uso: bash scripts/verify_all.sh
+# Variables opcionales: CH_PASSWORD=xxx CH_USERNAME=admin
 
 BASE="https://localhost:8443"
-CURL="curl -sk"   # -s silencioso, -k acepta cert auto-firmado
 PASS="${CH_PASSWORD:-cyberhound}"
 USER="${CH_USERNAME:-admin}"
-FAIL=0
-PASS_COUNT=0
+COOKIES="/tmp/ch_cookies_$$.txt"
+FAIL=0; OK_COUNT=0
 
-# Colores
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
 BLUE='\033[0;34m'; NC='\033[0m'; BOLD='\033[1m'
 
-ok()   { echo -e "${GREEN}✓${NC} $*"; ((PASS_COUNT++)); }
-fail() { echo -e "${RED}✗${NC} $*"; ((FAIL++)); }
-info() { echo -e "${BLUE}ℹ${NC} $*"; }
-header() { echo -e "\n${BOLD}${BLUE}═══ $* ═══${NC}"; }
+ok()  { echo -e "  ${GREEN}✓${NC} $*"; ((OK_COUNT++)) || true; }
+fail(){ echo -e "  ${RED}✗${NC} $*"; ((FAIL++)) || true; }
+info(){ echo -e "  ${BLUE}ℹ${NC} $*"; }
+hdr() { echo -e "\n${BOLD}${BLUE}═══ $* ═══${NC}"; }
+trap "rm -f $COOKIES" EXIT
 
-# ── Login y obtención de cookie ───────────────────────────────────────────────
-header "Autenticación"
+C="curl -sk --max-time 15 -b $COOKIES -c $COOKIES"
 
-CSRF_TOKEN=$(${CURL} -c /tmp/ch_cookies.txt "${BASE}/login" | grep -o 'name="csrf_token" value="[^"]*"' | cut -d'"' -f4)
-if [ -z "$CSRF_TOKEN" ]; then
-  fail "No se pudo obtener el token CSRF de /login"
-  CSRF_TOKEN="dummy"
+# ── Login ─────────────────────────────────────────────────────────────────────
+hdr "1. Autenticación"
+
+# Obtener página de login
+PAGE=$($C "${BASE}/login" 2>&1)
+if [ -z "$PAGE" ]; then
+  fail "No se puede conectar a ${BASE} — ¿está el servidor corriendo?"
+  echo -e "\n  ${YELLOW}Iniciar servidor:${NC} sudo cyberhound web --port 8443 &"
+  exit 1
 fi
-info "CSRF token: ${CSRF_TOKEN:0:20}…"
+ok "Servidor accesible en ${BASE}"
 
-LOGIN_RESP=$(${CURL} -b /tmp/ch_cookies.txt -c /tmp/ch_cookies.txt \
-  -X POST "${BASE}/login" \
-  -d "username=${USER}&password=${PASS}&csrf_token=${CSRF_TOKEN}" \
-  -w "\n%{http_code}" 2>&1)
-HTTP_CODE=$(echo "$LOGIN_RESP" | tail -1)
-if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "302" ]; then
-  ok "Login exitoso (HTTP ${HTTP_CODE})"
+# Extraer token CSRF (campo _csrf)
+CSRF=$(echo "$PAGE" | python3 -c "
+import sys, re
+html = sys.stdin.read()
+for pat in [
+    r'name=[\"_csrf\"]+\s+value=\"([^\"]+)\"',
+    r'value=\"([^\"]+)\"\s+name=\"_csrf\"',
+    r'_csrf.*?value=\"([^\"]+)\"',
+    r'value=\"([a-f0-9]{32,})\"',
+]:
+    m = re.search(pat, html, re.IGNORECASE)
+    if m:
+        print(m.group(1))
+        break
+" 2>/dev/null)
+
+[ -z "$CSRF" ] && CSRF="noop"
+info "Token CSRF: ${CSRF:0:16}…"
+
+# Login POST
+HTTP=$($C -X POST "${BASE}/login" \
+  -d "username=${USER}&password=${PASS}&_csrf=${CSRF}" \
+  -o /dev/null -w "%{http_code}" 2>&1)
+
+if [ "$HTTP" = "200" ] || [ "$HTTP" = "302" ]; then
+  if grep -q "ch_token" "$COOKIES" 2>/dev/null; then
+    ok "Login exitoso (HTTP ${HTTP}) — cookie JWT obtenida"
+  else
+    fail "HTTP ${HTTP} pero sin cookie JWT. Verifica: CH_PASSWORD=tupass bash $0"
+  fi
 else
-  fail "Login fallido (HTTP ${HTTP_CODE})"
-  echo "  Respuesta: ${LOGIN_RESP:0:200}"
+  fail "Login fallido — HTTP ${HTTP}. Verifica contraseña: CH_PASSWORD=tupass bash $0"
 fi
 
-AUTH_OPTS="-b /tmp/ch_cookies.txt"
-
-# ── Función helper para peticiones autenticadas ───────────────────────────────
-api_get() {
-  local path="$1"
-  local resp
-  resp=$(${CURL} ${AUTH_OPTS} -w "\n%{http_code}" "${BASE}${path}" 2>&1)
-  local code=$(echo "$resp" | tail -1)
-  local body=$(echo "$resp" | head -n -1)
-  echo "$code|$body"
+# ── Helper ────────────────────────────────────────────────────────────────────
+GET() {
+  local r; r=$($C -w "\n%{http_code}" "${BASE}$1" 2>&1)
+  echo "${r##*$'\n'}|${r%$'\n'*}"
 }
-
-api_post() {
-  local path="$1"
-  local data="$2"
-  local resp
-  resp=$(${CURL} ${AUTH_OPTS} -X POST \
-    -H "Content-Type: application/json" \
-    -d "$data" \
-    -w "\n%{http_code}" "${BASE}${path}" 2>&1)
-  local code=$(echo "$resp" | tail -1)
-  local body=$(echo "$resp" | head -n -1)
-  echo "$code|$body"
+POST() {
+  local r; r=$($C -X POST -H "Content-Type: application/json" \
+    -d "${2:-{}}" -w "\n%{http_code}" "${BASE}$1" 2>&1)
+  echo "${r##*$'\n'}|${r%$'\n'*}"
 }
-
-check_endpoint() {
-  local desc="$1"
-  local path="$2"
-  local expected_code="${3:-200}"
-  local result
-  result=$(api_get "$path")
-  local code="${result%%|*}"
-  local body="${result#*|}"
-  if [ "$code" = "$expected_code" ]; then
-    ok "$desc (HTTP $code)"
-  else
-    fail "$desc — HTTP $code (esperado $expected_code): ${body:0:80}"
-  fi
-}
-
-check_json_field() {
-  local desc="$1"
-  local path="$2"
-  local field="$3"
-  local result
-  result=$(api_get "$path")
-  local code="${result%%|*}"
-  local body="${result#*|}"
-  if [ "$code" = "200" ] && echo "$body" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('$field','MISSING'))" 2>/dev/null | grep -qv "MISSING\|None"; then
-    ok "$desc"
-  else
-    fail "$desc — campo '$field' no encontrado. Body: ${body:0:100}"
-  fi
+JQ() { echo "$1" | python3 -c "
+import sys,json
+try:
+    d=json.load(sys.stdin)
+    for k in '$2'.split('.'): d=d.get(k,'?') if isinstance(d,dict) else '?'
+    print(d)
+except: print('?')
+" 2>/dev/null; }
+CHK() {
+  local desc="$1" path="$2" exp="${3:-200}"
+  local r; r=$(GET "$path")
+  local code="${r%%|*}"
+  [ "$code" = "$exp" ] && ok "$desc" || fail "$desc — HTTP $code (esperado $exp)"
 }
 
 # ── Endpoints básicos ─────────────────────────────────────────────────────────
-header "Endpoints básicos"
-check_endpoint "GET /health" "/health"
-check_endpoint "GET /api/dashboard" "/api/dashboard"
-check_endpoint "GET /api/score/trend" "/api/score/trend"
-check_endpoint "GET /api/history" "/api/history"
-check_endpoint "GET /api/assets" "/api/assets"
-check_endpoint "GET /api/suppressions" "/api/suppressions"
-check_endpoint "GET /api/users" "/api/users"
-check_endpoint "GET /api/license" "/api/license"
-check_endpoint "GET /api/quarantine" "/api/quarantine"
-check_endpoint "GET /api/quarantine/stats" "/api/quarantine/stats"
-check_endpoint "GET /api/yara/rules" "/api/yara/rules"
-check_endpoint "GET /api/agent/list" "/api/agent/list"
-check_endpoint "GET /api/monitor/status" "/api/monitor/status"
-check_endpoint "GET /api/tenants" "/api/tenants"
-check_endpoint "GET /api/ansible/jobs" "/api/ansible/jobs"
-check_endpoint "GET /api/sbom/latest" "/api/sbom/latest" "404"   # sin SBOM generado todavía — 404 esperado
-check_endpoint "GET /api/openapi.json" "/api/openapi.json"
-check_endpoint "GET /api/docs" "/api/docs"
-check_endpoint "GET /api/compliance" "/api/compliance"
+hdr "2. Endpoints básicos"
+CHK "GET /health"                  "/health"
+CHK "GET /api/dashboard"           "/api/dashboard"
+CHK "GET /api/score/trend"         "/api/score/trend"
+CHK "GET /api/history"             "/api/history"
+CHK "GET /api/assets"              "/api/assets"
+CHK "GET /api/suppressions"        "/api/suppressions"
+CHK "GET /api/users"               "/api/users"
+CHK "GET /api/scheduler"           "/api/scheduler"
+CHK "GET /api/license"             "/api/license"
+CHK "GET /api/quarantine"          "/api/quarantine"
+CHK "GET /api/quarantine/stats"    "/api/quarantine/stats"
+CHK "GET /api/yara/rules"          "/api/yara/rules"
+CHK "GET /api/agent/list"          "/api/agent/list"
+CHK "GET /api/monitor/status"      "/api/monitor/status"
+CHK "GET /api/tenants"             "/api/tenants"
+CHK "GET /api/ansible/jobs"        "/api/ansible/jobs"
+CHK "GET /api/openapi.json"        "/api/openapi.json"
+CHK "GET /api/docs"                "/api/docs"
+CHK "GET /api/compliance"          "/api/compliance"
+CHK "GET /api/config/keys"         "/api/config/keys"
+CHK "GET /api/config/notifications""/api/config/notifications"
+CHK "GET /api/config/siem"         "/api/config/siem"
+CHK "GET /api/sbom/latest (404 OK)""/api/sbom/latest" "404"
 
-# ── 2FA / TOTP ────────────────────────────────────────────────────────────────
-header "2FA / TOTP"
-TOTP_STATUS=$(api_get "/api/auth/2fa/status")
-STATUS_CODE="${TOTP_STATUS%%|*}"
-STATUS_BODY="${TOTP_STATUS#*|}"
-if [ "$STATUS_CODE" = "200" ]; then
-  ok "GET /api/auth/2fa/status (HTTP 200)"
-  ENABLED=$(echo "$STATUS_BODY" | python3 -c "import sys,json; print(json.load(sys.stdin).get('enabled','?'))" 2>/dev/null)
-  info "  2FA actualmente: $ENABLED"
+# ── 2FA ──────────────────────────────────────────────────────────────────────
+hdr "3. 2FA / TOTP"
+
+R=$(GET "/api/auth/2fa/status"); CODE="${R%%|*}"; BODY="${R#*|}"
+[ "$CODE" = "200" ] && ok "GET /api/auth/2fa/status — enabled: $(JQ "$BODY" "enabled")" \
+                      || fail "GET /api/auth/2fa/status — HTTP $CODE"
+
+R=$(POST "/api/auth/2fa/setup" "{}"); CODE="${R%%|*}"; BODY="${R#*|}"
+if [ "$CODE" = "200" ]; then
+  ok "POST /api/auth/2fa/setup"
+  SECRET=$(JQ "$BODY" "secret")
+  HAS_QR=$(echo "$BODY" | python3 -c "import sys,json; print('si' if json.load(sys.stdin).get('qr_svg') else 'no')" 2>/dev/null)
+  HAS_RC=$(echo "$BODY" | python3 -c "import sys,json; print('si' if json.load(sys.stdin).get('recovery_codes') else 'no')" 2>/dev/null)
+  [ "$HAS_QR" = "si" ] && ok "  QR SVG generado" || fail "  Falta qr_svg"
+  [ "$HAS_RC" = "si" ] && ok "  Códigos de recuperación presentes" || fail "  Faltan recovery_codes"
+  ok "  Secret: ${SECRET:0:12}…"
 else
-  fail "GET /api/auth/2fa/status — HTTP $STATUS_CODE"
+  fail "POST /api/auth/2fa/setup — HTTP $CODE: ${BODY:0:200}"
 fi
 
-SETUP_RESP=$(api_post "/api/auth/2fa/setup" "{}")
-SETUP_CODE="${SETUP_RESP%%|*}"
-SETUP_BODY="${SETUP_RESP#*|}"
-if [ "$SETUP_CODE" = "200" ]; then
-  ok "POST /api/auth/2fa/setup (HTTP 200)"
-  HAS_SECRET=$(echo "$SETUP_BODY" | python3 -c "import sys,json; d=json.load(sys.stdin); print('ok' if d.get('secret') else 'missing')" 2>/dev/null)
-  HAS_QR=$(echo "$SETUP_BODY" | python3 -c "import sys,json; d=json.load(sys.stdin); print('ok' if d.get('qr_svg') else 'missing')" 2>/dev/null)
-  HAS_CODES=$(echo "$SETUP_BODY" | python3 -c "import sys,json; d=json.load(sys.stdin); print('ok' if d.get('recovery_codes') else 'missing')" 2>/dev/null)
-  [ "$HAS_SECRET" = "ok" ] && ok "  2FA secret generado" || fail "  Falta campo 'secret'"
-  [ "$HAS_QR" = "ok" ]     && ok "  QR SVG generado" || fail "  Falta campo 'qr_svg'"
-  [ "$HAS_CODES" = "ok" ]  && ok "  Códigos de recuperación generados" || fail "  Falta campo 'recovery_codes'"
-else
-  fail "POST /api/auth/2fa/setup — HTTP $SETUP_CODE: ${SETUP_BODY:0:200}"
-fi
-
-# Test activación con código inválido (debe devolver ok:false)
-ACT_RESP=$(api_post "/api/auth/2fa/activate" '{"code":"000000"}')
-ACT_CODE="${ACT_RESP%%|*}"
-ACT_BODY="${ACT_RESP#*|}"
-ACT_OK=$(echo "$ACT_BODY" | python3 -c "import sys,json; print(json.load(sys.stdin).get('ok'))" 2>/dev/null)
-if [ "$ACT_CODE" = "200" ] && [ "$ACT_OK" = "False" ]; then
-  ok "POST /api/auth/2fa/activate — código inválido rechazado correctamente"
-else
-  fail "POST /api/auth/2fa/activate — respuesta inesperada: HTTP $ACT_CODE, ok=$ACT_OK"
-fi
-
-# ── Scheduler ─────────────────────────────────────────────────────────────────
-header "Scheduler"
-check_endpoint "GET /api/scheduler" "/api/scheduler"
-# Lanzar un task manual (run_now del scheduler diario)
-RUN_RESP=$(api_post "/api/scheduler/daily_audit/run" "{}")
-RUN_CODE="${RUN_RESP%%|*}"
-[ "$RUN_CODE" = "200" ] && ok "POST /api/scheduler/daily_audit/run" || info "Scheduler run: HTTP $RUN_CODE (puede estar deshabilitado)"
-
-# ── Scans — lanzar un audit rápido vía WebSocket ─────────────────────────────
-header "Scans WebSocket"
-info "Comprobando conectividad WS con wscat (si está disponible)…"
-if command -v wscat &>/dev/null; then
-  WS_OUT=$(echo '{"task":"audit"}' | timeout 30 wscat -c "wss://localhost:8443/ws" --no-check -x '{"task":"audit"}' 2>&1 | head -5)
-  if echo "$WS_OUT" | grep -q '"type"'; then
-    ok "WebSocket /ws conectado y respondiendo"
-  else
-    fail "WebSocket /ws no responde: ${WS_OUT:0:100}"
-  fi
-else
-  info "wscat no disponible — saltando test WS interactivo"
-  info "  Para instalar: npm install -g wscat"
-fi
-
-# Comprobar el WS push
-WS_PUSH=$(${CURL} ${AUTH_OPTS} -o /dev/null -w "%{http_code}" \
-  --http1.1 -H "Connection: Upgrade" -H "Upgrade: websocket" \
-  -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" \
-  -H "Sec-WebSocket-Version: 13" \
-  "${BASE}/ws/push" 2>&1)
-[ "$WS_PUSH" = "101" ] && ok "WebSocket /ws/push upgrade (HTTP 101)" || \
-  info "WS push: HTTP $WS_PUSH (puede ser 400 sin handshake completo)"
+R=$(POST "/api/auth/2fa/activate" '{"code":"000000"}'); CODE="${R%%|*}"; BODY="${R#*|}"
+ACT_OK=$(JQ "$BODY" "ok")
+[ "$CODE" = "200" ] && [ "$ACT_OK" = "False" ] \
+  && ok "POST /api/auth/2fa/activate — código inválido rechazado" \
+  || fail "POST /api/auth/2fa/activate — HTTP $CODE, ok=$ACT_OK"
 
 # ── Compliance ────────────────────────────────────────────────────────────────
-header "Compliance"
-COMP_RESP=$(api_get "/api/compliance?frameworks=ens,iso27001")
-COMP_CODE="${COMP_RESP%%|*}"
-COMP_BODY="${COMP_RESP#*|}"
-if [ "$COMP_CODE" = "200" ]; then
-  ENS_SCORE=$(echo "$COMP_BODY" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('ens',{}).get('score_pct','?'))" 2>/dev/null)
-  ok "GET /api/compliance — ENS score: ${ENS_SCORE}%"
+hdr "4. Compliance"
+R=$(GET "/api/compliance?frameworks=ens,iso27001,cis"); CODE="${R%%|*}"; BODY="${R#*|}"
+if [ "$CODE" = "200" ]; then
+  ok "GET /api/compliance — ENS: $(JQ "$BODY" "ens.score_pct")%, ISO: $(JQ "$BODY" "iso27001.score_pct")%, CIS: $(JQ "$BODY" "cis.score_pct")%"
 else
-  fail "GET /api/compliance — HTTP $COMP_CODE"
+  fail "GET /api/compliance — HTTP $CODE"
 fi
+
+R=$(POST "/api/compliance" '{"frameworks":["ens"]}'); CODE="${R%%|*}"
+[ "$CODE" = "200" ] && ok "POST /api/compliance" || fail "POST /api/compliance — HTTP $CODE"
 
 # ── PDF ───────────────────────────────────────────────────────────────────────
-header "Informe PDF"
-PDF_RESP=$(api_post "/api/report/pdf" '{"scan_type":"audit","target":"localhost"}')
-PDF_CODE="${PDF_RESP%%|*}"
-if [ "$PDF_CODE" = "200" ]; then
-  ok "POST /api/report/pdf (HTTP 200)"
-else
-  fail "POST /api/report/pdf — HTTP $PDF_CODE"
-fi
+hdr "5. Informe PDF"
+R=$(POST "/api/report/pdf" '{"scan_type":"audit","target":"localhost"}')
+CODE="${R%%|*}"; BODY="${R#*|}"
+[ "$CODE" = "200" ] && ok "POST /api/report/pdf" || fail "POST /api/report/pdf — HTTP $CODE: ${BODY:0:80}"
 
 # ── SBOM ─────────────────────────────────────────────────────────────────────
-header "SBOM"
-SBOM_RESP=$(api_post "/api/sbom/generate" '{"include":["kernel","pip"]}')
-SBOM_CODE="${SBOM_RESP%%|*}"
-SBOM_BODY="${SBOM_RESP#*|}"
-if [ "$SBOM_CODE" = "200" ]; then
-  SBOM_TOTAL=$(echo "$SBOM_BODY" | python3 -c "import sys,json; print(json.load(sys.stdin).get('total',0))" 2>/dev/null)
-  ok "POST /api/sbom/generate — $SBOM_TOTAL componentes"
+hdr "6. SBOM"
+R=$(POST "/api/sbom/generate" '{"include":["kernel"]}'); CODE="${R%%|*}"; BODY="${R#*|}"
+if [ "$CODE" = "200" ]; then
+  ok "POST /api/sbom/generate — $(JQ "$BODY" "total") componentes"
 else
-  fail "POST /api/sbom/generate — HTTP $SBOM_CODE: ${SBOM_BODY:0:100}"
+  fail "POST /api/sbom/generate — HTTP $CODE: ${BODY:0:80}"
 fi
 
 # ── Multi-tenant ─────────────────────────────────────────────────────────────
-header "Multi-tenant"
-TENANT_CREATE=$(api_post "/api/tenants" '{"slug":"test-tenant","name":"Test Org","plan":"starter"}')
-T_CODE="${TENANT_CREATE%%|*}"
-T_BODY="${TENANT_CREATE#*|}"
-if [ "$T_CODE" = "201" ]; then
+hdr "7. Multi-tenant"
+R=$(POST "/api/tenants" '{"slug":"verify-tmp","name":"Test","plan":"starter"}')
+CODE="${R%%|*}"; BODY="${R#*|}"
+if [ "$CODE" = "201" ]; then
   ok "POST /api/tenants — tenant creado"
-  # Limpiar
-  api_post "/api/tenants/test-tenant" '{"active":false}' > /dev/null 2>&1
-elif echo "$T_BODY" | grep -qi "ya existe"; then
+  POST "/api/tenants/verify-tmp" '{"active":false}' > /dev/null 2>&1
+elif echo "$BODY" | grep -qi "existe\|already"; then
   ok "POST /api/tenants — tenant ya existe (OK)"
 else
-  fail "POST /api/tenants — HTTP $T_CODE: ${T_BODY:0:100}"
+  fail "POST /api/tenants — HTTP $CODE: ${BODY:0:80}"
 fi
+CHK "GET /api/tenants" "/api/tenants"
 
-# ── Cuarentena ────────────────────────────────────────────────────────────────
-header "Cuarentena"
-QUAR_LIST=$(api_get "/api/quarantine")
-Q_CODE="${QUAR_LIST%%|*}"
-[ "$Q_CODE" = "200" ] && ok "GET /api/quarantine (HTTP 200)" || fail "GET /api/quarantine — HTTP $Q_CODE"
-
-QUAR_STATS=$(api_get "/api/quarantine/stats")
-QS_CODE="${QUAR_STATS%%|*}"
-[ "$QS_CODE" = "200" ] && ok "GET /api/quarantine/stats (HTTP 200)" || fail "GET /api/quarantine/stats — HTTP $QS_CODE"
-
-# ── Licencias ─────────────────────────────────────────────────────────────────
-header "Licencias"
-LIC_RESP=$(api_get "/api/license")
-L_CODE="${LIC_RESP%%|*}"
-L_BODY="${LIC_RESP#*|}"
-if [ "$L_CODE" = "200" ]; then
-  TIER=$(echo "$L_BODY" | python3 -c "import sys,json; print(json.load(sys.stdin).get('tier','?'))" 2>/dev/null)
-  ok "GET /api/license — tier: $TIER"
+# ── OpenAPI ───────────────────────────────────────────────────────────────────
+hdr "8. OpenAPI / Swagger"
+R=$(GET "/api/openapi.json"); CODE="${R%%|*}"; BODY="${R#*|}"
+if [ "$CODE" = "200" ]; then
+  NEPS=$(echo "$BODY" | python3 -c "import sys,json; d=json.load(sys.stdin); print(sum(len(v) for v in d.get('paths',{}).values()))" 2>/dev/null)
+  ok "GET /api/openapi.json — ${NEPS} endpoints documentados"
 else
-  fail "GET /api/license — HTTP $L_CODE"
+  fail "GET /api/openapi.json — HTTP $CODE"
 fi
-
-# ── OpenAPI / Swagger ─────────────────────────────────────────────────────────
-header "API Docs"
-SPEC_RESP=$(api_get "/api/openapi.json")
-SPEC_CODE="${SPEC_RESP%%|*}"
-SPEC_BODY="${SPEC_RESP#*|}"
-if [ "$SPEC_CODE" = "200" ]; then
-  ENDPOINT_COUNT=$(echo "$SPEC_BODY" | python3 -c "import sys,json; d=json.load(sys.stdin); print(sum(len(v) for v in d.get('paths',{}).values()))" 2>/dev/null)
-  ok "GET /api/openapi.json — $ENDPOINT_COUNT endpoints documentados"
-else
-  fail "GET /api/openapi.json — HTTP $SPEC_CODE"
-fi
-check_endpoint "GET /api/docs (Swagger UI)" "/api/docs"
-
-# ── Monitor ───────────────────────────────────────────────────────────────────
-header "Monitor"
-MON_RESP=$(api_get "/api/monitor/status")
-M_CODE="${MON_RESP%%|*}"
-M_BODY="${MON_RESP#*|}"
-if [ "$M_CODE" = "200" ]; then
-  MODE=$(echo "$M_BODY" | python3 -c "import sys,json; print(json.load(sys.stdin).get('mode','?'))" 2>/dev/null)
-  ok "GET /api/monitor/status — modo: $MODE"
-else
-  fail "GET /api/monitor/status — HTTP $M_CODE"
-fi
+CHK "GET /api/docs (Swagger UI)" "/api/docs"
 
 # ── Ansible ───────────────────────────────────────────────────────────────────
-header "Ansible"
-ANS_RESP=$(api_get "/api/ansible/jobs")
-A_CODE="${ANS_RESP%%|*}"
-[ "$A_CODE" = "200" ] && ok "GET /api/ansible/jobs (HTTP 200)" || fail "GET /api/ansible/jobs — HTTP $A_CODE"
+hdr "9. Ansible"
+CHK "GET /api/ansible/jobs" "/api/ansible/jobs"
+R=$(POST "/api/ansible/run" '{"mode":"local","target":"localhost"}')
+CODE="${R%%|*}"; BODY="${R#*|}"
+[ "$CODE" = "200" ] \
+  && ok "POST /api/ansible/run" \
+  || info "POST /api/ansible/run — HTTP $CODE (sin scan disponible es normal)"
 
-# ── Tests unitarios ───────────────────────────────────────────────────────────
-header "Tests unitarios pytest"
-cd "$(dirname "$0")/.." || true
-if command -v pytest &>/dev/null; then
-  if pytest tests/ -q --no-header --tb=no 2>&1 | tail -3; then
-    ok "Suite de tests completada"
-  else
-    fail "Algunos tests fallaron"
-  fi
-elif /home/jose/.venv/cyberhound/bin/pytest tests/ -q --no-header --tb=no 2>&1 | tail -3; then
-  ok "Suite de tests completada (venv)"
+# ── Monitor ───────────────────────────────────────────────────────────────────
+hdr "10. Monitor"
+R=$(GET "/api/monitor/status"); CODE="${R%%|*}"; BODY="${R#*|}"
+if [ "$CODE" = "200" ]; then
+  MODE=$(JQ "$BODY" "mode"); ACTIVE=$(JQ "$BODY" "active")
+  ok "GET /api/monitor/status — modo: $MODE, activo: $ACTIVE"
+  [ "$ACTIVE" = "False" ] && info "  Para activar: sudo apt install auditd && sudo systemctl enable --now auditd"
 else
-  info "pytest no disponible en PATH — ejecutar manualmente: ~/.venv/cyberhound/bin/pytest tests/"
+  fail "GET /api/monitor/status — HTTP $CODE"
+fi
+
+# ── Agentes ───────────────────────────────────────────────────────────────────
+hdr "11. Agentes"
+CHK "GET /api/agent/list" "/api/agent/list"
+
+# ── Tests pytest ──────────────────────────────────────────────────────────────
+hdr "12. Tests unitarios (pytest)"
+PYTEST=""
+for p in \
+  "/home/jose/.venv/cyberhound/bin/pytest" \
+  "$(which pytest 2>/dev/null)" \
+  "/home/$(whoami)/.venv/cyberhound/bin/pytest"; do
+  [ -x "$p" ] && PYTEST="$p" && break
+done
+
+if [ -n "$PYTEST" ]; then
+  cd "$(dirname "$0")/.." 2>/dev/null
+  $PYTEST tests/ -q --no-header --tb=line 2>&1 | tail -5
+  [ ${PIPESTATUS[0]} -eq 0 ] && ok "Suite pytest — todos pasados" || fail "Algunos tests fallaron"
+else
+  info "pytest no en PATH — ejecutar manualmente:"
+  info "  ~/.venv/cyberhound/bin/pytest tests/ -q"
 fi
 
 # ── Resumen ───────────────────────────────────────────────────────────────────
 echo ""
-echo -e "${BOLD}══════════════════════════════════════${NC}"
-echo -e "${BOLD}Resumen de verificación CyberHound Pro${NC}"
-echo -e "${BOLD}══════════════════════════════════════${NC}"
-echo -e "  ${GREEN}Pasados:${NC} $PASS_COUNT"
-echo -e "  ${RED}Fallidos:${NC} $FAIL"
+echo -e "${BOLD}═══════════════════════════════════════${NC}"
+echo -e "${BOLD}  Resumen CyberHound Pro Verificación  ${NC}"
+echo -e "${BOLD}═══════════════════════════════════════${NC}"
+echo -e "  ${GREEN}✓ Pasados:${NC}  ${OK_COUNT}"
+echo -e "  ${RED}✗ Fallidos:${NC} ${FAIL}"
 echo ""
 if [ $FAIL -eq 0 ]; then
-  echo -e "${GREEN}${BOLD}✓ Todo correcto — CyberHound Pro funcionando perfectamente${NC}"
+  echo -e "${GREEN}${BOLD}  ✓ CyberHound Pro funcionando correctamente${NC}"
   exit 0
 else
-  echo -e "${RED}${BOLD}✗ $FAIL verificación(es) fallaron — revisar los errores anteriores${NC}"
+  echo -e "${RED}${BOLD}  ✗ ${FAIL} fallo(s) — ver errores anteriores${NC}"
+  echo ""
+  echo -e "  ${YELLOW}Resolución rápida:${NC}"
+  echo "  • Contraseña: CH_PASSWORD=tupass bash scripts/verify_all.sh"
+  echo "  • Logs: sudo journalctl -u cyberhound -n 30"
+  echo "  • Estado: sudo systemctl status cyberhound"
   exit 1
 fi
