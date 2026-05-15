@@ -1,0 +1,31 @@
+<!-- 
+  CyberHound Pro — Decoder Wazuh
+  
+  Coloca este fichero en: /var/ossec/etc/decoders/cyberhound_decoder.xml
+  Reinicia Wazuh: systemctl restart wazuh-manager
+  
+  Parsea eventos JSON enviados por CyberHound al agente Wazuh.
+  Compatible con Wazuh 4.x+
+-->
+<decoder name="cyberhound">
+  <prematch>{"source": "cyberhound_pro"</prematch>
+</decoder>
+
+<decoder name="cyberhound_finding">
+  <parent>cyberhound</parent>
+  <prematch>"event_type": "finding"</prematch>
+  <regex>"finding_id": "(\S+)", "category": "(\S+)", "severity": "(\w+)", "title": "([^"]+)"</regex>
+  <order>cyberhound.finding_id, cyberhound.category, cyberhound.severity, cyberhound.title</order>
+</decoder>
+
+<decoder name="cyberhound_summary">
+  <parent>cyberhound</parent>
+  <prematch>"event_type": "scan_summary"</prematch>
+  <regex>"scan_type": "(\w+)", "score": (\d+), "total": (\d+)</regex>
+  <order>cyberhound.scan_type, cyberhound.score, cyberhound.total_findings</order>
+</decoder>
+
+<decoder name="cyberhound_heartbeat">
+  <parent>cyberhound</parent>
+  <prematch>"event_type": "connectivity_test"</prematch>
+</decoder>
