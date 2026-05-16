@@ -105,11 +105,16 @@ GET() {
 }
 
 POST() {
+  # Escribe el body JSON en un fichero temporal para evitar problemas de quoting
+  local tmpf; tmpf=$(mktemp /tmp/ch_post_XXXX.json)
+  # Eliminar backslashes residuales que bash pueda haber introducido
+  printf '%s' "${2:-{}}" | sed 's/\\"/"/g' > "$tmpf"
   local out
   out=$(${CURL} -X POST \
     -H "Content-Type: application/json" \
-    -d "${2:-{}}" \
+    --data-binary "@${tmpf}" \
     -w "\n%{http_code}" "${BASE}$1" 2>&1)
+  rm -f "$tmpf"
   local code body
   code=$(printf '%s' "$out" | tail -1)
   body=$(printf '%s' "$out" | head -n -1)
