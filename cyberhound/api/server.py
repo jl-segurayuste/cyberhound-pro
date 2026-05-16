@@ -36,6 +36,29 @@ from cyberhound.core.security import (
 
 logger = get_logger("api")
 
+
+async def _read_json(request) -> dict:
+    """
+    Lee el body JSON de un request de forma robusta.
+    Maneja: whitespace extra, encoding issues, body vacío.
+    Fallback a {} si el body está vacío o no es JSON válido.
+    """
+    import json as _json
+    try:
+        raw = await request.read()
+        if not raw or not raw.strip():
+            return {}
+        # Limpiar whitespace al final que puede causar "Extra data"
+        text = raw.strip().decode("utf-8", errors="replace")
+        return _json.loads(text)
+    except Exception:
+        # Intentar con el método nativo de aiohttp
+        try:
+            return await _read_json(request)
+        except Exception:
+            return {}
+
+
 # ── Repositorios de reglas YARA públicos ──────────────────────────────────────
 YARA_SOURCES = {
     "default": [
@@ -675,7 +698,7 @@ class CyberHoundServer:
 
     async def api_fix_local(self, request: web.Request) -> web.Response:
         try:
-            body  = await request.json()
+            body  = await _read_json(request)
             fid   = body.get("finding_id")
             dry   = body.get("dry_run", False)
             user  = request.get("auth_user", "unknown")
@@ -700,7 +723,7 @@ class CyberHoundServer:
 
     async def api_fix_remote(self, request: web.Request) -> web.Response:
         try:
-            body = await request.json()
+            body = await _read_json(request)
             fid  = body.get("finding_id")
             host = body.get("host", "")
             user = request.get("auth_user", "unknown")
@@ -791,7 +814,7 @@ class CyberHoundServer:
     async def api_asset_authorize(self, request: web.Request) -> web.Response:
         try:
             ip = request.match_info["ip"]
-            body = await request.json()
+            body = await _read_json(request)
             authorized = bool(body.get("authorized", True))
             notes = str(body.get("notes", ""))[:500]
             await self.db.set_asset_authorized(ip, authorized, notes)
@@ -817,7 +840,7 @@ class CyberHoundServer:
 
     async def api_suppressions_add(self, request: web.Request) -> web.Response:
         try:
-            body    = await request.json()
+            body    = await _read_json(request)
             pattern = str(body.get("pattern", "")).strip()[:200]
             reason  = str(body.get("reason", "")).strip()[:500]
             expires = body.get("expires_at")
@@ -843,7 +866,7 @@ class CyberHoundServer:
 
     async def api_users_create(self, request: web.Request) -> web.Response:
         try:
-            body     = await request.json()
+            body     = await _read_json(request)
             username = str(body.get("username", "")).strip()[:32]
             password = str(body.get("password", ""))
             role     = str(body.get("role", "viewer"))
@@ -868,7 +891,7 @@ class CyberHoundServer:
     async def api_users_update(self, request: web.Request) -> web.Response:
         try:
             username = request.match_info["username"]
-            body = await request.json()
+            body = await _read_json(request)
             updates = {}
             if "role" in body:
                 if body["role"] not in ("admin", "operator", "viewer"):
@@ -911,7 +934,7 @@ class CyberHoundServer:
     async def api_scheduler_toggle(self, request: web.Request) -> web.Response:
         try:
             name = request.match_info["name"]
-            body = await request.json()
+            body = await _read_json(request)
             enabled = bool(body.get("enabled", True))
             if not self.scheduler:
                 return web.json_response({"error": "Scheduler no activo"}, status=503)
@@ -931,7 +954,7 @@ class CyberHoundServer:
 
     async def api_save_keys(self, request: web.Request) -> web.Response:
         try:
-            body = await request.json()
+            body = await _read_json(request)
             for attr in ("shodan", "virustotal", "abuseipdb", "greynoise", "otx", "hibp"):
                 v = body.get(attr, "")
                 if v and not v.endswith("***"):
@@ -958,7 +981,7 @@ class CyberHoundServer:
 
     async def api_save_notifications_cfg(self, request: web.Request) -> web.Response:
         try:
-            body = await request.json()
+            body = await _read_json(request)
             n = self.cfg.notifications
             for field in ("email_enabled","smtp_host","smtp_port","smtp_user",
                           "email_from","email_to","webhook_enabled","webhook_url","min_level"):
@@ -999,7 +1022,7 @@ class CyberHoundServer:
 
     async def api_save_siem(self, request: web.Request) -> web.Response:
         try:
-            body = await request.json()
+            body = await _read_json(request)
             s = self.cfg.siem
             for field in ("wazuh_enabled", "wazuh_host", "wazuh_port", "wazuh_api_url",
                           "wazuh_api_user", "elk_enabled", "elk_url", "elk_index",
@@ -1088,7 +1111,7 @@ class CyberHoundServer:
 
     async def api_ansible_run(self, request: web.Request) -> web.Response:
         try:
-            body     = await request.json()
+            body     = await _read_json(request)
             scan_id  = body.get("scan_id")
             target   = body.get("target", "localhost")
             mode     = body.get("mode", "local")  # local | awx
@@ -1168,7 +1191,7 @@ class CyberHoundServer:
 
     async def api_tenants_create(self, request: web.Request) -> web.Response:
         try:
-            body   = await request.json()
+            body   = await _read_json(request)
             store  = self._get_tenant_store()
             tenant = store.create(
                 slug=body.get("slug",""),
@@ -1194,7 +1217,7 @@ class CyberHoundServer:
     async def api_tenant_update(self, request: web.Request) -> web.Response:
         slug  = request.match_info["slug"]
         store = self._get_tenant_store()
-        body  = await request.json()
+        body  = await _read_json(request)
         t     = store.update(slug, **body)
         if not t:
             return web.json_response({"error": "No encontrado"}, status=404)
@@ -1210,7 +1233,7 @@ class CyberHoundServer:
 
     async def api_runtime_scan(self, request: web.Request) -> web.Response:
         try:
-            body       = await request.json()
+            body       = await _read_json(request)
             containers = body.get("containers") or None
             from cyberhound.scanners.runtime_scan import RuntimeScanner
             scan_id  = await self.db.create_scan("runtime", triggered_by="manual")
@@ -1231,7 +1254,7 @@ class CyberHoundServer:
     async def api_docker_image_scan(self, request: web.Request) -> web.Response:
         """Análisis profundo del filesystem de imágenes Docker."""
         try:
-            body      = await request.json()
+            body      = await _read_json(request)
             images    = body.get("images") or None
             deep      = body.get("deep", True)
             max_imgs  = min(int(body.get("max_images", 5)), 10)
@@ -1276,7 +1299,7 @@ class CyberHoundServer:
     async def api_report_pdf(self, request: web.Request) -> web.Response:
         """Genera un informe PDF del último scan o de los findings proporcionados."""
         try:
-            body       = await request.json()
+            body       = await _read_json(request)
             scan_id    = body.get("scan_id")
             scan_type  = body.get("scan_type", "audit")
             target     = body.get("target", "localhost")
@@ -1326,7 +1349,7 @@ class CyberHoundServer:
     async def api_compliance(self, request: web.Request) -> web.Response:
         """Analiza compliance a partir de los findings del último scan o scan_id."""
         try:
-            body       = await request.json()
+            body       = await _read_json(request)
             scan_id    = body.get("scan_id")
             frameworks = body.get("frameworks") or None
 
@@ -1380,7 +1403,7 @@ class CyberHoundServer:
 
     async def api_quarantine_add(self, request: web.Request) -> web.Response:
         try:
-            body       = await request.json()
+            body       = await _read_json(request)
             filepath   = str(body.get("filepath", "")).strip()
             finding_id = str(body.get("finding_id", ""))
             title      = str(body.get("title", ""))
@@ -1397,7 +1420,7 @@ class CyberHoundServer:
     async def api_quarantine_restore(self, request: web.Request) -> web.Response:
         try:
             name = request.match_info["name"]
-            body = await request.json()
+            body = await _read_json(request)
             restore_path = body.get("path") or None
             from cyberhound.core.quarantine import restore_file
             ok, msg = restore_file(name, restore_path)
@@ -1415,7 +1438,7 @@ class CyberHoundServer:
 
     async def api_sbom_generate(self, request: web.Request) -> web.Response:
         try:
-            body = await request.json()
+            body = await _read_json(request)
             include   = body.get("include") or None
             pip_venvs = body.get("pip_venvs") or None
             from cyberhound.scanners.sbom import SBOMGenerator
@@ -1447,7 +1470,7 @@ class CyberHoundServer:
 
     async def api_license_activate(self, request: web.Request) -> web.Response:
         try:
-            body = await request.json()
+            body = await _read_json(request)
             key  = str(body.get("key", "")).strip()
             if not key:
                 return web.json_response({"ok": False, "error": "Clave vacía"}, status=400)
@@ -1461,7 +1484,7 @@ class CyberHoundServer:
     async def api_ldap_scan(self, request: web.Request) -> web.Response:
         """Ejecuta un audit de LDAP/AD y devuelve los hallazgos."""
         try:
-            body   = await request.json()
+            body   = await _read_json(request)
             user   = request.get("auth_user", "unknown")
             from cyberhound.scanners.ldap_audit import LDAPAuditor
             scan_id = await self.db.create_scan("ldap", triggered_by="manual")
@@ -1492,7 +1515,7 @@ class CyberHoundServer:
         if not self.agent_manager.verify_agent_key(key):
             return web.json_response({"error": "Clave de agente inválida"}, status=401)
         try:
-            payload = await request.json()
+            payload = await _read_json(request)
             result  = await self.agent_manager.receive_report(payload)
             return web.json_response(result)
         except Exception as e:
@@ -1504,7 +1527,7 @@ class CyberHoundServer:
         key  = self.agent_manager.extract_agent_key(auth)
         if not self.agent_manager.verify_agent_key(key):
             return web.json_response({"error": "Clave inválida"}, status=401)
-        payload = await request.json()
+        payload = await _read_json(request)
         await self.agent_manager.receive_heartbeat(payload)
         return web.json_response({"ok": True})
 
@@ -1532,7 +1555,7 @@ class CyberHoundServer:
         """Activa el 2FA verificando el primer código."""
         user = request.get("auth_user", "")
         try:
-            body = await request.json()
+            body = await _read_json(request)
             code = str(body.get("code", "")).strip()
         except Exception:
             return web.json_response({"ok": False, "error": "Body inválido"}, status=400)
@@ -1562,7 +1585,7 @@ class CyberHoundServer:
     async def api_yara_update(self, request: web.Request) -> web.Response:
         """Descarga y actualiza reglas YARA desde repositorios públicos."""
         try:
-            body = await request.json()
+            body = await _read_json(request)
             sources = body.get("sources", ["default"])
         except Exception:
             sources = ["default"]
@@ -1593,7 +1616,7 @@ class CyberHoundServer:
     async def api_report(self, request: web.Request) -> web.Response:
         fmt = request.match_info.get("fmt", "html")
         try:
-            body     = await request.json()
+            body     = await _read_json(request)
             findings = [Finding.from_dict(d) for d in body.get("findings", [])]
             report   = ScanReport(target=body.get("source", "localhost"), local_findings=findings)
             from cyberhound.scanners.reports import ReportGenerator
