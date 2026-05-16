@@ -668,6 +668,139 @@ async def check_sticky_bit_tmp() -> list[Finding]:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Nuevos checks v6.3
+# ──────────────────────────────────────────────────────────────────────────────
+
+async def check_ssh_host_keys() -> list[Finding]:
+    """Verifica que las claves de host SSH tienen los permisos correctos."""
+    findings = []
+    for key_path in ["/etc/ssh/ssh_host_rsa_key", "/etc/ssh/ssh_host_ed25519_key",
+                     "/etc/ssh/ssh_host_ecdsa_key"]:
+        p = Path(key_path)
+        if not p.exists():
+            continue
+        mode = p.stat().st_mode & 0o777
+        if mode != 0o600:
+            findings.append(Finding(
+                id=f"ssh_hostkey_perm_{p.name}",
+                category="ssh", severity="high",
+                title=f"Permisos incorrectos en clave de host SSH: {key_path}",
+                description=f"La clave {key_path} tiene permisos {oct(mode)} — deberían ser 0o600.",
+                remediation=f"chmod 600 {key_path}",
+                file_path=key_path, auto_fix=True,
+            ))
+    return findings
+
+
+async def check_passwd_integrity() -> list[Finding]:
+    """Verifica la integridad de /etc/passwd y /etc/shadow."""
+    findings = []
+    # /etc/passwd debe ser readable por todos pero no writable
+    for path, expected_max_mode in [("/etc/passwd", 0o644), ("/etc/shadow", 0o640)]:
+        p = Path(path)
+        if not p.exists():
+            continue
+        mode = p.stat().st_mode & 0o777
+        if mode > expected_max_mode:
+            findings.append(Finding(
+                id=f"passwd_perm_{Path(path).name}",
+                category="filesystem", severity="critical",
+                title=f"Permisos excesivos en {path}: {oct(mode)}",
+                description=f"{path} tiene permisos {oct(mode)}. Deberían ser {oct(expected_max_mode)}.",
+                remediation=f"chmod {oct(expected_max_mode)[2:]} {path}",
+                file_path=path, auto_fix=True,
+            ))
+    return findings
+
+
+async def check_at_cron_allow() -> list[Finding]:
+    """Verifica que at/cron están restringidos a usuarios específicos."""
+    findings = []
+    # Si /etc/cron.deny no existe pero tampoco /etc/cron.allow → sin restricción
+    cron_allow = Path("/etc/cron.allow")
+    cron_deny  = Path("/etc/cron.deny")
+    at_allow   = Path("/etc/at.allow")
+
+    if not cron_allow.exists() and not cron_deny.exists():
+        findings.append(Finding(
+            id="cron_no_restriction",
+            category="authentication", severity="medium",
+            title="Sin restricciones de acceso a cron",
+            description="No existe /etc/cron.allow ni /etc/cron.deny. Todos los usuarios pueden usar cron.",
+            remediation="Crear /etc/cron.allow con solo los usuarios autorizados:\necho 'root' > /etc/cron.allow\nchmod 600 /etc/cron.allow",
+            auto_fix=False,
+        ))
+    if not at_allow.exists():
+        findings.append(Finding(
+            id="at_no_restriction",
+            category="authentication", severity="low",
+            title="Sin restricciones de acceso a at",
+            description="No existe /etc/at.allow. Todos los usuarios podrían usar el comando at.",
+            remediation="echo 'root' > /etc/at.allow && chmod 600 /etc/at.allow",
+            auto_fix=False,
+        ))
+    return findings
+
+
+async def check_grub_password() -> list[Finding]:
+    """Verifica si el bootloader tiene contraseña configurada."""
+    grub_paths = [
+        "/etc/grub.d/40_custom",
+        "/boot/grub/grub.cfg",
+        "/boot/grub2/grub.cfg",
+    ]
+    for gpath in grub_paths:
+        p = Path(gpath)
+        if p.exists():
+            content = p.read_text(errors="ignore") if p.stat().st_size < 100_000 else ""
+            if "password_pbkdf2" in content or "set superusers" in content:
+                return []  # Contraseña configurada
+    return [Finding(
+        id="grub_no_password",
+        category="authentication", severity="medium",
+        title="Bootloader GRUB sin contraseña",
+        description="El bootloader no tiene contraseña configurada. "
+                    "Alguien con acceso físico podría modificar parámetros de arranque.",
+        remediation="Configurar contraseña en GRUB:\ngrub-mkpasswd-pbkdf2 → copiar el hash\n"
+                    "Añadir en /etc/grub.d/40_custom:\nset superusers='admin'\n"
+                    "password_pbkdf2 admin <hash>",
+        auto_fix=False,
+    )]
+
+
+async def check_ipv6_disabled_if_unused() -> list[Finding]:
+    """Avisa si IPv6 está habilitado pero no configurado (superficie de ataque innecesaria)."""
+    proc = await run_command(["ip", "-6", "addr", "show"], timeout=10, check=False)
+    if proc.returncode != 0:
+        return []
+    lines = [l for l in proc.stdout.splitlines()
+             if "inet6" in l
+             and " scope global" in l   # solo IPs con scope global = IPs públicas/privadas reales
+             and "fe80" not in l]       # excluir link-local
+    if lines:
+        return []  # IPv6 en uso con IPs globales — OK
+
+    # Comprobar si ya está explícitamente deshabilitado en sysctl
+    sysctl_path = Path("/proc/sys/net/ipv6/conf/all/disable_ipv6")
+    if sysctl_path.exists() and sysctl_path.read_text().strip() == "1":
+        return []  # ya deshabilitado
+
+    return [Finding(
+        id="ipv6_enabled_unused",
+        category="kernel", severity="low",
+        title="IPv6 habilitado sin uso detectado",
+        description="IPv6 está habilitado pero no hay IPs globales asignadas. "
+                    "Si no se usa IPv6, deshabilitarlo reduce la superficie de ataque.",
+        remediation=(
+            "Añadir a /etc/sysctl.d/99-cyberhound.conf:\n"
+            "net.ipv6.conf.all.disable_ipv6 = 1\n"
+            "net.ipv6.conf.default.disable_ipv6 = 1\n"
+            "Aplicar: sysctl --system"
+        ),
+        auto_fix=False,
+    )]
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Orquestador
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -690,7 +823,7 @@ class HardeningAuditor:
         check_log_permissions,
         check_unattended_upgrades,
         check_aide,
-        # Nuevos checks v6.1
+        # v6.1
         check_umask,
         check_ntp,
         check_login_banners,
@@ -700,6 +833,12 @@ class HardeningAuditor:
         check_sticky_bit_tmp,
         check_services_listening_all,
         check_openssh_version,
+        # v6.3
+        check_ssh_host_keys,
+        check_passwd_integrity,
+        check_at_cron_allow,
+        check_grub_password,
+        check_ipv6_disabled_if_unused,
     ]
 
     @classmethod

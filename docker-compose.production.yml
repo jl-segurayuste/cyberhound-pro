@@ -1,0 +1,176 @@
+# CyberHound Pro — Docker Compose de PRODUCCIÓN
+# Uso: docker compose -f docker-compose.production.yml up -d
+#
+# Servicios:
+#   cyberhound  — aplicación principal (HTTPS :8443)
+#   postgres    — base de datos PostgreSQL 16
+#   nginx       — reverse proxy con certificado TLS (puerto 443)
+#   backup      — backup automático diario de la BD
+#
+# Variables de entorno requeridas (en .env.production):
+#   CH_PASSWORD=contraseña_segura
+#   CH_USERNAME=admin
+#   POSTGRES_PASSWORD=contraseña_bd
+#   CH_DOMAIN=cyberhound.empresa.com
+#   SHODAN_API_KEY=xxxx           (opcional)
+#   VT_API_KEY=xxxx               (opcional)
+
+services:
+
+  # ── PostgreSQL ──────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: cyberhound-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       cyberhound
+      POSTGRES_USER:     cyberhound
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD requerida}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --lc-collate=en_US.utf8"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - cyberhound-internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cyberhound -d cyberhound"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    # Sin exposición externa — solo acceso interno
+    expose:
+      - "5432"
+
+  # ── CyberHound Pro ──────────────────────────────────────────────────────────
+  cyberhound:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VERSION: "6.3.0"
+    image: cyberhound-pro:latest
+    container_name: cyberhound-app
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # Auth
+      CH_USERNAME:   ${CH_USERNAME:-admin}
+      CH_PASSWORD:   ${CH_PASSWORD:?CH_PASSWORD requerida}
+      # Base de datos PostgreSQL
+      CH_DB_URL:     postgresql://cyberhound:${POSTGRES_PASSWORD}@postgres:5432/cyberhound
+      # API keys de threat intelligence (opcionales)
+      SHODAN_API_KEY:  ${SHODAN_API_KEY:-}
+      VT_API_KEY:      ${VT_API_KEY:-}
+      CH_SMTP_PASSWORD: ${CH_SMTP_PASSWORD:-}
+      CH_WAZUH_PASS:   ${CH_WAZUH_PASS:-}
+      CH_ELK_API_KEY:  ${CH_ELK_API_KEY:-}
+      CH_SPLUNK_TOKEN: ${CH_SPLUNK_TOKEN:-}
+      CH_AGENT_KEY:    ${CH_AGENT_KEY:-}
+    volumes:
+      # Configuración persistente
+      - cyberhound_config:/root/.cyberhound
+      # Logs
+      - cyberhound_logs:/var/log/cyberhound
+      # YARA rules
+      - yara_rules:/root/.cyberhound/yara
+      # Cuarentena
+      - quarantine:/root/.cyberhound/quarantine
+      # Certificados TLS propios (opcional — si no se montan, usa auto-firmado)
+      # - ./certs/cert.pem:/etc/cyberhound/tls/cert.pem:ro
+      # - ./certs/key.pem:/etc/cyberhound/tls/key.pem:ro
+    networks:
+      - cyberhound-internal
+    # Puerto interno — nginx hace el proxy
+    expose:
+      - "8443"
+    # Capacidades necesarias para algunos checks (nmap, auditd)
+    cap_add:
+      - NET_ADMIN
+      - SYS_PTRACE
+    # Docker socket para análisis de contenedores
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - cyberhound_config:/root/.cyberhound
+      - cyberhound_logs:/var/log/cyberhound
+      - yara_rules:/root/.cyberhound/yara
+      - quarantine:/root/.cyberhound/quarantine
+    healthcheck:
+      test: ["CMD", "curl", "-fsk", "https://localhost:8443/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  # ── Nginx reverse proxy ─────────────────────────────────────────────────────
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: cyberhound-nginx
+    restart: unless-stopped
+    depends_on:
+      cyberhound:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./docker/nginx/cyberhound.conf:/etc/nginx/conf.d/cyberhound.conf:ro
+      # Certificados Let's Encrypt (si se usan)
+      # - /etc/letsencrypt:/etc/letsencrypt:ro
+      # Certificados auto-firmados de desarrollo
+      - nginx_certs:/etc/nginx/certs
+    networks:
+      - cyberhound-internal
+      - cyberhound-external
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # ── Backup automático ───────────────────────────────────────────────────────
+  backup:
+    image: postgres:16-alpine
+    container_name: cyberhound-backup
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - backups:/backups
+      - ./docker/backup/backup.sh:/backup.sh:ro
+    networks:
+      - cyberhound-internal
+    # Ejecutar backup cada día a las 3:00 AM
+    entrypoint: ["/bin/sh", "-c",
+      "while true; do sleep 86400; /backup.sh; done"]
+    command: []
+
+# ── Volúmenes persistentes ──────────────────────────────────────────────────
+volumes:
+  postgres_data:
+    name: cyberhound_postgres_data
+  cyberhound_config:
+    name: cyberhound_config
+  cyberhound_logs:
+    name: cyberhound_logs
+  yara_rules:
+    name: cyberhound_yara
+  quarantine:
+    name: cyberhound_quarantine
+  nginx_certs:
+    name: cyberhound_nginx_certs
+  backups:
+    name: cyberhound_backups
+
+# ── Redes ───────────────────────────────────────────────────────────────────
+networks:
+  cyberhound-internal:
+    name: cyberhound-internal
+    internal: true    # sin acceso externo directo
+  cyberhound-external:
+    name: cyberhound-external
