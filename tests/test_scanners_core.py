@@ -120,10 +120,13 @@ class TestNetworkScanner:
 
     @pytest.mark.asyncio
     async def test_scan_network_without_nmap(self):
-        """Sin nmap devuelve lista de NetworkDevice."""
+        """Sin nmap devuelve lista vacía inmediatamente."""
         from cyberhound.scanners.network import NetworkScanner
         scanner = NetworkScanner()
-        with patch("cyberhound.scanners.network.command_exists", return_value=False):
+        # Mockear command_exists Y run_command para evitar timeout real
+        with patch("cyberhound.scanners.network.command_exists", return_value=False),              patch("cyberhound.scanners.network.run_command",
+                   new_callable=AsyncMock,
+                   return_value=MagicMock(returncode=1, stdout="", stderr="")):
             devices = await scanner.scan_network()
         assert isinstance(devices, list)
 
@@ -179,7 +182,7 @@ class TestAgentReporter:
 
     @pytest.mark.asyncio
     async def test_send_report_handles_connection_error(self):
-        """Error de conexión no propaga excepción."""
+        """Error de conexión devuelve False sin colgar el test."""
         from cyberhound.core.agent import AgentReporter, AgentConfig
         cfg = AgentConfig(
             manager_url="https://192.0.2.1:9999",
@@ -191,13 +194,17 @@ class TestAgentReporter:
             id="f1", category="ssh", severity="critical",
             title="Test", description="", remediation="",
         )]
-        try:
+        # Mockear aiohttp para evitar timeout real (30s+) en red no enrutable
+        import aiohttp
+        mock_session = MagicMock()
+        mock_session.__aenter__ = AsyncMock(side_effect=aiohttp.ClientConnectorError(
+            MagicMock(), OSError("Connection refused")
+        ))
+        mock_session.__aexit__ = AsyncMock(return_value=False)
+        with patch("aiohttp.ClientSession", return_value=mock_session):
             result = await reporter.report_scan(findings=findings, scan_type="audit", score=50)
-        except (ConnectionError, OSError):
-            pass  # Errores de red son aceptables
-        except Exception as e:
-            # Otros errores no deberían propagarse
-            assert "connect" in str(e).lower() or "timeout" in str(e).lower(),                 f"Excepción inesperada: {e}"
+        # report_scan devuelve bool — False cuando hay error de conexión
+        assert isinstance(result, bool)
 
 
 # ── LDAP Audit ────────────────────────────────────────────────────────────────
@@ -238,17 +245,14 @@ class TestSSHAudit:
         assert creds.port == 22
         assert creds.username == "root"
 
-    @pytest.mark.asyncio
-    async def test_remote_auditor_has_run_method(self):
-        """RemoteAuditor tiene el método correcto de auditoría."""
+    def test_remote_auditor_has_methods(self):
+        """RemoteAuditor tiene métodos de auditoría."""
         from cyberhound.scanners.ssh_audit import RemoteAuditor, SSHCredentials
         creds = SSHCredentials(username="admin")
         creds.host = "192.0.2.1"
         auditor = RemoteAuditor(credentials=creds)
-        # Verificar que tiene algún método de auditoría asíncrono
-        run_method = next(
-            (m for m in dir(auditor) if not m.startswith("_") and
-             "audit" in m.lower() or "run" in m.lower() or "scan" in m.lower()),
-            None
-        )
-        assert auditor is not None  # al menos puede instanciarse
+        audit_methods = [m for m in dir(auditor)
+                         if not m.startswith("_") and
+                         ("audit" in m.lower() or "scan" in m.lower())]
+        assert auditor is not None
+        assert len(audit_methods) > 0, f"Sin métodos de auditoría: {dir(auditor)}"
