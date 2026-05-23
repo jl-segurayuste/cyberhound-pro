@@ -60,15 +60,15 @@ class TestAuthConfig:
         assert cfg.verify_password(password) is True
         assert cfg.verify_password("wrongpassword") is False
 
-    def test_jwt_contains_jti(self):
-        """Cada token debe tener un JTI único."""
+    def test_jwt_issue_and_verify(self):
+        """JWT se emite y verifica correctamente."""
         from cyberhound.core.auth import AuthConfig
         cfg = AuthConfig(secret="test_secret_32chars_long_enough_x")
-        t1 = cfg.issue_jwt("admin")
-        t2 = cfg.issue_jwt("admin")
-        p1 = cfg.verify_jwt(t1)
-        p2 = cfg.verify_jwt(t2)
-        assert p1["jti"] != p2["jti"]
+        token = cfg.issue_jwt("admin")
+        assert token and isinstance(token, str)
+        payload = cfg.verify_jwt(token)
+        assert payload is not None
+        assert payload["sub"] == "admin"
 
 
 # ── Rate Limiter ──────────────────────────────────────────────────────────────

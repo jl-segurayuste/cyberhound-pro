@@ -23,6 +23,7 @@ from typing import Optional
 from aiohttp import web
 
 from cyberhound.core.auth import AuthConfig, auth_middleware, setup_auth_routes
+from cyberhound.api.routes.intel_routes import register_routes as register_intel_routes
 from cyberhound.core.config import CyberHoundConfig
 from cyberhound.core.database import AssetRecord, Database, UserRecord
 from cyberhound.core.logging import audit_log, get_logger
