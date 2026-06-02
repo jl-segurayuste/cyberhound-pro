@@ -20,10 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import re
-import subprocess
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Optional
 
 from cyberhound.core.executor import command_exists, run_command
 from cyberhound.core.logging import get_logger
@@ -52,7 +49,7 @@ def _f(id, category, severity, title, description, remediation,
 
 # ── Detección de LDAP local ───────────────────────────────────────────────────
 
-async def _detect_ldap_config() -> Optional[dict]:
+async def _detect_ldap_config() -> dict | None:
     """Detecta la configuración LDAP del sistema (sssd, /etc/ldap.conf, etc.)."""
     # Buscar en sssd.conf
     for cfg_path in ["/etc/sssd/sssd.conf", "/etc/sssd/conf.d/"]:
@@ -343,7 +340,7 @@ class LDAPAuditor:
 
         findings: list[Finding] = []
         names = ["passwd_not_req", "no_expiry", "asrep", "domain_admins", "guest", "policy"]
-        for name, result in zip(names, results):
+        for name, result in zip(names, results, strict=False):
             if isinstance(result, list):
                 findings.extend(result)
                 logger.info("  ldap/%s: %d hallazgos", name, len(result))

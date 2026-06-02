@@ -5,9 +5,10 @@ Ejecuta auditorías automáticas sin depender del cron del sistema.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Callable, Optional
+from typing import Optional
 
 from cyberhound.core.logging import get_logger
 
@@ -22,8 +23,8 @@ class ScheduleEntry:
     minute:  int = 0
     days:    list[int] = field(default_factory=lambda: list(range(7)))
     enabled: bool = True
-    last_run:  Optional[str] = None
-    next_run:  Optional[str] = None
+    last_run:  str | None = None
+    next_run:  str | None = None
 
     def should_run_now(self) -> bool:
         if not self.enabled:
@@ -47,7 +48,7 @@ class Scheduler:
     def __init__(self) -> None:
         self._entries: list[ScheduleEntry] = []
         self._running = False
-        self._task: Optional[asyncio.Task] = None
+        self._task: asyncio.Task | None = None
 
     def add(self, entry: ScheduleEntry) -> None:
         entry.next_run = entry.compute_next_run()
@@ -191,9 +192,10 @@ def build_scheduler(app_ref, cfg) -> Scheduler:
 
     if getattr(cfg, "network_enabled", True):
         async def _network():
-            from cyberhound.scanners.network import NetworkScanner
-            from cyberhound.core.database import AssetRecord
             import json as _json
+
+            from cyberhound.core.database import AssetRecord
+            from cyberhound.scanners.network import NetworkScanner
             db = app_ref.db
             scan_id = await db.create_scan("network", triggered_by="scheduler")
             try:
@@ -233,8 +235,10 @@ def build_scheduler(app_ref, cfg) -> Scheduler:
     if getattr(cfg, "yara_update_enabled", False):
         async def _yara_update():
             try:
-                import aiohttp
                 from pathlib import Path
+
+                import aiohttp
+
                 from cyberhound.scanners.malware import YARA_SOURCES_DEFAULT
             except ImportError:
                 pass

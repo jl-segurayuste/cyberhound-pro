@@ -11,8 +11,6 @@ Integra múltiples fuentes de intel para contexto de amenazas:
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
-from typing import Optional
 
 from aiohttp import web
 
@@ -39,7 +37,7 @@ async def api_intel_scan(request: web.Request) -> web.Response:
     """
     POST /api/intel/scan
     Lanza un análisis de threat intelligence sobre IPs/dominios.
-    
+
     Body: {"targets": ["1.2.3.4", "evil.com"], "modules": ["shodan","vt","abuseipdb"]}
     """
     server = request.app["server"]

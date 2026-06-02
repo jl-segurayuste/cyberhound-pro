@@ -17,9 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Optional
+from datetime import UTC, datetime
 
 from cyberhound.core.executor import command_exists, run_command
 from cyberhound.core.logging import get_logger
@@ -56,7 +54,7 @@ async def _docker_available() -> bool:
     return proc.returncode == 0
 
 
-async def _docker_json(args: list[str]) -> Optional[list | dict]:
+async def _docker_json(args: list[str]) -> list | dict | None:
     proc = await run_command(["docker"] + args, timeout=30, check=False)
     if proc.returncode != 0:
         logger.warning("docker %s respondió %d: %s", " ".join(args[:3]), proc.returncode, proc.stderr[:80])
@@ -100,9 +98,9 @@ async def check_containers_as_root() -> list[Finding]:
                     "Si hay un escape del contenedor, el atacante tiene root en el host."
                 ),
                 remediation=(
-                    f"Añadir al Dockerfile: USER nonroot\n"
-                    f"O en docker-compose.yml: user: '1000:1000'\n"
-                    f"O al ejecutar: docker run --user 1000:1000 ..."
+                    "Añadir al Dockerfile: USER nonroot\n"
+                    "O en docker-compose.yml: user: '1000:1000'\n"
+                    "O al ejecutar: docker run --user 1000:1000 ..."
                 ),
                 evidence=f"Container={name}, User={user or 'root (por defecto)'}",
                 auto_fix=False,
@@ -148,7 +146,7 @@ async def check_privileged_containers() -> list[Finding]:
                     "Eliminar --privileged y añadir solo las capabilities estrictamente necesarias:\n"
                     "docker run --cap-drop ALL --cap-add CHOWN --cap-add NET_BIND_SERVICE ..."
                 ),
-                evidence=f"Privileged=true",
+                evidence="Privileged=true",
                 auto_fix=False,
             ))
             continue
@@ -299,7 +297,7 @@ async def check_dangerous_mounts() -> list[Finding]:
     return findings
 
 
-async def check_images_cve(image_list: Optional[list[str]] = None) -> list[Finding]:
+async def check_images_cve(image_list: list[str] | None = None) -> list[Finding]:
     """Analiza imágenes con Trivy si está disponible."""
     if not command_exists("trivy"):
         return [Finding(
@@ -377,7 +375,7 @@ async def check_old_images() -> list[Finding]:
         return []
 
     findings = []
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     for line in proc.stdout.splitlines():
         try:
             data = json.loads(line)
@@ -388,7 +386,7 @@ async def check_old_images() -> list[Finding]:
             created_str = created_str.replace(" +0000 UTC", "").replace(" UTC", "")
             try:
                 created = datetime.strptime(created_str[:19], "%Y-%m-%d %H:%M:%S")
-                created = created.replace(tzinfo=timezone.utc)
+                created = created.replace(tzinfo=UTC)
             except ValueError:
                 continue
             age_days = (now - created).days
@@ -419,7 +417,7 @@ class DockerScanner:
     @staticmethod
     async def full_scan(
         scan_images_cve: bool = True,
-        image_list: Optional[list[str]] = None,
+        image_list: list[str] | None = None,
         scan_k8s: bool = True,
     ) -> list[Finding]:
         docker_findings: list[Finding] = []
@@ -445,7 +443,7 @@ class DockerScanner:
                 tasks["images_cve"] = check_images_cve(image_list)
 
             results = await asyncio.gather(*tasks.values(), return_exceptions=True)
-            for module, result in zip(tasks.keys(), results):
+            for module, result in zip(tasks.keys(), results, strict=False):
                 if isinstance(result, list):
                     docker_findings.extend(result)
                     logger.info("  docker/%s: %d hallazgos", module, len(result))

@@ -12,7 +12,7 @@ from cyberhound.core.logging import get_logger
 from cyberhound.core.models import ExternalIntel
 
 if TYPE_CHECKING:
-    from cyberhound.core.config import APIKeys
+    pass
 
 logger = get_logger("intel")
 
@@ -37,7 +37,7 @@ class IntelScanner:
                 tasks["hibp"] = self._hibp(session, target)
 
             gathered = await asyncio.gather(*tasks.values(), return_exceptions=True)
-            for source, res in zip(tasks.keys(), gathered):
+            for source, res in zip(tasks.keys(), gathered, strict=False):
                 if isinstance(res, Exception):
                     logger.warning("Intel %s error: %s", source, res)
                 elif res is not None:

@@ -21,13 +21,10 @@ La técnica utilizada es exportar el filesystem de la imagen con
 from __future__ import annotations
 
 import asyncio
-import json
 import re
 import tarfile
 import tempfile
-from io import BytesIO
 from pathlib import Path
-from typing import Optional
 
 from cyberhound.core.executor import command_exists, run_command
 from cyberhound.core.logging import get_logger
@@ -117,8 +114,8 @@ async def check_eol_base_images(images: list[str]) -> list[Finding]:
                     "eol", "high",
                     f"Imagen basada en distribución EOL: {image}",
                     f"{desc} — Esta imagen base ya no recibe actualizaciones de seguridad.",
-                    f"Actualizar la imagen base en el Dockerfile:\n"
-                    f"FROM ubuntu:22.04  # o la versión actual LTS",
+                    "Actualizar la imagen base en el Dockerfile:\n"
+                    "FROM ubuntu:22.04  # o la versión actual LTS",
                     evidence=f"image={image}",
                 ))
     return findings
@@ -348,7 +345,7 @@ class DockerImageScanner:
 
     @staticmethod
     async def scan_images(
-        images: Optional[list[str]] = None,
+        images: list[str] | None = None,
         max_images: int = 5,
         deep_scan: bool = True,
         max_size_mb: int = 200,
@@ -381,7 +378,7 @@ class DockerImageScanner:
             tasks.append(_scan_single_image(image, deep_scan, max_size_mb))
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
-        for image, result in zip(images, results):
+        for image, result in zip(images, results, strict=False):
             if isinstance(result, list):
                 findings.extend(result)
             else:
