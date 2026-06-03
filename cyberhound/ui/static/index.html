@@ -39,6 +39,7 @@
     <button class="nav-tab" data-panel="services"  onclick="showPanel('services')">⚙️ Servicios</button>
     <button class="nav-tab" data-panel="tls"       onclick="showPanel('tls')">🔒 TLS/SSL</button>
     <button class="nav-tab" data-panel="webhdr"    onclick="showPanel('webhdr')">🌐 Cabeceras Web</button>
+    <button class="nav-tab" data-panel="dnssec"    onclick="showPanel('dnssec')">📛 DNS Security</button>
     <button class="nav-tab" data-panel="intel"    onclick="showPanel('intel')">🌐 Intel</button>
     <button class="nav-tab" data-panel="history"   onclick="showPanel('history')">📅 Historial</button>
     <button class="nav-tab" data-panel="monitor"   onclick="showPanel('monitor')">👁 Monitor</button>
@@ -464,6 +465,41 @@
       <div class="empty-icon">🌐</div>
       <h3>Análisis de cabeceras no ejecutado</h3>
       <p>Introduce las URLs de tus sitios para auditar sus cabeceras de seguridad HTTP.</p>
+    </div>
+  </section>
+
+
+  <!-- ═══ DNS SECURITY ═══ -->
+  <section class="panel" id="panel-dnssec">
+    <div class="page-header"><h1>📛 Seguridad DNS</h1>
+      <p>Audita SPF, DMARC, DKIM, DNSSEC y CAA — protección anti-spoofing del correo y del dominio.</p>
+    </div>
+    <div class="config-bar">
+      <div class="field">
+        <label>Dominios a analizar (uno por línea)</label>
+        <textarea id="dnssec-domains" rows="3" placeholder="midominio.com&#10;otrodominio.es"></textarea>
+      </div>
+      <button class="btn-primary" id="btn-dnssec" onclick="runDNSScan()">▶ Auditar DNS</button>
+    </div>
+    <div id="dnssec-results" style="display:none">
+      <div id="dnssec-summary-bar"></div>
+      <div class="toolbar">
+        <button class="filter active" onclick="filterTable('dnssec','all',this)">Todos</button>
+        <button class="filter" data-sev="high" onclick="filterTable('dnssec','high',this)">Alto</button>
+        <button class="filter" data-sev="medium" onclick="filterTable('dnssec','medium',this)">Medio</button>
+        <button class="filter" data-sev="low" onclick="filterTable('dnssec','low',this)">Bajo</button>
+        <input type="text" placeholder="🔎 Buscar…" oninput="searchTable('dnssec-tbody',this.value)">
+        <button class="btn-secondary small" onclick="exportJSON('dnssec')">⬇ JSON</button>
+      </div>
+      <table>
+        <thead><tr><th>Severidad</th><th>Dominio</th><th>Problema</th><th>Solución</th></tr></thead>
+        <tbody id="dnssec-tbody"></tbody>
+      </table>
+    </div>
+    <div class="empty-panel" id="dnssec-empty">
+      <div class="empty-icon">📛</div>
+      <h3>Auditoría DNS no ejecutada</h3>
+      <p>Comprueba la configuración de seguridad DNS de tus dominios (SPF/DMARC/DKIM/DNSSEC/CAA).</p>
     </div>
   </section>
 
