@@ -3,8 +3,13 @@ import pytest
 
 from cyberhound.core.models import Finding
 from cyberhound.core.scoring import (
-    ACCUMULATION_DECAY, AUTO_FIX_REDUCTION, BASE_PENALTY,
-    CATEGORY_WEIGHTS, ScoreResult, ScoringContext, compute_score,
+    ACCUMULATION_DECAY,
+    AUTO_FIX_REDUCTION,
+    BASE_PENALTY,
+    CATEGORY_WEIGHTS,
+    ScoreResult,
+    ScoringContext,
+    compute_score,
 )
 
 

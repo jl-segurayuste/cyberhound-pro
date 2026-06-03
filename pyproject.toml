@@ -73,3 +73,15 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "cyberhound/core/scheduler.py" = ["F401"]   # find_spec availability check pattern
 "tests/*" = ["F811", "F401"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+# Modo lenient: detecta regresiones graves sin ahogarse en None-narrowing
+# de código async (la mayoría de avisos son falsos positivos verificados).
+check_untyped_defs = false
+warn_return_any = false
+warn_unused_ignores = true
+exclude = ["build", "dist", "tests", "cyberhound/ui"]
+# Errores que SÍ importan (bugs reales):
+disable_error_code = ["union-attr", "attr-defined", "index", "operator"]

@@ -20,8 +20,10 @@ class TestIntelRoutes:
     def test_intel_routes_module_importable(self):
         """El módulo de rutas es importable."""
         from cyberhound.api.routes.intel_routes import (
-            register_routes, _build_intel_summary,
-            api_intel_scan, api_intel_lookup,
+            _build_intel_summary,
+            api_intel_lookup,
+            api_intel_scan,
+            register_routes,
         )
         assert callable(register_routes)
         assert callable(_build_intel_summary)
@@ -73,6 +75,7 @@ class TestIntelRoutes:
     def test_register_routes(self):
         """register_routes añade las rutas a la app."""
         from aiohttp import web
+
         from cyberhound.api.routes.intel_routes import register_routes
         app = web.Application()
         register_routes(app)

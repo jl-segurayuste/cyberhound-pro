@@ -31,7 +31,7 @@ class StructuredFormatter(logging.Formatter):
         if record.exc_info:
             entry["exc"] = self.formatException(record.exc_info)
         if hasattr(record, "extra"):
-            entry.update(record.extra)  # type: ignore[arg-type]
+            entry.update(record.extra)
         return json.dumps(entry, ensure_ascii=False)
 
 
@@ -96,7 +96,7 @@ def setup_logging(
 
     # Intentar integración con systemd journal
     try:
-        from systemd.journal import JournalHandler  # type: ignore
+        from systemd.journal import JournalHandler
         jh = JournalHandler(SYSLOG_IDENTIFIER="cyberhound")
         jh.setFormatter(StructuredFormatter())
         root.addHandler(jh)

@@ -7,9 +7,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from cyberhound.scanners.docker_image_scan import (
-    DockerImageScanner,
     EOL_DISTROS,
     SECRET_PATTERNS,
+    DockerImageScanner,
     _scan_tar,
     check_dockerfile_best_practices,
     check_eol_base_images,

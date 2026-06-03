@@ -17,13 +17,12 @@ from cyberhound.scanners.hardening import (
     check_duplicate_uid0,
     check_empty_passwords,
     check_login_banners,
+    check_ntp,
     check_openssh_version,
     check_password_policy,
     check_sticky_bit_tmp,
     check_umask,
-    check_ntp,
 )
-
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
