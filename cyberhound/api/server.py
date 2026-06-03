@@ -449,6 +449,8 @@ class CyberHoundServer:
                 await self._run_services_audit(msg, ws_id, send, log, scan_id)
             elif task == "tls":
                 await self._run_tls_scan(msg, ws_id, send, log, scan_id)
+            elif task == "web_headers":
+                await self._run_web_headers_scan(msg, ws_id, send, log, scan_id)
             else:
                 await send({"type": "error", "text": f"Tarea desconocida: {task}"})
         except Exception as e:
@@ -586,6 +588,17 @@ class CyberHoundServer:
         tgt_str = ", ".join(f"{h}:{p}" for h, p in (targets or TLSScanner.DEFAULT_TARGETS))
         await log("section", f"Escaneando TLS/SSL: {tgt_str}…")
         findings = await TLSScanner.full_scan(targets=targets)
+        await self._emit_findings(findings, ws_id, send, scan_id)
+
+    async def _run_web_headers_scan(self, params, ws_id, send, log, scan_id):
+        from cyberhound.scanners.web_headers import WebHeadersScanner
+        urls = params.get("urls") or []
+        if not urls:
+            await log("section", "No se indicaron URLs para analizar")
+            await self._emit_findings([], ws_id, send, scan_id)
+            return
+        await log("section", f"Analizando cabeceras de seguridad: {', '.join(urls)}…")
+        findings = await WebHeadersScanner.full_scan(urls=urls)
         await self._emit_findings(findings, ws_id, send, scan_id)
 
     async def _run_malware_scan(self, params, ws_id, send, log, scan_id):
