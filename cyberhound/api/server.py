@@ -453,6 +453,8 @@ class CyberHoundServer:
                 await self._run_web_headers_scan(msg, ws_id, send, log, scan_id)
             elif task == "dns":
                 await self._run_dns_scan(msg, ws_id, send, log, scan_id)
+            elif task == "web_exposure":
+                await self._run_web_exposure_scan(msg, ws_id, send, log, scan_id)
             else:
                 await send({"type": "error", "text": f"Tarea desconocida: {task}"})
         except Exception as e:
@@ -612,6 +614,17 @@ class CyberHoundServer:
             return
         await log("section", f"Analizando cabeceras de seguridad: {', '.join(urls)}…")
         findings = await WebHeadersScanner.full_scan(urls=urls)
+        await self._emit_findings(findings, ws_id, send, scan_id)
+
+    async def _run_web_exposure_scan(self, params, ws_id, send, log, scan_id):
+        from cyberhound.scanners.web_exposure import WebExposureScanner
+        urls = params.get("urls") or []
+        if not urls:
+            await log("section", "No se indicaron URLs para analizar")
+            await self._emit_findings([], ws_id, send, scan_id)
+            return
+        await log("section", f"Analizando exposición web: {', '.join(urls)}…")
+        findings = await WebExposureScanner.full_scan(urls=urls)
         await self._emit_findings(findings, ws_id, send, scan_id)
 
     async def _run_malware_scan(self, params, ws_id, send, log, scan_id):

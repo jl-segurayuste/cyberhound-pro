@@ -1636,6 +1636,48 @@ function runWebHeadersScan() {
   }, 'Cabeceras de seguridad web', '🌐');
 }
 
+function runWebExposureScan() {
+  S.findings.webexp = [];
+  document.getElementById('webexp-results').style.display = 'none';
+  document.getElementById('webexp-empty').style.display = '';
+  document.getElementById('webexp-tbody').innerHTML = '';
+
+  const raw = (document.getElementById('webexp-urls').value || '').trim();
+  const urls = raw ? raw.split('\n').map(s => s.trim()).filter(Boolean) : [];
+  if (!urls.length) { toast('Introduce al menos una URL'); return; }
+  btn('btn-webexp', true, '⏳ Analizando…');
+
+  wsRunWithActivity('web_exposure', { urls }, {
+    onFinding(f) {
+      S.findings.webexp.push(f);
+      const tbody = document.getElementById('webexp-tbody');
+      const tr = document.createElement('tr');
+      tr.dataset.sev = f.severity;
+      tr.onclick = () => openDrawer(f);
+      tr.innerHTML = `
+        <td>${sevBadge(f.severity)}</td>
+        <td style="font-size:.8rem">🕵️ ${esc(f.source_host || '—')}</td>
+        <td><b>${esc(f.title)}</b></td>
+        <td style="font-size:.78rem;color:var(--text2)">${esc((f.remediation||'').substring(0,70))}</td>`;
+      tbody.appendChild(tr);
+    },
+    onDone() {
+      btn('btn-webexp', false, '▶ Analizar exposición');
+      if (S.findings.webexp.length) {
+        document.getElementById('webexp-results').style.display = '';
+        document.getElementById('webexp-empty').style.display = 'none';
+        renderSummary('webexp-summary-bar', S.findings.webexp);
+      } else {
+        const h3 = document.querySelector('#webexp-empty h3');
+        const p  = document.querySelector('#webexp-empty p');
+        if (h3) h3.textContent = '✅ Sin exposiciones detectadas';
+        if (p)  p.textContent  = 'No se encontraron recursos sensibles accesibles públicamente.';
+      }
+    },
+    onError() { btn('btn-webexp', false, '▶ Analizar exposición'); },
+  }, 'Exposición de recursos web', '🕵️');
+}
+
 function runDNSScan() {
   S.findings.dnssec = [];
   document.getElementById('dnssec-results').style.display = 'none';
