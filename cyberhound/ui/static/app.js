@@ -1762,6 +1762,48 @@ function runDNSScan() {
   }, 'Seguridad DNS', '📛');
 }
 
+function runSubdomainScan() {
+  S.findings.subenum = [];
+  document.getElementById('subenum-results').style.display = 'none';
+  document.getElementById('subenum-empty').style.display = '';
+  document.getElementById('subenum-tbody').innerHTML = '';
+
+  const raw = (document.getElementById('subenum-domains').value || '').trim();
+  const domains = raw ? raw.split('\n').map(s => s.trim()).filter(Boolean) : [];
+  if (!domains.length) { toast('Introduce al menos un dominio'); return; }
+  btn('btn-subenum', true, '⏳ Enumerando…');
+
+  wsRunWithActivity('subdomain_enum', { domains }, {
+    onFinding(f) {
+      S.findings.subenum.push(f);
+      const tbody = document.getElementById('subenum-tbody');
+      const tr = document.createElement('tr');
+      tr.dataset.sev = f.severity;
+      tr.onclick = () => openDrawer(f);
+      tr.innerHTML = `
+        <td>${sevBadge(f.severity)}</td>
+        <td style="font-size:.8rem">🌐 ${esc(f.source_host || '—')}</td>
+        <td><b>${esc(f.title)}</b></td>
+        <td style="font-size:.78rem;color:var(--text2)">${esc((f.evidence||'').substring(0,70))}</td>`;
+      tbody.appendChild(tr);
+    },
+    onDone() {
+      btn('btn-subenum', false, '▶ Enumerar subdominios');
+      if (S.findings.subenum.length) {
+        document.getElementById('subenum-results').style.display = '';
+        document.getElementById('subenum-empty').style.display = 'none';
+        renderSummary('subenum-summary-bar', S.findings.subenum);
+      } else {
+        const h3 = document.querySelector('#subenum-empty h3');
+        const p  = document.querySelector('#subenum-empty p');
+        if (h3) h3.textContent = 'Sin subdominios en CT logs';
+        if (p)  p.textContent  = 'No se encontraron subdominios publicados (o crt.sh no respondió).';
+      }
+    },
+    onError() { btn('btn-subenum', false, '▶ Enumerar subdominios'); },
+  }, 'Enumeración de subdominios', '🌐');
+}
+
 // ── 2FA ───────────────────────────────────────────────────────────────────────
 async function load2FAStatus() {
   try {
