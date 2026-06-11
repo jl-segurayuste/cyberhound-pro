@@ -43,6 +43,7 @@
     <button class="nav-tab" data-panel="apisec"    onclick="showPanel('apisec')">🔌 API / CORS</button>
     <button class="nav-tab" data-panel="dnssec"    onclick="showPanel('dnssec')">📛 DNS Security</button>
     <button class="nav-tab" data-panel="subenum"   onclick="showPanel('subenum')">🌐 Subdominios</button>
+    <button class="nav-tab" data-panel="nuclei"    onclick="showPanel('nuclei')">☢️ Nuclei</button>
     <button class="nav-tab" data-panel="intel"    onclick="showPanel('intel')">🌐 Intel</button>
     <button class="nav-tab" data-panel="history"   onclick="showPanel('history')">📅 Historial</button>
     <button class="nav-tab" data-panel="monitor"   onclick="showPanel('monitor')">👁 Monitor</button>
@@ -607,6 +608,40 @@
       <div class="empty-icon">🌐</div>
       <h3>Enumeración no ejecutada</h3>
       <p>Introduce tus dominios para descubrir qué subdominios tienes publicados.</p>
+    </div>
+  </section>
+
+
+  <section class="panel" id="panel-nuclei">
+    <div class="page-header"><h1>☢️ Nuclei (motor de plantillas)</h1>
+      <p>Escaneo con las plantillas open-source de Nuclei (ProjectDiscovery): CVEs, configuraciones inseguras y exposiciones. Requiere el binario <code>nuclei</code> instalado en el servidor.</p>
+    </div>
+    <div class="config-bar">
+      <div class="field">
+        <label>URLs a escanear (una por línea)</label>
+        <textarea id="nuclei-urls" rows="3" placeholder="https://midominio.com&#10;https://app.midominio.com"></textarea>
+      </div>
+      <button class="btn-primary" id="btn-nuclei" onclick="runNucleiScan()">▶ Ejecutar Nuclei</button>
+    </div>
+    <div id="nuclei-results" style="display:none">
+      <div id="nuclei-summary-bar"></div>
+      <div class="toolbar">
+        <button class="filter active" onclick="filterTable('nuclei','all',this)">Todos</button>
+        <button class="filter" data-sev="critical" onclick="filterTable('nuclei','critical',this)">Críticas</button>
+        <button class="filter" data-sev="high" onclick="filterTable('nuclei','high',this)">Altas</button>
+        <button class="filter" data-sev="medium" onclick="filterTable('nuclei','medium',this)">Medias</button>
+        <input type="text" placeholder="🔎 Buscar…" oninput="searchTable('nuclei-tbody',this.value)">
+        <button class="btn-secondary small" onclick="exportJSON('nuclei')">⬇ JSON</button>
+      </div>
+      <table>
+        <thead><tr><th>Severidad</th><th>Host</th><th>Hallazgo</th><th>Detalle</th></tr></thead>
+        <tbody id="nuclei-tbody"></tbody>
+      </table>
+    </div>
+    <div class="empty-panel" id="nuclei-empty">
+      <div class="empty-icon">☢️</div>
+      <h3>Nuclei no ejecutado</h3>
+      <p>Introduce URLs para escanearlas con las plantillas de Nuclei.</p>
     </div>
   </section>
 
