@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import secrets
 import time
 from datetime import datetime
 from pathlib import Path
@@ -145,6 +146,12 @@ def _requires_role(*roles: str):
 
 @web.middleware
 async def security_headers_middleware(request: web.Request, handler):
+    # Nonce por petición: los <script> inline llevan este nonce, de modo que un
+    # <script> inyectado (sin nonce) queda bloqueado por la CSP. Los manejadores
+    # de eventos inline (onclick…) siguen permitidos vía script-src-attr
+    # (endurecimiento futuro: eliminarlos y quitar también 'unsafe-inline' ahí).
+    nonce = secrets.token_urlsafe(16)
+    request["csp_nonce"] = nonce
     response = await handler(request)
     response.headers.update({
         "X-Content-Type-Options":  "nosniff",
@@ -153,7 +160,8 @@ async def security_headers_middleware(request: web.Request, handler):
         "Referrer-Policy":         "strict-origin-when-cross-origin",
         "Cache-Control":           "no-store",
         "Content-Security-Policy": (
-            "default-src 'self'; script-src 'self' 'unsafe-inline'; "
+            f"default-src 'self'; script-src 'self' 'nonce-{nonce}'; "
+            "script-src-attr 'unsafe-inline'; "
             "style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
             "connect-src 'self' ws: wss:;"
         ),
@@ -389,7 +397,11 @@ class CyberHoundServer:
     async def serve_spa(self, request: web.Request) -> web.Response:
         spa_path = Path(__file__).parent.parent / "ui" / "static" / "index.html"
         if spa_path.exists():
-            return web.Response(text=spa_path.read_text(encoding="utf-8"), content_type="text/html")
+            html = spa_path.read_text(encoding="utf-8")
+            nonce = request.get("csp_nonce", "")
+            # Solo los <script> inline (no los <script src=...>) reciben el nonce.
+            html = html.replace("<script>", f'<script nonce="{nonce}">')
+            return web.Response(text=html, content_type="text/html")
         return web.Response(text="<h1>UI no encontrada</h1>", content_type="text/html")
 
     # ── WebSocket ─────────────────────────────────────────────────────────────
@@ -1212,7 +1224,9 @@ class CyberHoundServer:
 
     async def api_swagger_ui(self, request: web.Request) -> web.Response:
         from cyberhound.core.openapi import SWAGGER_UI_HTML
-        return web.Response(text=SWAGGER_UI_HTML, content_type="text/html")
+        nonce = request.get("csp_nonce", "")
+        html = SWAGGER_UI_HTML.replace("<script>", f'<script nonce="{nonce}">')
+        return web.Response(text=html, content_type="text/html")
 
     # ── Ansible AWX/Tower ─────────────────────────────────────────────────────
 
