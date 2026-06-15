@@ -52,3 +52,23 @@ desplegados en caliente al contenedor con `docker cp` + `docker restart`
 del contenedor hay que **reconstruir la imagen** `cyberhound-pro` y recrear el
 contenedor con la **misma** config de compose/Caddy → el dominio interno sigue
 igual. (Recomendado coordinarlo por la sensibilidad del acceso.)
+
+## 6. QA exhaustivo del frontend (addendum)
+
+Los tests de `pytest` son de backend y no cubrían el render del front; eso dejó
+pasar varios bugs **funcionales** (funciones JS invocadas pero inexistentes). Se
+hizo una auditoría completa (navegador headless: toda función de handler +
+navegación de los 20 paneles y 14 pestañas de config; análisis estático de
+llamadas; simulación de los 12 scanners) y se corrigieron:
+
+| Bug (pre-existente) | Efecto | Fix |
+|---|---|---|
+| `renderSummary`/`appendAuditRow` sin prefijo `_`; falta `_appendMalwareRow` | Los hallazgos no se mostraban en el panel, solo en el feed de actividad | Llamadas corregidas a `_renderSummary`/`_appendAuditRow` + se crea `_appendMalwareRow` |
+| `loadSuppresions` (typo) | Panel de Supresiones y carga de Configuración fallaban | Nombre unificado a `loadSuppressions` |
+| `saveAgentConfig` inexistente (sin endpoint) | El botón "Guardar" del modo agente no hacía nada | Endpoint `GET/POST /api/config/agent` (la clave nunca se devuelve) + funciones front + 4 tests |
+| `id` duplicado `history-trend-wrap`/`-chart` | DOM inválido (markup muerto) | Bloque duplicado eliminado |
+
+**Red de seguridad permanente:** `tests/test_frontend_integrity.py` comprueba en
+la suite normal que toda función de handler existe, que no hay desajuste
+`_func`/`func`, que no hay ids duplicados y que los cargadores `load*` existen —
+habría cazado todos estos bugs. Estado: **suite 568 verde, ruff limpio**.
