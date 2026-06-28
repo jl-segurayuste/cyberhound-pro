@@ -347,6 +347,10 @@ class CyberHoundServer:
         # ── Runtime container scan ────────────────────────────────────────────────
         app.router.add_post("/api/scan/runtime",       self.api_runtime_scan)
 
+        # ── Importación de auditorías externas ──────────────────────────────────────
+        app.router.add_post("/api/import/audit",      self.api_import_audit)
+        app.router.add_get ("/api/import/formats",    self.api_import_formats)
+
         # ── Docker image deep scan ───────────────────────────────────────────────
         app.router.add_post("/api/scan/docker-image",   self.api_docker_image_scan)
 
@@ -1249,6 +1253,125 @@ class CyberHoundServer:
             })
         except Exception as e:
             logger.error("api_runtime_scan: %s", e, exc_info=True)
+            return web.json_response({"error": str(e)}, status=500)
+
+    # ── Importación de auditorías externas ───────────────────────────────────
+
+    async def api_import_formats(self, request: web.Request) -> web.Response:
+        """GET /api/import/formats — formatos soportados y sus descripciones."""
+        return web.json_response({
+            "formats": [
+                {
+                    "id":          "nessus",
+                    "name":        "Tenable Nessus (.nessus)",
+                    "description": "Exportación XML de Tenable Nessus, Tenable.io o Tenable.sc",
+                    "extensions":  [".nessus", ".xml"],
+                    "type":        "vulnerability",
+                },
+                {
+                    "id":          "xccdf",
+                    "name":        "OpenSCAP / XCCDF (.xml)",
+                    "description": "Resultados XCCDF de oscap, Red Hat Satellite, Ansible Security. "
+                                   "Compatible con perfiles CIS y STIG para RHEL 7/8/9.",
+                    "extensions":  [".xml"],
+                    "type":        "compliance",
+                },
+                {
+                    "id":          "csv",
+                    "name":        "CSV genérico",
+                    "description": "Exportaciones CSV de Tenable, Qualys, OpenVAS o cualquier herramienta.",
+                    "extensions":  [".csv"],
+                    "type":        "vulnerability",
+                },
+                {
+                    "id":          "json",
+                    "name":        "JSON (CyberHound o genérico)",
+                    "description": "Formato JSON propio de CyberHound o lista de findings.",
+                    "extensions":  [".json"],
+                    "type":        "generic",
+                },
+            ],
+            "note": "CyberHound distingue entre hallazgos de CUMPLIMIENTO (compliance/*, "
+                    "procedentes de XCCDF/CIS/STIG) y VULNERABILIDADES (vulnerability/*, "
+                    "procedentes de Nessus/CVE). Ambos tipos se pueden ver por separado en la UI.",
+        })
+
+    async def api_import_audit(self, request: web.Request) -> web.Response:
+        """
+        POST /api/import/audit — importa un fichero de auditoría externo.
+
+        Acepta multipart/form-data con:
+          - file: el fichero de auditoría
+          - format: (opcional) forzar formato ("nessus", "xccdf", "csv", "json")
+          - scan_type: (opcional) tipo de scan a crear (default: "imported")
+          - target: (opcional) objetivo/host del scan
+        """
+        try:
+            reader = await request.multipart()
+            content = b""
+            filename = ""
+            fmt = None
+            scan_type = "imported"
+            target = "imported"
+
+            async for part in reader:
+                if part.name == "file":
+                    filename = part.filename or "upload"
+                    content = await part.read(decode=True)
+                elif part.name == "format":
+                    fmt = (await part.read(decode=True)).decode().strip()
+                elif part.name == "scan_type":
+                    scan_type = (await part.read(decode=True)).decode().strip()
+                elif part.name == "target":
+                    target = (await part.read(decode=True)).decode().strip()
+
+            if not content:
+                return web.json_response(
+                    {"error": "No se recibió ningún fichero. Envía 'file' como campo multipart."},
+                    status=400,
+                )
+
+            from cyberhound.scanners.audit_import import import_audit_file
+            result = import_audit_file(content, filename, fmt or None)
+
+            if result.errors and not result.findings:
+                return web.json_response(
+                    {"error": result.errors[0], "all_errors": result.errors},
+                    status=400,
+                )
+
+            # Guardar en la BD como un scan de tipo "imported" / "xccdf" / "nessus"
+            actual_scan_type = result.source if result.source != "unknown" else scan_type
+            scan_id = await self.db.create_scan(
+                actual_scan_type, target=target or filename,
+                triggered_by="import",
+            )
+            filtered = await self.db.filter_suppressed(result.findings)
+            await self.db.complete_scan(scan_id, filtered)
+
+            logger.info(
+                "Auditoría importada: %s → scan_id=%d, %d findings (%d skipped)",
+                filename, scan_id, result.imported, result.skipped,
+            )
+
+            return web.json_response({
+                "scan_id":   scan_id,
+                "source":    result.source,
+                "filename":  filename,
+                "imported":  result.imported,
+                "skipped":   result.skipped,
+                "total":     result.total,
+                "errors":    result.errors,
+                "metadata":  result.metadata,
+                "findings":  [f.to_dict() for f in filtered[:50]],  # preview
+                "note": (
+                    "Los hallazgos de tipo 'compliance/*' son checks de bastionado/cumplimiento. "
+                    "Los de 'vulnerability/*' son vulnerabilidades CVE/CVSSv3."
+                ),
+            })
+
+        except Exception as e:
+            logger.error("api_import_audit: %s", e, exc_info=True)
             return web.json_response({"error": str(e)}, status=500)
 
     # ── Docker image deep scan ────────────────────────────────────────────────
