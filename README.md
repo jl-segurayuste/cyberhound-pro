@@ -442,28 +442,51 @@ pytest tests/ --cov=cyberhound --cov-report=term-missing
 
 ---
 
-## Roadmap — Pendiente
+## Roadmap
 
-### Alta prioridad
-- [ ] **Análisis de servicios específicos** — nginx, apache, mysql, postgresql (checks de configuración)
-- [ ] **Sistema de licencias** para comercialización (JWT firmado con fecha de expiración y límite de hosts)
-- [ ] **2FA/TOTP** — segundo factor de autenticación opcional
-- [ ] **Historial visual** — gráfico de tendencia interactivo en el panel de historial
+### ✅ Implementado en v6.3 — Funcionalidades completas
 
-### Media prioridad
-- [ ] **Integración Wazuh nativa** — envío activo + reglas de decodificación custom
-- [ ] **Análisis de AD/LDAP** — usuarios sin contraseña, cuentas inactivas, permisos excesivos
-- [ ] **Actualización automática de reglas YARA** desde repositorios públicos
-- [ ] **Modo agente** — despliegue en múltiples servidores con reporting central
-- [ ] **Notificaciones push** — WebSocket notificaciones al navegador sin polling
+| Área | Módulo | Detalle |
+|------|--------|---------|
+| Auditoría | `hardening.py` | 26 checks + corrección automática |
+| Red | `network.py` | nmap, OS detection, CVEs en red |
+| SSH | `ssh_audit.py` | audit remoto paralelo, SFTP |
+| Malware | `malware.py` | YARA streaming O(1), VT, webshells |
+| Docker | `docker_scan.py` | 7 checks de configuración |
+| Kubernetes | `kubernetes_scan.py` | 11 checks via kubectl |
+| Docker image | `docker_image_scan.py` | Secretos en capas, SUID, EOL |
+| Runtime | `runtime_scan.py` | Procesos, diff, red, CPU en vivo |
+| Servicios | `services_audit.py` | nginx, apache, mysql, pg, redis, mongodb |
+| Código | `code.py` | bandit, shellcheck, eslint, secretos |
+| Intel | `intel.py` | Shodan, VT, AbuseIPDB, GreyNoise, HIBP |
+| LDAP/AD | `ldap_audit.py` | 6 checks: AS-REP, domain admins, policy |
+| Scoring | `scoring.py` | 5 factores, grades A-F, exposición |
+| PDF | `pdf_report.py` | fpdf2 + compliance ENS/ISO en el informe |
+| Compliance | `compliance.py` | ENS, ISO 27001, PCI-DSS, CIS Controls v8 |
+| SBOM | `sbom.py` | CycloneDX 1.4, SPDX 2.3, diff entre scans |
+| Cuarentena | `quarantine.py` | XOR + restore con verificación SHA-256 |
+| Monitor | `ebpf_monitor.py` | eBPF/auditd: 12 patrones, 14 ficheros |
+| 2FA | `totp.py` | TOTP RFC 6238, recovery codes |
+| Licencias | `licensing.py` | community/starter/professional/enterprise |
+| Agentes | `agent.py` | Multi-servidor con heartbeat |
+| Multi-tenant | `multitenancy.py` | TenantStore, middleware, API key por tenant |
+| OpenAPI | `openapi.py` | Spec 3.0.3 + Swagger UI en /api/docs |
+| Ansible | `ansible_integration.py` | Playbooks auto + AWX/Tower API |
+| BD | `database.py` + `database_pg.py` | SQLite WAL + PostgreSQL asyncpg |
+| SIEM | `siem.py` + `wazuh/` | Wazuh (decoders+reglas), ELK, Splunk |
+| Push | WS `/ws/push` | Notificaciones en tiempo real sin polling |
+| CSS | `style.css` | Responsive mobile/tablet/print |
+| Tests | `tests/` | **355 tests pytest** |
 
-### Mejoras técnicas
-- [ ] **Streaming con generators** para YARA y world-writable en servidores con millones de ficheros
-- [ ] **PostgreSQL** como alternativa a SQLite para despliegues multi-instancia
-- [ ] **eBPF monitoring** — detección de comportamiento malicioso en tiempo real sin auditd
-- [ ] **SBOM** — Software Bill of Materials para cumplimiento normativo
+### 🔜 Ideas para futuras versiones
 
----
+- **Compliance en tiempo real** — alertas cuando un check baja el score de un marco normativo
+- **Integración con ticketing** — Jira/ServiceNow automático desde hallazgos críticos
+- **ML scoring** — modelo entrenado con datos históricos para priorización más inteligente
+- **App móvil nativa** — iOS/Android con notificaciones push reales
+- **Marketplace de reglas YARA** — repositorio centralizado con actualización automática
+- **Exportación a Elastic Security** — timeline de incidentes y correlation rules
+
 
 ## Licencia
 
