@@ -13,6 +13,7 @@
 ## Índice
 
 - [¿Qué hace?](#qué-hace)
+- [Requisitos](#requisitos)
 - [Instalación rápida](#instalación-rápida)
 - [Funcionalidades](#funcionalidades)
 - [Arquitectura](#arquitectura)
@@ -43,6 +44,33 @@ CyberHound Pro es una herramienta todo-en-uno de ciberseguridad orientada a ento
 | **📊 Scoring** | Score contextual 0-100 con factor de exposición |
 | **📡 Monitoreo** | Panel de actividad en tiempo real, alertas automáticas |
 | **🛡 SIEM** | Wazuh, Elasticsearch, Splunk HEC |
+
+---
+
+## Requisitos
+
+### Sistema
+- **SO**: Linux x86_64 (Ubuntu 22.04/24.04, Debian 12/13, RHEL/Rocky/Alma 9+).
+- **Python**: 3.12+ (solo para instalación manual; con Docker no hace falta).
+- **Privilegios**: varios scanners y los auto-fixes requieren `root`/`sudo`
+  (nmap OS detection, `auditd`, monitor eBPF, remediaciones de hardening). La
+  interfaz web puede ejecutarse sin root.
+- **Red**: salida a internet para feeds opcionales (CVEs, plantillas de Nuclei,
+  threat intelligence). Funciona en entornos aislados con cobertura reducida.
+
+### Hardware
+
+| | Mínimo | Recomendado |
+|---|---|---|
+| **CPU** | 2 vCPU | 4+ vCPU |
+| **RAM** | 2 GB | 8 GB |
+| **Disco** | 3 GB | 15+ GB SSD |
+
+- Base (app + BD SQLite + logs): ~1 GB.
+- **Plantillas de Nuclei**: ~1,5 GB adicionales (si usas ese scanner).
+- El escaneo de **malware (YARA sobre el sistema de ficheros)** y **Nuclei** con
+  todas las plantillas son lo que más CPU/RAM consume; sube recursos si los usas
+  de forma intensiva. Para un homelab/PYME pequeña, 2 vCPU / 4 GB / 10 GB sobran.
 
 ---
 
@@ -432,6 +460,7 @@ pytest tests/ --cov=cyberhound --cov-report=term-missing
 | Herramienta | Para qué | Instalación |
 |-------------|---------|-------------|
 | `nmap` | Network scan, OS detection, CVEs | `sudo apt install nmap` |
+| `nuclei` | Scanner por plantillas (CVEs, exposiciones) | [github.com/projectdiscovery/nuclei](https://github.com/projectdiscovery/nuclei/releases) + `nuclei -update-templates` |
 | `arp-scan` | Descubrimiento LAN | `sudo apt install arp-scan` |
 | `kubectl` | Kubernetes scan | [kubernetes.io/docs](https://kubernetes.io/docs/tasks/tools/) |
 | `trivy` | CVEs en imágenes Docker | [aquasecurity.github.io](https://aquasecurity.github.io/trivy/) |
