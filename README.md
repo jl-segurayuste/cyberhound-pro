@@ -5,7 +5,7 @@
 > Analiza tu red, servidores, contenedores y código. Detecta vulnerabilidades, malware y configuraciones inseguras. Corrige automáticamente. Monitoriza en tiempo real.
 
 [![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://python.org)
-[![Tests](https://img.shields.io/badge/tests-501%20passed-green.svg)](#tests)
+[![Tests](https://img.shields.io/badge/tests-505%20passed-green.svg)](#tests)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 ---
