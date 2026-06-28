@@ -262,6 +262,23 @@ def setup_auth_routes(app: web.Application, cfg: AuthConfig) -> None:
 
         # ── Login exitoso ──────────────────────────────────────────────────
         await _login_rate_limiter.record_success(ip)
+
+        # Rehash transparente: si el hash almacenado es del formato antiguo
+        # (SHA-256 sin sal), se migra a PBKDF2 ahora que tenemos la contraseña en
+        # claro. Best-effort: un fallo de persistencia NUNCA debe romper el login.
+        if passwords.needs_rehash(cfg.password_hash or ""):
+            try:
+                new_hash = passwords.hash_password(password)
+                cfg.password_hash = new_hash
+                server = request.app.get("server")
+                full_cfg = getattr(server, "cfg", None)
+                if full_cfg is not None and hasattr(full_cfg, "save"):
+                    full_cfg.auth.password_hash = new_hash
+                    full_cfg.save()
+                logger.info("Hash de contraseña migrado a PBKDF2 para '%s'", username)
+            except Exception as e:  # noqa: BLE001 — nunca romper el login por esto
+                logger.warning("No se pudo migrar el hash de contraseña: %s", e)
+
         token = cfg.issue_jwt(username)
         audit_log.auth_success(ip, username)
 
