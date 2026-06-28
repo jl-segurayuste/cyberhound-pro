@@ -536,3 +536,211 @@ body.activity-open #main { margin-right:320px; }
 
 /* ── PARALLEL SCANS ── */
 #parallel-scans { padding:0 0 16px; }
+
+/* ═══════════════════════════════════════════════════════════════
+   RESPONSIVE — Mobile & Tablet
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── Tablets (≤ 900px) ──────────────────────────────────────── */
+@media (max-width: 900px) {
+  #topbar {
+    padding: 0 12px;
+    gap: 8px;
+  }
+  .top-nav {
+    gap: 2px;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    scrollbar-width: none;
+  }
+  .top-nav::-webkit-scrollbar { display: none; }
+  .nav-tab {
+    font-size: .72rem;
+    padding: 5px 8px;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  #main {
+    padding: 12px;
+  }
+  .dash-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+  .settings-grid {
+    grid-template-columns: 1fr;
+  }
+  #activity-panel {
+    width: 280px;
+  }
+  body.activity-open #main {
+    margin-right: 280px;
+  }
+}
+
+/* ── Móvil (≤ 600px) ─────────────────────────────────────────── */
+@media (max-width: 600px) {
+  #topbar {
+    height: auto;
+    min-height: 48px;
+    flex-wrap: wrap;
+    padding: 8px 12px;
+    gap: 6px;
+  }
+
+  .logo { order: 1; }
+  #log-toggle { order: 2; margin-left: auto; }
+  .logout-btn { order: 3; }
+  #status-area { order: 4; width: 100%; font-size: .75rem; }
+
+  .top-nav {
+    order: 5;
+    width: 100%;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    border-top: 1px solid var(--border);
+    padding-top: 6px;
+    margin-top: 2px;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .top-nav::-webkit-scrollbar { display: none; }
+  .nav-tab {
+    font-size: .7rem;
+    padding: 5px 8px;
+    white-space: nowrap;
+  }
+
+  #main {
+    padding: 10px;
+    margin-top: 0;
+  }
+
+  .page-header h1 { font-size: 1.1rem; }
+  .page-header p  { font-size: .82rem; }
+
+  .dash-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .dash-card.wide {
+    grid-column: 1;
+  }
+
+  .counters {
+    gap: 8px;
+  }
+  .counter span {
+    font-size: 1.3rem;
+  }
+
+  /* Tablas — scroll horizontal */
+  .table-area, table {
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Config tabs — scroll horizontal */
+  .cfg-tabs-row {
+    display: flex;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    gap: 2px;
+    scrollbar-width: none;
+  }
+  .cfg-tab {
+    white-space: nowrap;
+    font-size: .72rem;
+    padding: 6px 10px;
+  }
+
+  /* Config grid — columna única */
+  .settings-grid { grid-template-columns: 1fr; }
+  .field-group   { flex-direction: column; }
+
+  /* Formularios — full width */
+  input[type=text], input[type=password], input[type=number],
+  input[type=email], select, textarea {
+    width: 100% !important;
+  }
+
+  /* Panel de actividad — pantalla completa en móvil */
+  #activity-panel {
+    width: 100%;
+    top: auto;
+    bottom: 0;
+    height: 50vh;
+    border-left: none;
+    border-top: 2px solid var(--border);
+    transform: translateY(100%);
+  }
+  #activity-panel.open { transform: translateY(0); }
+
+  #activity-panel-toggle {
+    top: auto;
+    bottom: 0;
+    right: 16px;
+    transform: none;
+    writing-mode: horizontal-tb;
+    border-radius: 6px 6px 0 0;
+    padding: 5px 10px;
+    font-size: .75rem;
+  }
+  body.activity-open #main {
+    margin-right: 0;
+    margin-bottom: 50vh;
+  }
+
+  /* Drawer — ancho completo en móvil */
+  #drawer {
+    width: 100%;
+    right: 0;
+  }
+
+  /* Score card — compacta */
+  .score-card { flex-direction: column; gap: 8px; }
+  .score-circle { width: 70px; height: 70px; }
+  #score-num { font-size: 1.5rem; }
+
+  /* Botones de acción */
+  .quick-actions { grid-template-columns: 1fr 1fr; }
+  .quick-btn { padding: 10px 8px; font-size: .8rem; }
+
+  /* Historial */
+  #history-table th:nth-child(6),
+  #history-table td:nth-child(6),
+  #history-table th:nth-child(7),
+  #history-table td:nth-child(7) { display: none; }
+
+  /* SBOM — ocultar columnas en móvil */
+  #sbom-tbody td:nth-child(4) { display: none; }
+
+  /* Toast — ancho completo */
+  #toast {
+    left: 12px;
+    right: 12px;
+    bottom: 12px;
+    max-width: none;
+    text-align: center;
+  }
+}
+
+/* ── Modo oscuro forzado (por si el OS tiene light mode) ─────── */
+@media (prefers-color-scheme: light) {
+  /* CyberHound siempre es dark — ignorar preferencia del OS */
+  :root {
+    color-scheme: dark;
+  }
+}
+
+/* ── Print ────────────────────────────────────────────────────── */
+@media print {
+  #topbar, #log-toggle, #log-overlay,
+  #toast, #drawer-backdrop, #activity-panel,
+  #activity-panel-toggle, .no-print { display: none !important; }
+  body { background: white; color: black; }
+  #main { padding: 0; margin: 0; }
+  .panel.active { display: block; }
+  table { border-collapse: collapse; }
+  td, th { border: 1px solid #ddd; }
+}
