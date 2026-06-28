@@ -59,13 +59,29 @@ def generate_pdf(
         return _generate_with_fpdf2(findings, target, scan_type, score, licensee,
                                     include_compliance)
     except ImportError:
-        logger.warning("fpdf2 no disponible — usando HTML como fallback")
+        logger.warning("fpdf2 no disponible - usando HTML como fallback")
         return _generate_html_fallback(findings, target, scan_type, score, licensee,
                                        include_compliance)
     except Exception as e:
-        logger.error("Error generando PDF con fpdf2: %s", e, exc_info=True)
+        logger.warning("fpdf2 fallo (%s) - usando HTML como fallback", type(e).__name__)
         return _generate_html_fallback(findings, target, scan_type, score, licensee,
                                        include_compliance)
+
+
+def _sanitize_pdf(text: str) -> str:
+    """Elimina/reemplaza caracteres no soportados por las fuentes core de fpdf2 (latin-1)."""
+    replacements = {
+        '—': '-',   # em dash
+        '–': '-',   # en dash
+        '…': '...',  # ellipsis
+        '→': '->',  # flecha derecha
+        'é': 'e',   # é (ya en latin-1 pero por si acaso)
+    }
+    result = text
+    for char, repl in replacements.items():
+        result = result.replace(char, repl)
+    # Eliminar cualquier otro carácter fuera de latin-1
+    return result.encode('latin-1', errors='replace').decode('latin-1')
 
 
 def _generate_with_fpdf2(
@@ -287,7 +303,7 @@ def _generate_with_fpdf2(
                                  new_x=XPos.LMARGIN, new_y=YPos.NEXT)
                     if res.failed > 5:
                         pdf.set_text_color(139, 148, 158)
-                        pdf.cell(0, 4, f"  … y {res.failed-5} más",
+                        pdf.cell(0, 4, f"  ... y {res.failed-5} mas",
                                  new_x=XPos.LMARGIN, new_y=YPos.NEXT)
                 pdf.ln(4)
         except Exception as e:
@@ -298,7 +314,7 @@ def _generate_with_fpdf2(
     pdf.set_font("Helvetica", "", 7)
     pdf.set_text_color(139, 148, 158)
     pdf.cell(0, 5,
-             f"CyberHound Pro — Informe confidencial — {now.strftime('%d/%m/%Y')} — {licensee}",
+             f"CyberHound Pro - Informe confidencial - {_sanitize_pdf(now.strftime(chr(37)+'d/'+chr(37)+'m/'+chr(37)+'Y'))} - {_sanitize_pdf(licensee)}",
              align="C")
 
     return pdf.output()
