@@ -1,16 +1,18 @@
 """
-Servidor web de CyberHound con:
-- Autenticación JWT en todas las rutas
-- Rate limiting en /login
-- Validación de todos los inputs WebSocket
-- CSRF protection en formularios
-- TLS automático (auto-signed o Let's Encrypt)
-- Headers de seguridad en todas las respuestas
-- Logging estructurado de cada petición
+Servidor web de CyberHound Pro v6.1
+====================================
+Integra:
+- Base de datos SQLite (histórico, inventario, usuarios, supresiones)
+- Scheduler de auditorías automáticas
+- Notificaciones email/webhook
+- WebSocket streaming con persistencia automática
+- Gestión de múltiples usuarios con roles
+- Endpoints REST completos
 """
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import re
 import time
@@ -21,133 +23,184 @@ from aiohttp import web
 
 from cyberhound.core.auth import AuthConfig, auth_middleware, setup_auth_routes
 from cyberhound.core.config import CyberHoundConfig
+from cyberhound.core.database import AssetRecord, Database, UserRecord
 from cyberhound.core.logging import audit_log, get_logger
-from cyberhound.core.models import Finding, HostResult, ScanReport
+from cyberhound.core.models import Finding, ScanReport
+from cyberhound.core.notifications import NotificationConfig, NotificationManager
+from cyberhound.core.scheduler import Scheduler, build_scheduler
 from cyberhound.core.security import (
-    CsrfProtection, InputValidator, RateLimiter,
-    TLSManager, ValidationError, _get_real_ip,
+    CsrfProtection, InputValidator, TLSManager, ValidationError, _get_real_ip,
 )
 
 logger = get_logger("api")
 
+# Roles y sus permisos
+ROLE_PERMISSIONS = {
+    "admin":    {"scan", "fix", "config", "users", "view"},
+    "operator": {"scan", "fix", "view"},
+    "viewer":   {"view"},
+}
+
+
+def _requires_role(*roles: str):
+    """Decorator para proteger endpoints por rol."""
+    def decorator(handler):
+        async def wrapper(self, request: web.Request) -> web.Response:
+            user = request.get("auth_user", "")
+            db_user = await self.db.get_user(user) if user else None
+            role = db_user["role"] if db_user else "viewer"
+            required = set(roles)
+            allowed = ROLE_PERMISSIONS.get(role, set())
+            if not required.issubset(allowed):
+                return web.json_response(
+                    {"error": f"Permiso denegado. Rol requerido: {roles}"},
+                    status=403,
+                )
+            request["user_role"] = role
+            return await handler(self, request)
+        return wrapper
+    return decorator
+
+
+# ── Middlewares ───────────────────────────────────────────────────────────────
 
 @web.middleware
 async def security_headers_middleware(request: web.Request, handler):
-    """Añade headers de seguridad HTTP a todas las respuestas."""
     response = await handler(request)
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "DENY"
-    response.headers["X-XSS-Protection"] = "1; mode=block"
-    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    response.headers["Cache-Control"] = "no-store"
-    # CSP restrictivo — solo permite recursos locales
-    response.headers["Content-Security-Policy"] = (
-        "default-src 'self'; "
-        "script-src 'self' 'unsafe-inline'; "
-        "style-src 'self' 'unsafe-inline'; "
-        "img-src 'self' data:; "
-        "connect-src 'self' ws: wss:;"
-    )
+    response.headers.update({
+        "X-Content-Type-Options":  "nosniff",
+        "X-Frame-Options":         "DENY",
+        "X-XSS-Protection":        "1; mode=block",
+        "Referrer-Policy":         "strict-origin-when-cross-origin",
+        "Cache-Control":           "no-store",
+        "Content-Security-Policy": (
+            "default-src 'self'; script-src 'self' 'unsafe-inline'; "
+            "style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
+            "connect-src 'self' ws: wss:;"
+        ),
+    })
     return response
 
 
 @web.middleware
 async def request_logger_middleware(request: web.Request, handler):
-    """Loguea todas las peticiones con tiempo de respuesta."""
     start = time.monotonic()
     try:
         response = await handler(request)
         elapsed = (time.monotonic() - start) * 1000
-        logger.info(
-            "%s %s %d %.0fms user=%s",
-            request.method, request.path, response.status, elapsed,
-            request.get("auth_user", "anonymous"),
-        )
+        logger.info("%s %s %d %.0fms user=%s",
+                    request.method, request.path, response.status, elapsed,
+                    request.get("auth_user", "anonymous"))
         return response
     except web.HTTPException as e:
         elapsed = (time.monotonic() - start) * 1000
-        logger.warning(
-            "%s %s %d %.0fms [%s]",
-            request.method, request.path, e.status, elapsed, str(e.reason),
-        )
+        logger.warning("%s %s %d %.0fms", request.method, request.path, e.status, elapsed)
         raise
 
 
+# ── Servidor principal ────────────────────────────────────────────────────────
+
 class CyberHoundServer:
-    """
-    Servidor principal. Gestiona:
-    - Rutas REST y WebSocket
-    - Caché de findings por sesión WS
-    - Ejecución de escaneos con streaming
-    """
 
     def __init__(self, cfg: CyberHoundConfig) -> None:
         self.cfg = cfg
-        # Importaciones lazy para no cargar todo en el __init__
         self._app: Optional[web.Application] = None
-        # Caché de findings por conexión WS (ws_id → list[Finding])
         self._findings_cache: dict[str, list[Finding]] = {}
+        self._scan_id_cache:  dict[str, int] = {}   # ws_id → scan_id en BD
+
+        # Inicializar DB, notificaciones y scheduler
+        self.db = Database(Path(cfg.db_path))
+        self.notification_manager = NotificationManager(
+            NotificationConfig(
+                email_enabled=cfg.notifications.email_enabled,
+                smtp_host=cfg.notifications.smtp_host,
+                smtp_port=cfg.notifications.smtp_port,
+                smtp_user=cfg.notifications.smtp_user,
+                smtp_password=cfg.notifications.smtp_password,
+                email_from=cfg.notifications.email_from,
+                email_to=cfg.notifications.email_to,
+                webhook_enabled=cfg.notifications.webhook_enabled,
+                webhook_url=cfg.notifications.webhook_url,
+                min_level=cfg.notifications.min_level,
+            ),
+            db=self.db,
+        )
+        self.scheduler: Optional[Scheduler] = None
 
     def build_app(self) -> web.Application:
         auth_cfg = AuthConfig(
-            mode=           self.cfg.auth.mode,
-            secret=         self.cfg.auth.secret,
-            username=       self.cfg.auth.username,
-            password_hash=  self.cfg.auth.password_hash,
+            mode=self.cfg.auth.mode, secret=self.cfg.auth.secret,
+            username=self.cfg.auth.username, password_hash=self.cfg.auth.password_hash,
             token_ttl_hours=self.cfg.auth.token_ttl_hours,
-            localhost_only= self.cfg.auth.localhost_only,
+            localhost_only=self.cfg.auth.localhost_only,
         )
-
-        csrf = CsrfProtection()
-
         app = web.Application(
             middlewares=[
-                security_headers_middleware,
-                request_logger_middleware,
-                csrf.middleware_factory(),
-                auth_middleware,
+                security_headers_middleware, request_logger_middleware,
+                CsrfProtection().middleware_factory(), auth_middleware,
             ],
             client_max_size=10 * 1024 * 1024,
         )
         app["auth_config"] = auth_cfg
         app["server"] = self
 
-        # Rutas de autenticación (públicas)
         setup_auth_routes(app, auth_cfg)
 
-        # Servir la SPA desde ui/static/
         static_dir = Path(__file__).parent.parent / "ui" / "static"
         if static_dir.exists():
             app.router.add_static("/static", static_dir)
 
-        # Página principal (SPA)
         app.router.add_get("/", self.serve_spa)
-
-        # WebSocket (streaming de escaneos)
         app.router.add_get("/ws", self.websocket_handler)
 
-        # REST API
-        app.router.add_post("/api/fix/local",   self.api_fix_local)
-        app.router.add_post("/api/fix/remote",  self.api_fix_remote)
+        # ── Escaneos ──────────────────────────────────────────────────────────
+        app.router.add_post("/api/fix/local",    self.api_fix_local)
+        app.router.add_post("/api/fix/remote",   self.api_fix_remote)
         app.router.add_post("/api/report/{fmt}", self.api_report)
-        app.router.add_get ("/api/config/keys", self.api_get_keys)
-        app.router.add_post("/api/config/keys", self.api_save_keys)
-        app.router.add_get ("/api/network/discover", self.api_discover)
+
+        # ── Histórico y resultados ────────────────────────────────────────────
+        app.router.add_get("/api/history",               self.api_history)
+        app.router.add_get("/api/history/{scan_id}",     self.api_history_detail)
+        app.router.add_get("/api/history/{scan_id}/compare", self.api_compare)
+        app.router.add_get("/api/score/trend",           self.api_score_trend)
+        app.router.add_get("/api/dashboard",             self.api_dashboard)
+
+        # ── Inventario de red ────────────────────────────────────────────────
+        app.router.add_get ("/api/assets",              self.api_assets)
+        app.router.add_post("/api/assets/{ip}/authorize", self.api_asset_authorize)
+        app.router.add_get ("/api/network/discover",    self.api_discover)
+
+        # ── Supresiones (falsos positivos) ───────────────────────────────────
+        app.router.add_get   ("/api/suppressions",      self.api_suppressions_list)
+        app.router.add_post  ("/api/suppressions",      self.api_suppressions_add)
+        app.router.add_delete("/api/suppressions/{pattern}", self.api_suppressions_delete)
+
+        # ── Usuarios ─────────────────────────────────────────────────────────
+        app.router.add_get   ("/api/users",             self.api_users_list)
+        app.router.add_post  ("/api/users",             self.api_users_create)
+        app.router.add_patch ("/api/users/{username}",  self.api_users_update)
+        app.router.add_delete("/api/users/{username}",  self.api_users_delete)
+
+        # ── Scheduler ────────────────────────────────────────────────────────
+        app.router.add_get ("/api/scheduler",           self.api_scheduler_list)
+        app.router.add_post("/api/scheduler/{name}/run",   self.api_scheduler_run)
+        app.router.add_post("/api/scheduler/{name}/toggle", self.api_scheduler_toggle)
+
+        # ── Configuración ────────────────────────────────────────────────────
+        app.router.add_get ("/api/config/keys",         self.api_get_keys)
+        app.router.add_post("/api/config/keys",         self.api_save_keys)
+        app.router.add_get ("/api/config/notifications",self.api_get_notifications_cfg)
+        app.router.add_post("/api/config/notifications",self.api_save_notifications_cfg)
+        app.router.add_post("/api/config/notifications/test", self.api_test_notifications)
 
         self._app = app
         return app
 
     async def serve_spa(self, request: web.Request) -> web.Response:
-        """Sirve la SPA desde archivo estático."""
         spa_path = Path(__file__).parent.parent / "ui" / "static" / "index.html"
         if spa_path.exists():
-            content = spa_path.read_text(encoding="utf-8")
-            return web.Response(text=content, content_type="text/html")
-        return web.Response(
-            text="<h1>CyberHound Pro — UI no encontrada</h1>"
-                 "<p>Ejecuta el instalador para generar los ficheros estáticos.</p>",
-            content_type="text/html",
-        )
+            return web.Response(text=spa_path.read_text(encoding="utf-8"), content_type="text/html")
+        return web.Response(text="<h1>UI no encontrada</h1>", content_type="text/html")
 
     # ── WebSocket ─────────────────────────────────────────────────────────────
 
@@ -162,154 +215,163 @@ class CyberHoundServer:
             if not ws.closed:
                 try:
                     await ws.send_json(msg)
-                except Exception as e:
-                    logger.debug("WS send error: %s", e)
+                except Exception:
+                    pass
 
         async def log(level: str, text: str) -> None:
             await send({"type": "log", "level": level, "text": text})
 
         try:
             msg_raw = await asyncio.wait_for(ws.receive_json(), timeout=30)
-        except asyncio.TimeoutError:
-            await ws.close()
-            return ws
-        except Exception as e:
+        except (asyncio.TimeoutError, Exception) as e:
             logger.error("WS receive error: %s", e)
             await ws.close()
             return ws
 
-        # ── Validar y sanitizar el mensaje antes de procesarlo ────────────────
         try:
             msg = InputValidator.ws_message(msg_raw)
         except ValidationError as e:
-            logger.warning(
-                "WS input inválido de %s: %s=%s",
-                _get_real_ip(request), e.field, e.reason,
-            )
             await send({"type": "error", "text": f"Input inválido: {e.field} — {e.reason}"})
             await ws.close()
             return ws
 
-        task = msg.get("task", "")
-        audit_log.scan_started(
-            target=msg.get("target", "localhost"),
-            scan_type=task,
-            user=user,
-        )
+        task = msg["task"]
+        audit_log.scan_started(msg.get("target", "localhost"), task, user)
+
+        # Crear scan en BD
+        scan_id = await self.db.create_scan(task, triggered_by="manual")
+        self._scan_id_cache[ws_id] = scan_id
 
         try:
             if task == "audit":
-                await self._run_local_audit(msg, ws_id, send, log)
-
+                await self._run_local_audit(msg, ws_id, send, log, scan_id)
             elif task == "malware":
-                await self._run_malware_scan(msg, ws_id, send, log)
-
+                await self._run_malware_scan(msg, ws_id, send, log, scan_id)
             elif task == "network":
-                await self._run_network_scan(msg, ws_id, send, log)
-
+                await self._run_network_scan(msg, ws_id, send, log, scan_id)
             elif task == "ssh":
-                await self._run_ssh_scan(msg, ws_id, send, log)
-
+                await self._run_ssh_scan(msg, ws_id, send, log, scan_id)
             elif task == "code":
-                await self._run_code_audit(msg, ws_id, send, log)
-
+                await self._run_code_audit(msg, ws_id, send, log, scan_id)
             elif task == "intel":
-                await self._run_intel_scan(msg, ws_id, send, log)
-
+                await self._run_intel_scan(msg, ws_id, send, log, scan_id)
             else:
                 await send({"type": "error", "text": f"Tarea desconocida: {task}"})
-
         except Exception as e:
             logger.error("Error en tarea WS %s: %s", task, e, exc_info=True)
+            await self.db.fail_scan(scan_id)
             await send({"type": "error", "text": f"Error interno: {e}"})
 
         await ws.close()
-        logger.info("WS cerrado: %s", ws_id)
         return ws
 
     async def _emit_findings(
-        self,
-        findings: list[Finding],
-        ws_id: str,
-        send,
+        self, findings: list[Finding], ws_id: str, send, scan_id: int
     ) -> None:
-        """Emite findings al cliente y los cachea para el fix handler."""
+        """Filtra supresiones, guarda en BD y hace streaming al cliente."""
+        findings = await self.db.filter_suppressed(findings)
         self._findings_cache.setdefault(ws_id, []).extend(findings)
-        sev_order = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
-        sorted_findings = sorted(findings, key=lambda x: sev_order.get(x.severity, 5))
-        for f in sorted_findings:
-            await send({"type": "finding", "data": f.to_dict()})
-        await send({"type": "done", "count": len(findings)})
 
-    async def _run_local_audit(self, params: dict, ws_id: str, send, log) -> None:
+        # Guardar en BD
+        await self.db.complete_scan(scan_id, findings)
+
+        # Comparación con scan anterior
+        comparison = await self.db.get_comparison(scan_id)
+        new_critical = [f for f in comparison.get("new", []) if f.get("severity") == "critical"]
+        if new_critical:
+            await send({"type": "new_critical", "count": len(new_critical)})
+
+        # Streaming por severidad
+        sev_order = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
+        for f in sorted(findings, key=lambda x: sev_order.get(x.severity, 5)):
+            await send({"type": "finding", "data": f.to_dict()})
+
+        history = await self.db.get_scan_history(limit=1)
+        score = history[0]["score"] if history else None
+        await send({"type": "done", "count": len(findings), "scan_id": scan_id, "score": score})
+
+    async def _run_local_audit(self, params, ws_id, send, log, scan_id):
         from cyberhound.scanners.hardening import HardeningAuditor
         await log("section", "Iniciando Hardening Audit local…")
         findings = await HardeningAuditor.full_audit(cfg=self.cfg)
-        await self._emit_findings(findings, ws_id, send)
+        await self._emit_findings(findings, ws_id, send, scan_id)
 
-    async def _run_malware_scan(self, params: dict, ws_id: str, send, log) -> None:
+    async def _run_malware_scan(self, params, ws_id, send, log, scan_id):
         from cyberhound.scanners.malware import MalwareScanner
         skip = params.get("skip", [])
-        await log("section", f"Iniciando Malware Scan (módulos skip: {skip or 'ninguno'})…")
+        await log("section", f"Iniciando Malware Scan (skip: {skip or 'ninguno'})…")
         findings = await MalwareScanner.full_scan(
-            cfg=self.cfg,
-            skip_modules=skip or None,
+            cfg=self.cfg, skip_modules=skip or None,
             yara_rules=params.get("yara_rules"),
             yara_paths=params.get("yara_paths") or None,
             web_roots=params.get("web_roots") or None,
         )
-        await self._emit_findings(findings, ws_id, send)
+        await self._emit_findings(findings, ws_id, send, scan_id)
 
-    async def _run_code_audit(self, params: dict, ws_id: str, send, log) -> None:
+    async def _run_code_audit(self, params, ws_id, send, log, scan_id):
         from cyberhound.scanners.code import CodeAuditor
         from cyberhound.scanners.secrets import SecretScanner
         path = params.get("path", "")
         if not Path(path).exists():
             await send({"type": "error", "text": f"Ruta no existe: {path}"})
+            await self.db.fail_scan(scan_id)
             return
         await log("section", f"Analizando código en: {path}")
-        code_findings = await CodeAuditor.full_analysis(Path(path))
-        secret_findings = await SecretScanner.scan(path)
-        all_findings = code_findings + secret_findings
-        await self._emit_findings(all_findings, ws_id, send)
+        findings = await CodeAuditor.full_analysis(Path(path))
+        findings += await SecretScanner.scan(path)
+        await self._emit_findings(findings, ws_id, send, scan_id)
 
-    async def _run_network_scan(self, params: dict, ws_id: str, send, log) -> None:
+    async def _run_network_scan(self, params, ws_id, send, log, scan_id):
         from cyberhound.scanners.network import NetworkScanner
         from cyberhound.scanners.ssh_audit import RemoteAuditor, SSHCredentials
-
         networks = [n.strip() for n in params.get("networks", "").split(",") if n.strip()] or None
-        await log("section", "Fase 1/3: Descubriendo dispositivos en la red…")
-
+        await log("section", "Fase 1/3: Descubriendo dispositivos…")
         scanner = NetworkScanner(nmap_timeout=self.cfg.scan.nmap_timeout)
         devices = await scanner.scan_network(
-            networks=networks,
-            deep=True,
+            networks=networks, deep=True,
             vuln_scan=params.get("vuln_scan", False),
-            concurrency=10,
         )
-
         await send({"type": "devices", "data": [d.to_dict() for d in devices]})
         await log("ok", f"✓ {len(devices)} dispositivos encontrados")
 
-        # SSH audit en los que tienen SSH abierto
-        ssh_hosts = [d for d in devices if d.has_ssh and d.scan_status == "scanned"]
-        if not ssh_hosts or not params.get("ssh_audit"):
-            await send({"type": "done", "count": 0})
+        # Actualizar inventario
+        new_ips = []
+        for dev in devices:
+            asset = AssetRecord(
+                ip=dev.ip, mac=dev.mac, hostname=dev.hostname,
+                vendor=dev.vendor, os_name=dev.os_name,
+                open_ports=json.dumps([
+                    {"port": p.port, "service": p.service} for p in dev.open_ports
+                ]),
+                risk_level=dev.risk_level,
+            )
+            if await self.db.upsert_asset(asset):
+                new_ips.append(dev.ip)
+        if new_ips:
+            await send({"type": "new_assets", "ips": new_ips})
+            await log("warn", f"⚠ Nuevos dispositivos: {', '.join(new_ips)}")
+
+        if not params.get("ssh_audit"):
+            await self._emit_findings([], ws_id, send, scan_id)
             return
 
-        await log("section", f"Fase 2/3: Audit SSH en {len(ssh_hosts)} hosts…")
+        ssh_hosts = [d for d in devices if d.has_ssh]
+        if not ssh_hosts:
+            await log("info", "Sin hosts SSH en los dispositivos detectados")
+            await self._emit_findings([], ws_id, send, scan_id)
+            return
+
+        await log("section", f"Fase 2/3: SSH audit en {len(ssh_hosts)} hosts…")
         creds = SSHCredentials(
             username=params.get("ssh_user", self.cfg.scan.ssh_default_user),
             port=int(params.get("ssh_port", self.cfg.scan.ssh_default_port)),
             key_path=params.get("ssh_key") or self.cfg.scan.ssh_key_path,
             password=params.get("ssh_password") or None,
         )
-
         results = await RemoteAuditor.scan_multiple(
             [d.ip for d in ssh_hosts], creds,
             concurrency=self.cfg.scan.ssh_concurrency,
         )
-
         all_findings: list[Finding] = []
         for hr in results:
             await send({"type": "host_result", "data": {
@@ -319,34 +381,29 @@ class CyberHoundServer:
             }})
             if hr.status == "ok":
                 all_findings.extend(hr.findings)
-                await log("ok", f"✓ {hr.host}: {len(hr.findings)} hallazgos ({hr.scan_time:.1f}s)")
+                await log("ok", f"✓ {hr.host}: {len(hr.findings)} hallazgos")
             else:
                 await log("warn", f"✗ {hr.host}: {hr.status} — {hr.error}")
+        await log("section", "Fase 3/3: Consolidando…")
+        await self._emit_findings(all_findings, ws_id, send, scan_id)
 
-        await log("section", f"Fase 3/3: Consolidando resultados…")
-        await self._emit_findings(all_findings, ws_id, send)
-
-    async def _run_ssh_scan(self, params: dict, ws_id: str, send, log) -> None:
+    async def _run_ssh_scan(self, params, ws_id, send, log, scan_id):
         from cyberhound.scanners.ssh_audit import RemoteAuditor, SSHCredentials
-
-        hosts_raw = params.get("hosts", "")
-        hosts = [h.strip() for h in re.split(r"[,\s\n]+", hosts_raw) if h.strip()]
+        hosts = [h.strip() for h in re.split(r"[,\s\n]+", params.get("hosts", "")) if h.strip()]
         if not hosts:
-            await send({"type": "error", "text": "Sin hosts especificados"})
+            await send({"type": "error", "text": "Sin hosts"})
+            await self.db.fail_scan(scan_id)
             return
-
-        await log("section", f"SSH Scan en {len(hosts)} hosts: {', '.join(hosts)}")
+        await log("section", f"SSH Scan en {len(hosts)} hosts…")
         creds = SSHCredentials(
             username=params.get("ssh_user", self.cfg.scan.ssh_default_user),
             port=int(params.get("ssh_port", self.cfg.scan.ssh_default_port)),
             key_path=params.get("ssh_key") or self.cfg.scan.ssh_key_path,
             password=params.get("ssh_password") or None,
         )
-
         results = await RemoteAuditor.scan_multiple(
             hosts, creds, concurrency=self.cfg.scan.ssh_concurrency
         )
-
         all_findings: list[Finding] = []
         for hr in results:
             await send({"type": "host_result", "data": hr.to_dict()})
@@ -354,63 +411,59 @@ class CyberHoundServer:
                 all_findings.extend(hr.findings)
                 await log("ok", f"✓ {hr.host}: {len(hr.findings)} hallazgos")
             else:
-                await log("warn" if hr.status == "unreachable" else "error",
-                          f"✗ {hr.host}: {hr.status} — {hr.error}")
+                level = "warn" if hr.status == "unreachable" else "error"
+                await log(level, f"✗ {hr.host}: {hr.status} — {hr.error}")
+        await self._emit_findings(all_findings, ws_id, send, scan_id)
 
-        await self._emit_findings(all_findings, ws_id, send)
-
-    async def _run_intel_scan(self, params: dict, ws_id: str, send, log) -> None:
-        """Consulta APIs de inteligencia externa."""
+    async def _run_intel_scan(self, params, ws_id, send, log, scan_id):
+        from cyberhound.scanners.intel import IntelScanner
         target = params.get("target", "")
         modules = params.get("modules", ["shodan", "virustotal", "abuseipdb"])
-        if not target:
-            await send({"type": "error", "text": "Sin objetivo especificado"})
-            return
-
         await log("section", f"Intel scan: {target}")
-        from cyberhound.scanners.intel import IntelScanner
         scanner = IntelScanner(self.cfg.api_keys)
         results = await scanner.scan(target, modules)
         for item in results:
             await send({"type": "intel", "data": item.to_dict()})
             await log("ok", f"✓ {item.source}: datos obtenidos")
-        await send({"type": "done", "count": len(results)})
+        await self.db.complete_scan(scan_id, [])
+        await send({"type": "done", "count": len(results), "scan_id": scan_id})
 
-    # ── REST endpoints ─────────────────────────────────────────────────────────
+    # ── Fix local ─────────────────────────────────────────────────────────────
 
     async def api_fix_local(self, request: web.Request) -> web.Response:
         try:
-            body = await request.json()
-            finding_id = body.get("finding_id")
-            dry_run = body.get("dry_run", False)
-            user = request.get("auth_user", "unknown")
-
-            finding = self._find_cached(finding_id)
+            body  = await request.json()
+            fid   = body.get("finding_id")
+            dry   = body.get("dry_run", False)
+            user  = request.get("auth_user", "unknown")
+            finding = self._find_cached(fid)
             if not finding:
-                return web.json_response(
-                    {"ok": False, "error": "Finding no encontrado en caché de sesión"}
-                )
-
+                return web.json_response({"ok": False, "error": "Finding no encontrado"})
             from cyberhound.scanners.hardening import HardeningFixer
-            fixer = HardeningFixer(dry_run=dry_run)
-            ok, msg = await fixer.fix(finding)
-            audit_log.fix_applied(finding_id, user, "localhost", dry_run)
+            ok, msg = await HardeningFixer(dry_run=dry).fix(finding)
+            audit_log.fix_applied(fid, user, "localhost", dry)
+            # Marcar como corregido en BD si tenemos el scan_id
+            if ok and not dry:
+                for ws_id, findings in self._findings_cache.items():
+                    if any(f.id == fid for f in findings):
+                        scan_id = self._scan_id_cache.get(ws_id)
+                        if scan_id:
+                            await self.db.mark_finding_fixed(scan_id, fid, user)
+                        break
             return web.json_response({"ok": ok, "message": msg})
         except Exception as e:
-            logger.error("api_fix_local error: %s", e, exc_info=True)
+            logger.error("api_fix_local: %s", e, exc_info=True)
             return web.json_response({"ok": False, "error": str(e)}, status=500)
 
     async def api_fix_remote(self, request: web.Request) -> web.Response:
         try:
             body = await request.json()
-            finding_id = body.get("finding_id")
+            fid  = body.get("finding_id")
             host = body.get("host", "")
             user = request.get("auth_user", "unknown")
-
-            finding = self._find_cached(finding_id)
+            finding = self._find_cached(fid)
             if not finding:
                 return web.json_response({"ok": False, "error": "Finding no encontrado"})
-
             from cyberhound.scanners.ssh_audit import RemoteAuditor, SSHCredentials
             creds = SSHCredentials(
                 username=body.get("ssh_user", self.cfg.scan.ssh_default_user),
@@ -418,63 +471,62 @@ class CyberHoundServer:
                 key_path=body.get("ssh_key") or self.cfg.scan.ssh_key_path,
                 password=body.get("ssh_password") or None,
             )
-            auditor = RemoteAuditor(creds)
-            ok, msg = await auditor.apply_fix_remote(host, finding.remediation)
-            audit_log.fix_applied(finding_id, user, host, False)
+            ok, msg = await RemoteAuditor(creds).apply_fix_remote(host, finding.remediation)
+            audit_log.fix_applied(fid, user, host, False)
             return web.json_response({"ok": ok, "message": msg})
         except Exception as e:
-            logger.error("api_fix_remote error: %s", e, exc_info=True)
+            logger.error("api_fix_remote: %s", e, exc_info=True)
             return web.json_response({"ok": False, "error": str(e)}, status=500)
 
-    async def api_report(self, request: web.Request) -> web.Response:
-        fmt = request.match_info.get("fmt", "html")
-        try:
-            body = await request.json()
-            findings_data = body.get("findings", [])
-            findings = [Finding.from_dict(d) for d in findings_data]
-            report = ScanReport(
-                target=body.get("source", "localhost"),
-                local_findings=findings,
-            )
-            from cyberhound.scanners.reports import ReportGenerator
-            if fmt == "html":
-                content = await ReportGenerator.html_report(report)
-                return web.Response(
-                    body=content.encode(),
-                    content_type="text/html",
-                    headers={"Content-Disposition": "attachment; filename=report.html"},
-                )
-            elif fmt == "ansible":
-                content = ReportGenerator.ansible_playbook(findings)
-                return web.Response(
-                    body=content.encode(),
-                    content_type="text/yaml",
-                    headers={"Content-Disposition": "attachment; filename=remediation.yml"},
-                )
-            return web.json_response({"error": f"Formato desconocido: {fmt}"}, status=400)
-        except Exception as e:
-            logger.error("api_report error: %s", e, exc_info=True)
-            return web.json_response({"error": str(e)}, status=500)
+    # ── Histórico ─────────────────────────────────────────────────────────────
 
-    async def api_get_keys(self, request: web.Request) -> web.Response:
-        keys = {}
-        for attr in ("shodan", "virustotal", "abuseipdb", "greynoise", "otx", "hibp"):
-            val = getattr(self.cfg.api_keys, attr, None)
-            if val:
-                keys[attr] = val[:4] + "***"  # nunca exponer la clave completa
-        return web.json_response(keys)
+    async def api_history(self, request: web.Request) -> web.Response:
+        scan_type = request.rel_url.query.get("type")
+        limit = int(request.rel_url.query.get("limit", 50))
+        history = await self.db.get_scan_history(scan_type, limit)
+        return web.json_response(history)
 
-    async def api_save_keys(self, request: web.Request) -> web.Response:
+    async def api_history_detail(self, request: web.Request) -> web.Response:
         try:
+            scan_id = int(request.match_info["scan_id"])
+            findings = await self.db.get_scan_findings(scan_id)
+            return web.json_response(findings)
+        except ValueError:
+            return web.json_response({"error": "scan_id inválido"}, status=400)
+
+    async def api_compare(self, request: web.Request) -> web.Response:
+        try:
+            scan_id = int(request.match_info["scan_id"])
+            comparison = await self.db.get_comparison(scan_id)
+            return web.json_response(comparison)
+        except ValueError:
+            return web.json_response({"error": "scan_id inválido"}, status=400)
+
+    async def api_score_trend(self, request: web.Request) -> web.Response:
+        scan_type = request.rel_url.query.get("type", "audit")
+        days = int(request.rel_url.query.get("days", 30))
+        trend = await self.db.get_score_trend(scan_type, days)
+        return web.json_response(trend)
+
+    async def api_dashboard(self, request: web.Request) -> web.Response:
+        stats = await self.db.get_dashboard_stats()
+        return web.json_response(stats)
+
+    # ── Inventario ────────────────────────────────────────────────────────────
+
+    async def api_assets(self, request: web.Request) -> web.Response:
+        assets = await self.db.get_assets()
+        return web.json_response(assets)
+
+    async def api_asset_authorize(self, request: web.Request) -> web.Response:
+        try:
+            ip = request.match_info["ip"]
             body = await request.json()
-            for attr in ("shodan", "virustotal", "abuseipdb", "greynoise", "otx", "hibp"):
-                val = body.get(attr, "")
-                if val and not val.endswith("***"):
-                    setattr(self.cfg.api_keys, attr, val)
-            self.cfg.save()
+            authorized = bool(body.get("authorized", True))
+            notes = str(body.get("notes", ""))[:500]
+            await self.db.set_asset_authorized(ip, authorized, notes)
             return web.json_response({"ok": True})
         except Exception as e:
-            logger.error("api_save_keys error: %s", e, exc_info=True)
             return web.json_response({"ok": False, "error": str(e)}, status=500)
 
     async def api_discover(self, request: web.Request) -> web.Response:
@@ -482,29 +534,231 @@ class CyberHoundServer:
             networks_raw = request.rel_url.query.get("networks", "")
             networks = [n.strip() for n in networks_raw.split(",") if n.strip()] or None
             from cyberhound.scanners.network import NetworkScanner
-            scanner = NetworkScanner()
-            ips = await scanner.discover_hosts(networks=networks)
+            ips = await NetworkScanner().discover_hosts(networks=networks)
             return web.json_response({"hosts": ips})
         except Exception as e:
-            logger.error("api_discover error: %s", e, exc_info=True)
+            logger.error("api_discover: %s", e, exc_info=True)
+            return web.json_response({"error": str(e)}, status=500)
+
+    # ── Supresiones ───────────────────────────────────────────────────────────
+
+    async def api_suppressions_list(self, request: web.Request) -> web.Response:
+        return web.json_response(await self.db.get_suppressions())
+
+    async def api_suppressions_add(self, request: web.Request) -> web.Response:
+        try:
+            body    = await request.json()
+            pattern = str(body.get("pattern", "")).strip()[:200]
+            reason  = str(body.get("reason", "")).strip()[:500]
+            expires = body.get("expires_at")
+            user    = request.get("auth_user", "unknown")
+            if not pattern or not reason:
+                return web.json_response({"error": "pattern y reason son obligatorios"}, status=400)
+            await self.db.add_suppression(pattern, reason, user, expires)
+            return web.json_response({"ok": True})
+        except Exception as e:
+            return web.json_response({"ok": False, "error": str(e)}, status=500)
+
+    async def api_suppressions_delete(self, request: web.Request) -> web.Response:
+        from urllib.parse import unquote
+        pattern = unquote(request.match_info["pattern"])
+        await self.db.remove_suppression(pattern)
+        return web.json_response({"ok": True})
+
+    # ── Usuarios ──────────────────────────────────────────────────────────────
+
+    async def api_users_list(self, request: web.Request) -> web.Response:
+        users = await self.db.list_users()
+        return web.json_response(users)
+
+    async def api_users_create(self, request: web.Request) -> web.Response:
+        try:
+            body     = await request.json()
+            username = str(body.get("username", "")).strip()[:32]
+            password = str(body.get("password", ""))
+            role     = str(body.get("role", "viewer"))
+            if not username or not password:
+                return web.json_response({"error": "username y password son obligatorios"}, status=400)
+            if role not in ("admin", "operator", "viewer"):
+                return web.json_response({"error": "Rol inválido"}, status=400)
+            if len(password) < 8:
+                return web.json_response({"error": "Contraseña mínimo 8 caracteres"}, status=400)
+            if not re.match(r'^[a-zA-Z0-9_\-]{1,32}$', username):
+                return web.json_response({"error": "Username inválido"}, status=400)
+            pw_hash = hashlib.sha256(password.encode()).hexdigest()
+            await self.db.create_user(UserRecord(
+                username=username, password_hash=pw_hash, role=role
+            ))
+            logger.info("Usuario '%s' creado con rol '%s' por %s",
+                        username, role, request.get("auth_user"))
+            return web.json_response({"ok": True})
+        except Exception as e:
+            return web.json_response({"ok": False, "error": str(e)}, status=500)
+
+    async def api_users_update(self, request: web.Request) -> web.Response:
+        try:
+            username = request.match_info["username"]
+            body = await request.json()
+            updates = {}
+            if "role" in body:
+                if body["role"] not in ("admin", "operator", "viewer"):
+                    return web.json_response({"error": "Rol inválido"}, status=400)
+                updates["role"] = body["role"]
+            if "password" in body:
+                if len(body["password"]) < 8:
+                    return web.json_response({"error": "Contraseña mínimo 8 caracteres"}, status=400)
+                updates["password_hash"] = hashlib.sha256(body["password"].encode()).hexdigest()
+            if "active" in body:
+                updates["active"] = int(bool(body["active"]))
+            if updates:
+                await self.db.update_user(username, **updates)
+            return web.json_response({"ok": True})
+        except Exception as e:
+            return web.json_response({"ok": False, "error": str(e)}, status=500)
+
+    async def api_users_delete(self, request: web.Request) -> web.Response:
+        username = request.match_info["username"]
+        current  = request.get("auth_user", "")
+        if username == current:
+            return web.json_response({"error": "No puedes eliminar tu propio usuario"}, status=400)
+        await self.db.update_user(username, active=0)
+        return web.json_response({"ok": True})
+
+    # ── Scheduler ─────────────────────────────────────────────────────────────
+
+    async def api_scheduler_list(self, request: web.Request) -> web.Response:
+        if not self.scheduler:
+            return web.json_response([])
+        return web.json_response(self.scheduler.list_entries())
+
+    async def api_scheduler_run(self, request: web.Request) -> web.Response:
+        name = request.match_info["name"]
+        if not self.scheduler:
+            return web.json_response({"error": "Scheduler no activo"}, status=503)
+        ok = await self.scheduler.run_now(name)
+        return web.json_response({"ok": ok, "error": "Tarea no encontrada" if not ok else None})
+
+    async def api_scheduler_toggle(self, request: web.Request) -> web.Response:
+        try:
+            name = request.match_info["name"]
+            body = await request.json()
+            enabled = bool(body.get("enabled", True))
+            if not self.scheduler:
+                return web.json_response({"error": "Scheduler no activo"}, status=503)
+            ok = self.scheduler.enable(name, enabled)
+            return web.json_response({"ok": ok})
+        except Exception as e:
+            return web.json_response({"ok": False, "error": str(e)}, status=500)
+
+    # ── Configuración ─────────────────────────────────────────────────────────
+
+    async def api_get_keys(self, request: web.Request) -> web.Response:
+        keys = {
+            k: (v[:4] + "***" if v else None)
+            for k, v in self.cfg.api_keys.__dict__.items()
+        }
+        return web.json_response(keys)
+
+    async def api_save_keys(self, request: web.Request) -> web.Response:
+        try:
+            body = await request.json()
+            for attr in ("shodan", "virustotal", "abuseipdb", "greynoise", "otx", "hibp"):
+                v = body.get(attr, "")
+                if v and not v.endswith("***"):
+                    setattr(self.cfg.api_keys, attr, v)
+            self.cfg.save()
+            return web.json_response({"ok": True})
+        except Exception as e:
+            return web.json_response({"ok": False, "error": str(e)}, status=500)
+
+    async def api_get_notifications_cfg(self, request: web.Request) -> web.Response:
+        n = self.cfg.notifications
+        return web.json_response({
+            "email_enabled":   n.email_enabled,
+            "smtp_host":       n.smtp_host,
+            "smtp_port":       n.smtp_port,
+            "smtp_user":       n.smtp_user,
+            "email_from":      n.email_from,
+            "email_to":        n.email_to,
+            "webhook_enabled": n.webhook_enabled,
+            "webhook_url":     n.webhook_url,
+            "min_level":       n.min_level,
+            # contraseña SMTP nunca se devuelve
+        })
+
+    async def api_save_notifications_cfg(self, request: web.Request) -> web.Response:
+        try:
+            body = await request.json()
+            n = self.cfg.notifications
+            for field in ("email_enabled","smtp_host","smtp_port","smtp_user",
+                          "email_from","email_to","webhook_enabled","webhook_url","min_level"):
+                if field in body:
+                    setattr(n, field, body[field])
+            if "smtp_password" in body and body["smtp_password"]:
+                n.smtp_password = body["smtp_password"]
+            self.cfg.save()
+            # Actualizar el notification manager en caliente
+            self.notification_manager.cfg.email_enabled   = n.email_enabled
+            self.notification_manager.cfg.webhook_enabled = n.webhook_enabled
+            self.notification_manager.cfg.webhook_url     = n.webhook_url
+            self.notification_manager.cfg.email_to        = n.email_to
+            return web.json_response({"ok": True})
+        except Exception as e:
+            return web.json_response({"ok": False, "error": str(e)}, status=500)
+
+    async def api_test_notifications(self, request: web.Request) -> web.Response:
+        results = await self.notification_manager.test()
+        return web.json_response(results)
+
+    # ── Informes ──────────────────────────────────────────────────────────────
+
+    async def api_report(self, request: web.Request) -> web.Response:
+        fmt = request.match_info.get("fmt", "html")
+        try:
+            body     = await request.json()
+            findings = [Finding.from_dict(d) for d in body.get("findings", [])]
+            report   = ScanReport(target=body.get("source", "localhost"), local_findings=findings)
+            from cyberhound.scanners.reports import ReportGenerator
+            if fmt == "html":
+                content = await ReportGenerator.html_report(report)
+                return web.Response(body=content.encode(), content_type="text/html",
+                                    headers={"Content-Disposition": "attachment; filename=report.html"})
+            elif fmt == "ansible":
+                content = ReportGenerator.ansible_playbook(findings)
+                return web.Response(body=content.encode(), content_type="text/yaml",
+                                    headers={"Content-Disposition": "attachment; filename=remediation.yml"})
+            return web.json_response({"error": f"Formato desconocido: {fmt}"}, status=400)
+        except Exception as e:
+            logger.error("api_report: %s", e, exc_info=True)
             return web.json_response({"error": str(e)}, status=500)
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
     def _find_cached(self, finding_id: str) -> Optional[Finding]:
-        for findings_list in self._findings_cache.values():
-            for f in findings_list:
+        for fl in self._findings_cache.values():
+            for f in fl:
                 if f.id == finding_id:
                     return f
         return None
 
+    # ── Start ─────────────────────────────────────────────────────────────────
+
     async def start(self) -> None:
+        # 1. Inicializar BD
+        await self.db.init()
+        await self.db.ensure_admin_exists(
+            self.cfg.auth.username,
+            self.cfg.auth.password_hash or hashlib.sha256(b"cyberhound").hexdigest(),
+        )
+
+        # 2. Construir app
         app = self.build_app()
         runner = web.AppRunner(app)
         await runner.setup()
 
-        # ── TLS ───────────────────────────────────────────────────────────────
+        # 3. TLS
         ssl_ctx = None
+        proto = "http"
         try:
             ssl_ctx = TLSManager.create_ssl_context(
                 cert_path=self.cfg.server.tls_cert,
@@ -512,61 +766,46 @@ class CyberHoundServer:
             )
             proto = "https"
         except Exception as e:
-            logger.error(
-                "No se pudo activar TLS: %s — arrancando en HTTP (inseguro)", e
-            )
-            proto = "http"
+            logger.error("TLS no disponible: %s — arrancando en HTTP (inseguro)", e)
 
-        site = web.TCPSite(
-            runner,
-            self.cfg.server.host,
-            self.cfg.server.port,
-            ssl_context=ssl_ctx,
-        )
-
-        # ── Arrancar con error claro si el puerto está ocupado ────────────────
+        # 4. Bind
+        site = web.TCPSite(runner, self.cfg.server.host, self.cfg.server.port, ssl_context=ssl_ctx)
         try:
             await site.start()
         except OSError as e:
-            if e.errno == 98:  # Address already in use
+            if e.errno == 98:
                 import subprocess
                 proc = subprocess.run(
                     ["ss", "-tlnp", f"sport = :{self.cfg.server.port}"],
                     capture_output=True, text=True,
                 )
-                who = proc.stdout.strip() or "proceso desconocido"
-                logger.error(
-                    "Puerto %d ya en uso.\n"
-                    "Para liberar el puerto: sudo pkill -f 'cyberhound web'\n"
-                    "O usa otro puerto: sudo cyberhound web --port 9443\n"
-                    "Proceso actual en ese puerto:\n%s",
-                    self.cfg.server.port, who,
-                )
                 print(
-                    f"\n❌ El puerto {self.cfg.server.port} ya está en uso.\n"
+                    f"\n❌ Puerto {self.cfg.server.port} ya en uso.\n"
                     f"   Liberar: sudo pkill -f 'cyberhound web'\n"
-                    f"   O usar otro puerto: sudo cyberhound web --port 9443\n"
+                    f"   O usar otro: sudo cyberhound web --port 9443\n"
+                    f"   {proc.stdout.strip()}\n"
                 )
                 raise SystemExit(1)
             raise
 
+        # 5. Scheduler
+        if self.cfg.scheduler.enabled:
+            self.scheduler = build_scheduler(self, self.cfg.scheduler)
+            await self.scheduler.start()
+
         cert_info = ""
         if ssl_ctx and not self.cfg.server.tls_cert:
             cert_path, _ = TLSManager.cert_paths()
-            cert_info = (
-                f"\n   Certificado : {cert_path} (auto-firmado)"
-                f"\n   ⚠ Importa el cert en tu navegador para evitar avisos"
-            )
+            cert_info = f"\n   Certificado : {cert_path} (auto-firmado)"
 
-        logger.info(
-            "CyberHound Pro escuchando en %s://%s:%d",
-            proto, self.cfg.server.host, self.cfg.server.port,
-        )
+        logger.info("CyberHound Pro v6.1 en %s://%s:%d",
+                    proto, self.cfg.server.host, self.cfg.server.port)
         print(
-            f"\n🐾 CyberHound Pro listo en "
+            f"\n🐾 CyberHound Pro v6.1 listo en "
             f"{proto}://{self.cfg.server.host}:{self.cfg.server.port}"
             f"{cert_info}"
-            f"\n   Login: usuario='{self.cfg.auth.username}'"
-            f"\n   Cambiar contraseña: sudo cyberhound setup\n"
+            f"\n   Login: '{self.cfg.auth.username}'"
+            f"\n   BD: {self.cfg.db_path}"
+            f"\n   Scheduler: {'activo' if self.cfg.scheduler.enabled else 'desactivado'}\n"
         )
         await asyncio.Event().wait()
