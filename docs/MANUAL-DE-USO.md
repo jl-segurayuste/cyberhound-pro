@@ -1,7 +1,9 @@
-# 📘 CyberHound Pro — Manual de uso
+# CyberHound Pro — Manual de uso
 
 Guía práctica para usar CyberHound en el día a día. Para instalar, ver el
 [README](../README.md#instalación-rápida) y los [requisitos](../README.md#requisitos).
+
+![Interfaz de CyberHound Pro](img/interfaz.png)
 
 ---
 
@@ -16,6 +18,24 @@ Abre **https://TU_HOST:8443** (certificado autofirmado la primera vez → el
 navegador avisará). Credenciales: las que fijaste con `cyberhound setup`.
 
 > El modo `--no-auth` solo permite acceso desde `127.0.0.1` (localhost).
+
+### Navegación
+
+La interfaz es **responsive** (se adapta a cualquier monitor o móvil, sin scroll
+lateral) y agrupa todas las funciones en cinco menús de la barra superior:
+
+![Menú de navegación](img/interfaz-navegacion.png)
+
+| Menú | Funciones |
+|---|---|
+| **Inicio** | Panel de estado (score, problemas, cumplimiento, sistema) |
+| **Red** | Mi Red · Subdominios · DNS Security · Intel |
+| **Sistema** | Seguridad · Malware · Docker · Código · Servicios |
+| **Web** | TLS/SSL · Cabeceras Web · Exposición Web · API / CORS · Nuclei |
+| **Gestión** | Historial · Monitor · Informes · Configuración |
+
+En móvil, los menús se despliegan desde el botón **☰**. Arriba a la derecha:
+buscador de hallazgos, **Log**, **API** (documentación Swagger) y **Salir**.
 
 ## 2. El panel (Inicio)
 
@@ -42,23 +62,24 @@ navegador avisará). Credenciales: las que fijaste con `cyberhound setup`.
 
 ## 3. Lanzar análisis
 
-Cada pestaña superior es un scanner. Pulsa **▶ Analizar** (o las *Acciones rápidas*
-del panel). Los resultados aparecen en vivo (WebSocket) con su severidad y evidencia.
+Cada función abre un scanner. Pulsa **Analizar** (o las *Acciones rápidas* del
+panel). Los resultados aparecen en vivo (WebSocket) con su severidad y evidencia.
 
-| Pestaña | Qué audita | Requiere |
-|---|---|---|
-| 🔍 **Seguridad** | Hardening del SO (26 checks) + score | root |
-| 📡 **Mi Red** | Descubrimiento, OS, CVEs | `nmap` (+root para OS detection) |
-| 🦠 **Malware** | YARA, hashes (VT/MB), auditd, cron, webshells | — |
-| 🐳 **Docker** | 7 checks Docker + 11 de Kubernetes | acceso a Docker/`kubectl` |
-| 📄 **Código** | bandit, shellcheck, eslint sobre una ruta | esas herramientas |
-| ⚙️ **Servicios** | Servicios inseguros/expuestos | — |
-| 🔒 **TLS/SSL** | Certificados y protocolos de tus HTTPS | — |
-| 🕵️ **Exposición Web** | `.git`/`.env`, backups, listados, métodos | — |
-| 🔌 **API / CORS** | CORS roto, docs de API, GraphQL introspection | — |
-| 📛 **DNS Security** | SPF/DMARC/DNSSEC/CAA de un dominio | — |
-| 🌐 **Subdominios** | Enumeración vía Certificate Transparency | — |
-| ☢️ **Nuclei** | Plantillas de ProjectDiscovery (CVEs, exposiciones) | binario `nuclei` + plantillas |
+| Menú | Función | Qué audita | Requiere |
+|---|---|---|---|
+| Sistema | **Seguridad** | Hardening del SO (26 checks) + score | root |
+| Red | **Mi Red** | Descubrimiento, OS, CVEs | `nmap` (+root para OS detection) |
+| Sistema | **Malware** | YARA, hashes (VT/MB), auditd, cron, webshells | — |
+| Sistema | **Docker** | 7 checks Docker + 11 de Kubernetes | acceso a Docker/`kubectl` |
+| Sistema | **Código** | bandit, shellcheck, eslint sobre una ruta | esas herramientas |
+| Sistema | **Servicios** | Servicios inseguros/expuestos | — |
+| Web | **TLS/SSL** | Certificados y protocolos de tus HTTPS | — |
+| Web | **Cabeceras Web** | CSP, HSTS y demás cabeceras de seguridad | — |
+| Web | **Exposición Web** | `.git`/`.env`, backups, listados, métodos | — |
+| Web | **API / CORS** | CORS roto, docs de API, GraphQL introspection | — |
+| Red | **DNS Security** | SPF/DMARC/DNSSEC/CAA de un dominio | — |
+| Red | **Subdominios** | Enumeración vía Certificate Transparency | — |
+| Web | **Nuclei** | Plantillas de ProjectDiscovery (CVEs, exposiciones) | binario `nuclei` + plantillas |
 
 ## 4. Corregir hallazgos (auto-fix)
 
