@@ -147,7 +147,7 @@ function _wsConnect(task, params, handlers) {
     if (wasRunning && S.wsRetries < 3) {
       S.wsRetries++;
       const delay = [1500, 3000, 7000][S.wsRetries - 1] || 7000;
-      appendLog('warn', `⚡ Conexión perdida. Reconectando en ${delay/1000}s… (${S.wsRetries}/3)`);
+      appendLog('warn', `Conexión perdida. Reconectando en ${delay/1000}s… (${S.wsRetries}/3)`);
       setStatus('running', `Reconectando (${S.wsRetries}/3)…`);
       setTimeout(() => _wsConnect(task, params, handlers), delay);
     } else if (wasRunning) {
@@ -218,11 +218,11 @@ function _renderDashboard(stats, trend) {
   // Últimos scans por tipo
   const scansList = document.getElementById('dash-last-scans');
   if (scansList) {
-    const icons = {audit:'🔍', malware:'🦠', network:'📡', code:'📝'};
+    const icons = {audit:'', malware:'', network:'', code:''};
     const labels = {audit:'Seguridad', malware:'Malware', network:'Red', code:'Código'};
     scansList.innerHTML = Object.entries(stats.last_scans || {}).map(([type, scan]) =>
       scan ? `<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border)">
-        <span>${icons[type]||'📋'} ${labels[type]||type}</span>
+        <span>${icons[type]||''} ${labels[type]||type}</span>
         <span style="color:var(--text2)">${fmt(scan.started_at)}</span>
         <span>${_scorePill(scan.score)}</span>
       </div>` : ''
@@ -240,12 +240,12 @@ function _renderDashboard(stats, trend) {
             <div class="item-title">${esc(f.title)}</div>
             <div class="item-fix">${esc((f.remediation||'').substring(0,80))}</div>
           </div>
-          ${f.auto_fix ? '<span class="fix-btn" style="pointer-events:none">⚡</span>' : ''}
+          ${f.auto_fix ? '<span class="fix-tag" title="Corrección automática disponible">Auto-fix</span>' : ''}
         </div>`).join('');
     } else if (audit) {
       critList.innerHTML = '<div style="color:var(--green);padding:10px">✓ Sin hallazgos críticos en el último análisis</div>';
     } else {
-      critList.innerHTML = '<div class="empty-hint"><span>⏳</span><p>Ejecuta un análisis de seguridad para ver los resultados.</p></div>';
+      critList.innerHTML = '<div class="empty-hint"><span></span><p>Ejecuta un análisis de seguridad para ver los resultados.</p></div>';
     }
   }
 
@@ -285,7 +285,7 @@ function _appendAuditRow(f) {
     <td><b>${esc(f.title)}</b></td>
     <td style="color:var(--text2);font-size:.82rem">${esc((f.description||'').substring(0,100))}</td>
     <td>${f.auto_fix
-      ? `<button class="fix-btn" id="fix-${esc(f.id)}" onclick="event.stopPropagation();applyFix('${esc(f.id)}',this)">⚡ Corregir</button>`
+      ? `<button class="fix-btn" id="fix-${esc(f.id)}" onclick="event.stopPropagation();applyFix('${esc(f.id)}',this)">Corregir</button>`
       : `<span style="font-size:.75rem;color:var(--text2)">Manual</span>`
     }</td>`;
   tbody.appendChild(tr);
@@ -306,7 +306,7 @@ function runCode() {
   document.getElementById('code-results').style.display = 'none';
   document.getElementById('code-empty').style.display = '';
   document.getElementById('code-tbody').innerHTML = '';
-  btn('btn-code', true, '⏳ Analizando…');
+  btn('btn-code', true, 'Analizando…');
   appendLog('section', `═══ ANÁLISIS DE CÓDIGO: ${path} ═══`);
   wsRun('code', {path}, {
     onFinding(f) {
@@ -350,7 +350,7 @@ function runNetworkScan() {
   document.getElementById('network-findings-tbody').innerHTML = '';
   document.getElementById('ssh-findings-area').style.display = 'none';
   document.getElementById('host-chips').innerHTML = '';
-  btn('btn-network', true, '⏳ Escaneando red…');
+  btn('btn-network', true, 'Escaneando red…');
   appendLog('section', '═══ ESCANEO DE RED ═══');
   wsRun('network', {
     networks: document.getElementById('net-networks')?.value || '',
@@ -380,7 +380,7 @@ function runNetworkScan() {
         <td>${_sevBadge(f.severity)}</td>
         <td>${esc(f.title)}</td>
         <td style="font-size:.78rem;color:var(--text2)">${esc((f.remediation||'').substring(0,60))}</td>
-        <td>${f.auto_fix ? `<button class="fix-btn remote" onclick="event.stopPropagation();applyFixRemote('${esc(f.id)}','${esc(host)}',this)">⚡ Fix</button>` : ''}</td>`;
+        <td>${f.auto_fix ? `<button class="fix-btn remote" onclick="event.stopPropagation();applyFixRemote('${esc(f.id)}','${esc(host)}',this)">Fix</button>` : ''}</td>`;
       tbody.appendChild(tr);
     },
     onDone() { btn('btn-network', false, '▶ Descubrir y analizar'); },
@@ -398,7 +398,7 @@ function _renderNetworkTable(devices) {
     const chip = document.createElement('span');
     chip.className = 'host-chip scanning';
     chip.id = `chip-${d.ip.replace(/\./g,'_')}`;
-    chip.textContent = `⏳ ${d.ip}`;
+    chip.textContent = `${d.ip}`;
     chips.appendChild(chip);
   });
   // Tabla
@@ -418,7 +418,7 @@ function _renderNetworkTable(devices) {
       <td class="${riskCls}">${risk.toUpperCase()}</td>
       <td>${cveCount ? `<span style="color:var(--red);font-weight:600">${cveCount} CVEs</span>` : '—'}</td>
       <td id="status-${d.ip.replace(/\./g,'_')}" style="font-size:.78rem;color:var(--text2)">Pendiente</td>
-      <td>${d.has_ssh !== false ? `<button class="fix-btn remote" onclick="sshAuditOne('${esc(d.ip)}',${d.ssh_port||22})">🔍 Auditar</button>` : ''}</td>`;
+      <td>${d.has_ssh !== false ? `<button class="fix-btn remote" onclick="sshAuditOne('${esc(d.ip)}',${d.ssh_port||22})">Auditar</button>` : ''}</td>`;
     tbody.appendChild(tr);
   });
 }
@@ -426,7 +426,7 @@ function _renderNetworkTable(devices) {
 function _updateHostChip(hr) {
   const chip = document.getElementById(`chip-${hr.host.replace(/\./g,'_')}`);
   if (!chip) return;
-  const icons = {ok:'✓', unreachable:'✗', auth_failed:'🔑', error:'⚠'};
+  const icons = {ok:'✓', unreachable:'✗', auth_failed:'', error:'⚠'};
   chip.className = `host-chip ${hr.status}`;
   chip.textContent = `${icons[hr.status]||'?'} ${hr.host}${hr.status==='ok'?` (${hr.count})`:hr.error?` — ${hr.error.substring(0,25)}`:''}`;
   const statusEl = document.getElementById(`status-${hr.host.replace(/\./g,'_')}`);
@@ -463,7 +463,7 @@ function sshAuditOne(ip, port) {
         <td style="font-family:monospace;font-size:.78rem;color:var(--blue)">${esc(ip)}</td>
         <td>${_sevBadge(f.severity)}</td><td>${esc(f.title)}</td>
         <td style="font-size:.78rem;color:var(--text2)">${esc((f.remediation||'').substring(0,60))}</td>
-        <td>${f.auto_fix?`<button class="fix-btn remote" onclick="event.stopPropagation();applyFixRemote('${esc(f.id)}','${esc(ip)}',this)">⚡ Fix</button>`:''}</td>`;
+        <td>${f.auto_fix?`<button class="fix-btn remote" onclick="event.stopPropagation();applyFixRemote('${esc(f.id)}','${esc(ip)}',this)">Fix</button>`:''}</td>`;
       tbody.appendChild(tr);
     },
   });
@@ -482,7 +482,7 @@ async function loadHistory() {
       table.style.display = 'none'; empty.style.display = ''; return;
     }
     table.style.display = 'table'; empty.style.display = 'none';
-    const typeLabels = {audit:'🔍 Seguridad', malware:'🦠 Malware', network:'📡 Red', code:'📝 Código', ssh:'🖥️ SSH'};
+    const typeLabels = {audit:'Seguridad', malware:'Malware', network:'Red', code:'Código', ssh:'SSH'};
     tbody.innerHTML = data.map(s => `
       <tr onclick="loadHistoryDetail(${s.id},this)" style="cursor:pointer">
         <td style="white-space:nowrap">${fmt(s.started_at)}</td>
@@ -491,7 +491,7 @@ async function loadHistory() {
         <td>${_scorePill(s.score)}</td>
         <td>${_findingBar(s)}</td>
         <td style="color:var(--text2);font-size:.82rem">${dur(s.duration_s)}</td>
-        <td><span style="font-size:.75rem;color:var(--text2)">${s.triggered_by==='scheduler'?'🕐 Auto':'👤 Manual'}</span></td>
+        <td><span style="font-size:.75rem;color:var(--text2)">${s.triggered_by==='scheduler'?'Auto':'Manual'}</span></td>
         <td>
           ${s.status==='completed'?`<button class="fix-btn" onclick="event.stopPropagation();loadHistoryDetail(${s.id})">Ver</button>`:''}
           <span style="font-size:.75rem;color:${s.status==='completed'?'var(--green)':s.status==='failed'?'var(--red)':'var(--yellow)'}">${s.status}</span>
@@ -525,8 +525,8 @@ async function loadHistoryDetail(scanId) {
     compEl.innerHTML = '<span style="color:var(--text2)">Primer análisis</span>';
   } else if (comparison.new !== undefined) {
     compEl.innerHTML = `
-      <span class="comp-new">▲ ${comparison.new.length} nuevos</span>
-      <span class="comp-resolved">▼ ${comparison.resolved.length} resueltos</span>
+      <span class="comp-new">${comparison.new.length} nuevos</span>
+      <span class="comp-resolved">${comparison.resolved.length} resueltos</span>
       <span class="comp-same">= ${comparison.unchanged} sin cambio</span>`;
   }
   // Tabla de findings
@@ -548,7 +548,7 @@ function closeHistoryDetail() {
 
 // ── Fix local / remoto ────────────────────────────────────────────────────
 async function applyFix(findingId, btnEl) {
-  if (btnEl) { btnEl.disabled = true; btnEl.textContent = '⏳'; }
+  if (btnEl) { btnEl.disabled = true; btnEl.textContent = ''; }
   try {
     const r = await fetch('/api/fix/local', {
       method: 'POST', headers: {'Content-Type':'application/json'},
@@ -561,11 +561,11 @@ async function applyFix(findingId, btnEl) {
       if (btnEl) { btnEl.textContent = '✓ Listo'; btnEl.style.background = 'var(--green)'; }
     } else {
       toast('Error: ' + d.error, 'error');
-      if (btnEl) { btnEl.disabled = false; btnEl.textContent = '⚡ Corregir'; }
+      if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'Corregir'; }
     }
   } catch(e) {
     toast('Error: ' + e, 'error');
-    if (btnEl) { btnEl.disabled = false; btnEl.textContent = '⚡ Corregir'; }
+    if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'Corregir'; }
   }
 }
 
@@ -581,7 +581,7 @@ async function fixAll(scope) {
 }
 
 async function applyFixRemote(findingId, host, btnEl) {
-  if (btnEl) { btnEl.disabled = true; btnEl.textContent = '⏳'; }
+  if (btnEl) { btnEl.disabled = true; btnEl.textContent = ''; }
   try {
     const r = await fetch('/api/fix/remote', {
       method: 'POST', headers: {'Content-Type':'application/json'},
@@ -598,11 +598,11 @@ async function applyFixRemote(findingId, host, btnEl) {
       if (btnEl) { btnEl.textContent = '✓'; btnEl.style.background = 'var(--green)'; }
     } else {
       toast('Error: ' + d.error, 'error');
-      if (btnEl) { btnEl.disabled = false; btnEl.textContent = '⚡ Fix'; }
+      if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'Fix'; }
     }
   } catch(e) {
     toast('Error: ' + e, 'error');
-    if (btnEl) { btnEl.disabled = false; btnEl.textContent = '⚡ Fix'; }
+    if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'Fix'; }
   }
 }
 
@@ -631,11 +631,11 @@ function _renderDrawer(f, host) {
     ${f.file_path ? `<div class="d-field"><div class="d-label">Fichero</div><div class="d-value" style="font-family:monospace;font-size:.82rem">${esc(f.file_path)}${f.line_number?':'+f.line_number:''}</div></div>` : ''}
     <div class="d-field"><div class="d-label">Cómo solucionarlo</div><div class="d-code">${esc(f.remediation)}</div></div>
     ${f.fixed_at ? `<div style="background:rgba(63,185,80,.12);border-radius:6px;padding:8px;font-size:.82rem;color:var(--green)">✓ Corregido el ${fmt(f.fixed_at)} por ${esc(f.fixed_by||'')}</div>` : ''}
-    ${f.auto_fix && !hostLabel && !f.fixed_at ? `<button class="d-fix-btn" onclick="applyFix('${esc(f.id||f.finding_id||'')}',this)">⚡ Aplicar corrección</button>` : ''}
-    ${f.auto_fix && hostLabel && !f.fixed_at ? `<button class="d-fix-btn remote" onclick="applyFixRemote('${esc(f.id||'')}','${esc(hostLabel)}',this)">⚡ Corregir en ${esc(hostLabel)}</button>` : ''}
+    ${f.auto_fix && !hostLabel && !f.fixed_at ? `<button class="d-fix-btn" onclick="applyFix('${esc(f.id||f.finding_id||'')}',this)">Aplicar corrección</button>` : ''}
+    ${f.auto_fix && hostLabel && !f.fixed_at ? `<button class="d-fix-btn remote" onclick="applyFixRemote('${esc(f.id||'')}','${esc(hostLabel)}',this)">Corregir en ${esc(hostLabel)}</button>` : ''}
     ${!f.auto_fix ? `<div style="margin-top:10px;padding:10px;background:var(--bg3);border-radius:6px;font-size:.82rem;color:var(--text2)">ℹ️ Esta corrección requiere revisión manual.</div>` : ''}
     <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
-      <button class="btn-secondary small" onclick="suppressFinding('${esc(f.id||f.finding_id||'')}')">🔕 Suprimir (falso positivo)</button>
+      <button class="btn-secondary small" onclick="suppressFinding('${esc(f.id||f.finding_id||'')}')">Suprimir (falso positivo)</button>
     </div>`;
   document.getElementById('drawer').classList.add('open');
   document.getElementById('drawer-backdrop').classList.add('show');
@@ -686,13 +686,13 @@ async function loadScheduler() {
     const data = await fetch('/api/scheduler').then(r => r.json());
     const container = document.getElementById('scheduler-list');
     if (!container) return;
-    const names = {daily_audit:'🔍 Audit de seguridad diario', weekly_malware:'🦠 Malware scan semanal', daily_network:'📡 Network scan diario'};
+    const names = {daily_audit:'Audit de seguridad diario', weekly_malware:'Malware scan semanal', daily_network:'Network scan diario'};
     container.innerHTML = data.map(e => `
       <div class="sched-card">
         <div class="sched-info">
           <div class="sched-name">${names[e.name]||e.name}</div>
           <div class="sched-meta">
-            ${e.enabled ? '🟢 Activo' : '⭕ Desactivado'} ·
+            ${e.enabled ? 'Activo' : 'Desactivado'} ·
             ${e.hour.toString().padStart(2,'0')}:${e.minute.toString().padStart(2,'0')} ·
             Último: ${fmt(e.last_run)} · Próximo: ${fmt(e.next_run)}
           </div>
@@ -719,7 +719,7 @@ async function toggleScheduler(name, enabled, btnEl) {
 }
 
 async function runSchedulerNow(name, btnEl) {
-  if (btnEl) { btnEl.disabled = true; btnEl.textContent = '⏳'; }
+  if (btnEl) { btnEl.disabled = true; btnEl.textContent = ''; }
   const r = await fetch(`/api/scheduler/${encodeURIComponent(name)}/run`, {method: 'POST'});
   const d = await r.json();
   if (d.ok) { toast('✓ Tarea ejecutada'); loadScheduler(); }
@@ -746,7 +746,7 @@ async function loadUsers() {
             <option value="operator" ${u.role==='operator'?'selected':''}>operator</option>
             <option value="viewer" ${u.role==='viewer'?'selected':''}>viewer</option>
           </select>
-          <button class="btn-secondary small" onclick="deleteUser('${esc(u.username)}')">🗑</button>
+          <button class="btn-secondary small" onclick="deleteUser('${esc(u.username)}')"></button>
         </td>
       </tr>`).join('');
   } catch(e) { console.error('loadUsers:', e); }
@@ -762,7 +762,7 @@ async function createUser() {
   const password = document.getElementById('new-password')?.value;
   const role     = document.getElementById('new-role')?.value;
   const msg      = document.getElementById('user-create-msg');
-  if (!username || !password) { if(msg) msg.textContent = '❌ Rellena todos los campos'; return; }
+  if (!username || !password) { if(msg) msg.textContent = 'Rellena todos los campos'; return; }
   const r = await fetch('/api/users', {
     method: 'POST', headers: {'Content-Type':'application/json'},
     body: JSON.stringify({username, password, role}),
@@ -772,7 +772,7 @@ async function createUser() {
     if (msg) { msg.textContent = '✓ Usuario creado'; msg.style.color = 'var(--green)'; }
     setTimeout(() => { document.getElementById('create-user-form').style.display = 'none'; loadUsers(); }, 1000);
   } else {
-    if (msg) { msg.textContent = '❌ ' + d.error; msg.style.color = 'var(--red)'; }
+    if (msg) { msg.textContent = '' + d.error; msg.style.color = 'var(--red)'; }
   }
 }
 
@@ -809,7 +809,7 @@ async function loadSuppresions() {
         <td style="font-size:.82rem">${esc(s.reason)}</td>
         <td style="font-size:.78rem;color:var(--text2)">${esc(s.created_by)}</td>
         <td style="font-size:.78rem;color:var(--text2)">${s.expires_at ? fmt(s.expires_at) : 'Permanente'}</td>
-        <td><button class="btn-secondary small" onclick="removeSuppression('${esc(s.finding_id_pattern)}')">🗑 Eliminar</button></td>
+        <td><button class="btn-secondary small" onclick="removeSuppression('${esc(s.finding_id_pattern)}')">Eliminar</button></td>
       </tr>`).join('');
   } catch(e) { console.error('loadSuppresions:', e); }
 }
@@ -1015,7 +1015,7 @@ function renderDockerChips(findings) {
   });
   chips.innerHTML = Object.entries(cats).map(([k,n]) =>
     `<span class="host-chip" style="border-color:var(--yellow);color:var(--yellow)">
-       🐳 ${esc(k)}: ${n}
+       ${esc(k)}: ${n}
      </span>`
   ).join('');
 }
@@ -1065,7 +1065,7 @@ async function saveSIEM() {
 
 async function testSIEM() {
   const msg = document.getElementById('siem-msg');
-  msg.textContent = '⏳ Probando conexión…';
+  msg.textContent = 'Probando conexión…';
   msg.style.color = 'var(--text2)';
   const r = await fetch('/api/config/siem/test', { method: 'POST' });
   const d = await r.json();
@@ -1267,9 +1267,9 @@ function updateScanProgress(scanKey, count, crits, highs, mediums, detail = '') 
 
   if (detailsEl) {
     const stats = [
-      crits   > 0 ? `<span class="scan-stat has-value" style="color:var(--critical)">🔴 ${crits} críticos</span>` : '',
-      highs   > 0 ? `<span class="scan-stat has-value" style="color:var(--high)">🟠 ${highs} altos</span>` : '',
-      mediums > 0 ? `<span class="scan-stat has-value">🟡 ${mediums} medios</span>` : '',
+      crits   > 0 ? `<span class="scan-stat has-value" style="color:var(--critical)">${crits} críticos</span>` : '',
+      highs   > 0 ? `<span class="scan-stat has-value" style="color:var(--high)">${highs} altos</span>` : '',
+      mediums > 0 ? `<span class="scan-stat has-value">${mediums} medios</span>` : '',
       detail  ? `<span class="scan-stat">${esc(detail.substring(0,40))}</span>` : '',
     ].filter(Boolean).join('');
     detailsEl.innerHTML = stats || '<span class="scan-stat">Sin hallazgos por ahora…</span>';
@@ -1290,7 +1290,7 @@ function completeScanProgress(scanKey, count, score) {
 }
 
 // ── Versión mejorada de wsRun que alimenta el panel de actividad ──────────────
-function wsRunWithActivity(task, params, handlers = {}, scanLabel = '', scanIcon = '🔍') {
+function wsRunWithActivity(task, params, handlers = {}, scanLabel = '', scanIcon = '') {
   const scanKey = task + '_' + Date.now();
   createScanProgress(scanKey, scanLabel || task, scanIcon);
 
@@ -1304,7 +1304,7 @@ function wsRunWithActivity(task, params, handlers = {}, scanLabel = '', scanIcon
       if (f.severity in counts) counts[f.severity]++;
 
       // Añadir al feed de actividad
-      const sevIcon = {critical:'🔴', high:'🟠', medium:'🟡', low:'🔵', info:'⚪'}[f.severity] || '⚪';
+      const sevIcon = {critical:'', high:'', medium:'', low:'', info:''}[f.severity] || '';
       lastDetail = f.title;
       addActivityItem(task, sevIcon, f.title,
         (f.source_host ? `${f.source_host} · ` : '') + (f.category || ''),
@@ -1320,28 +1320,28 @@ function wsRunWithActivity(task, params, handlers = {}, scanLabel = '', scanIcon
     onLog(level, text) {
       // Mostrar mensajes de sección/fase en el feed de actividad
       if (level === 'section' || level === 'ok') {
-        const icon = level === 'ok' ? '✓' : '📋';
-        addActivityItem(task, icon === '✓' ? '✅' : '🔄', text, '', 'info');
+        const icon = level === 'ok' ? '✓' : '';
+        addActivityItem(task, icon === '✓' ? '' : '', text, '', 'info');
       }
       if (handlers.onLog) handlers.onLog(level, text);
     },
     onDone(msg) {
       completeScanProgress(scanKey, counts.total, msg.score);
       const scoreStr = msg.score != null ? ` (score: ${msg.score}/100)` : '';
-      addActivityItem(task, '✅',
+      addActivityItem(task, '',
         `${scanLabel || task} completado${scoreStr}`,
         `${counts.critical} críticos · ${counts.high} altos · ${counts.medium} medios`,
         counts.critical > 0 ? 'critical' : counts.high > 0 ? 'high' : 'ok');
       if (handlers.onDone) handlers.onDone(msg);
     },
     onDevices(devices) {
-      addActivityItem('network', '📡',
+      addActivityItem('network', '',
         `${devices.length} dispositivos encontrados en la red`, '', 'info');
       updateScanProgress(scanKey, devices.length, 0, 0, 0, `${devices.length} dispositivos`);
       if (handlers.onDevices) handlers.onDevices(devices);
     },
     onHostResult(hr) {
-      const icon = hr.status === 'ok' ? '✅' : '❌';
+      const icon = hr.status === 'ok' ? '' : '';
       addActivityItem('ssh', icon,
         `${hr.host}: ${hr.status === 'ok' ? hr.count + ' hallazgos' : hr.error || hr.status}`,
         hr.os_info || '', hr.status === 'ok' ? (hr.count > 0 ? 'high' : 'ok') : 'medium');
@@ -1349,7 +1349,7 @@ function wsRunWithActivity(task, params, handlers = {}, scanLabel = '', scanIcon
     },
     onError(e) {
       completeScanProgress(scanKey, counts.total, null);
-      addActivityItem(task, '❌', `Error en ${scanLabel || task}`, e.text, 'critical');
+      addActivityItem(task, '', `Error en ${scanLabel || task}`, e.text, 'critical');
       if (handlers.onError) handlers.onError(e);
     },
   };
@@ -1366,7 +1366,7 @@ function runAudit() {
   document.getElementById('audit-results').style.display = 'none';
   document.getElementById('audit-empty').style.display = '';
   document.getElementById('audit-tbody').innerHTML = '';
-  btn('btn-audit', true, '⏳ Analizando…');
+  btn('btn-audit', true, 'Analizando…');
   appendLog('section', '═══ ANÁLISIS DE SEGURIDAD ═══');
 
   wsRunWithActivity('audit', {}, {
@@ -1382,12 +1382,12 @@ function runAudit() {
       const fixable = S.findings.audit.filter(f => f.auto_fix);
       if (fixable.length) {
         const el = document.getElementById('btn-fix-all');
-        if (el) { el.textContent = `⚡ Corregir ${fixable.length} automáticamente`; el.style.display = ''; }
+        if (el) { el.textContent = `Corregir ${fixable.length} automáticamente`; el.style.display = ''; }
       }
       loadDashboard();
       if (document.getElementById('audit-fix-all')?.checked) fixAll('audit');
     },
-  }, 'Análisis de seguridad', '🔍');
+  }, 'Análisis de seguridad', '');
 }
 
 function runMalware() {
@@ -1395,7 +1395,7 @@ function runMalware() {
   document.getElementById('malware-results').style.display = 'none';
   document.getElementById('malware-empty').style.display = '';
   document.getElementById('malware-tbody').innerHTML = '';
-  btn('btn-malware', true, '⏳ Escaneando…');
+  btn('btn-malware', true, 'Escaneando…');
   appendLog('section', '═══ MALWARE SCAN ═══');
 
   const skip = [];
@@ -1421,7 +1421,7 @@ function runMalware() {
       renderSummary('malware-summary-bar', S.findings.malware);
       loadDashboard();
     },
-  }, 'Malware scan', '🦠');
+  }, 'Malware scan', '');
 }
 
 function runDocker() {
@@ -1430,7 +1430,7 @@ function runDocker() {
   document.getElementById('docker-empty').style.display = '';
   document.getElementById('docker-tbody').innerHTML = '';
   document.getElementById('docker-summary').style.display = 'none';
-  btn('btn-docker', true, '⏳ Analizando…');
+  btn('btn-docker', true, 'Analizando…');
   appendLog('section', '═══ DOCKER / KUBERNETES SCAN ═══');
 
   wsRunWithActivity('docker', {
@@ -1445,12 +1445,12 @@ function runDocker() {
       tr.dataset.sev = finding.severity;
       tr.onclick = () => openDrawer(finding);
       const catIcons = {
-        'docker/privilege':'🔐','docker/escape':'🚨','docker/secrets':'🔑',
-        'docker/mounts':'📁','docker/cve':'🐛','docker/updates':'🔄',
-        'kubernetes/rbac':'🔐','kubernetes/network':'🌐',
-        'kubernetes/pod_security':'🛡','kubernetes/secrets':'🔑',
+        'docker/privilege':'','docker/escape':'','docker/secrets':'',
+        'docker/mounts':'','docker/cve':'','docker/updates':'',
+        'kubernetes/rbac':'','kubernetes/network':'',
+        'kubernetes/pod_security':'','kubernetes/secrets':'',
       };
-      const icon  = catIcons[finding.category] || '🐳';
+      const icon  = catIcons[finding.category] || '';
       const label = (finding.category||'').replace(/^(docker|kubernetes)\//, '').replace(/_/g,' ');
       tr.innerHTML = `
         <td>${sevBadge(finding.severity)}</td>
@@ -1472,7 +1472,7 @@ function runDocker() {
         empty.style.display = '';
         const h3 = empty.querySelector('h3');
         const p  = empty.querySelector('p');
-        if (h3) h3.textContent = '✅ Sin problemas detectados';
+        if (h3) h3.textContent = 'Sin problemas detectados';
         if (p)  p.textContent  = 'Tus contenedores tienen buena configuración.';
       }
       loadDashboard();
@@ -1480,7 +1480,7 @@ function runDocker() {
     onError(e) {
       btn('btn-docker', false, '▶ Analizar Docker/K8s');
     },
-  }, 'Docker / Kubernetes', '🐳');
+  }, 'Docker / Kubernetes', '');
 }
 
 // ── Monitoreo: verificar si hay nuevos dispositivos en la red ─────────────────
@@ -1514,7 +1514,7 @@ function runServicesAudit() {
   document.getElementById('services-results').style.display = 'none';
   document.getElementById('services-empty').style.display = '';
   document.getElementById('services-tbody').innerHTML = '';
-  btn('btn-services', true, '⏳ Auditando…');
+  btn('btn-services', true, 'Auditando…');
 
   const services = [...document.querySelectorAll('.svc-check:checked')].map(c => c.value);
   if (!services.length) { toast('Selecciona al menos un servicio'); return; }
@@ -1526,11 +1526,11 @@ function runServicesAudit() {
       const tr = document.createElement('tr');
       tr.dataset.sev = f.severity;
       tr.onclick = () => openDrawer(f);
-      const svcIcons = { nginx:'🌐', apache:'🌐', mysql:'🗄', postgresql:'🐘', redis:'⚡', mongodb:'🍃' };
+      const svcIcons = { nginx:'', apache:'', mysql:'', postgresql:'', redis:'', mongodb:'' };
       const svc = (f.category||'').replace('services/', '');
       tr.innerHTML = `
         <td>${sevBadge(f.severity)}</td>
-        <td style="font-size:.8rem">${svcIcons[svc]||'⚙️'} ${esc(svc)}</td>
+        <td style="font-size:.8rem">${svcIcons[svc]||''} ${esc(svc)}</td>
         <td><b>${esc(f.title)}</b></td>
         <td style="font-size:.78rem;color:var(--text2)">${esc((f.remediation||'').substring(0,70))}</td>`;
       tbody.appendChild(tr);
@@ -1544,12 +1544,12 @@ function runServicesAudit() {
       } else {
         const h3 = document.querySelector('#services-empty h3');
         const p  = document.querySelector('#services-empty p');
-        if (h3) h3.textContent = '✅ Servicios con buena configuración';
+        if (h3) h3.textContent = 'Servicios con buena configuración';
         if (p)  p.textContent  = 'No se detectaron problemas en los servicios analizados.';
       }
     },
     onError() { btn('btn-services', false, '▶ Auditar servicios'); },
-  }, 'Auditoría de servicios', '⚙️');
+  }, 'Auditoría de servicios', '');
 }
 
 function runTLSScan() {
@@ -1557,7 +1557,7 @@ function runTLSScan() {
   document.getElementById('tls-results').style.display = 'none';
   document.getElementById('tls-empty').style.display = '';
   document.getElementById('tls-tbody').innerHTML = '';
-  btn('btn-tls', true, '⏳ Escaneando…');
+  btn('btn-tls', true, 'Escaneando…');
 
   const raw = (document.getElementById('tls-targets').value || '').trim();
   const targets = raw ? raw.split('\n').map(s => s.trim()).filter(Boolean) : [];
@@ -1572,7 +1572,7 @@ function runTLSScan() {
       const tgt = f.source_host || (f.evidence || '').split(',')[0] || '—';
       tr.innerHTML = `
         <td>${sevBadge(f.severity)}</td>
-        <td style="font-size:.8rem">🔒 ${esc(tgt)}</td>
+        <td style="font-size:.8rem">${esc(tgt)}</td>
         <td><b>${esc(f.title)}</b></td>
         <td style="font-size:.78rem;color:var(--text2)">${esc((f.remediation||'').substring(0,70))}</td>`;
       tbody.appendChild(tr);
@@ -1586,12 +1586,12 @@ function runTLSScan() {
       } else {
         const h3 = document.querySelector('#tls-empty h3');
         const p  = document.querySelector('#tls-empty p');
-        if (h3) h3.textContent = '✅ TLS sin problemas detectados';
+        if (h3) h3.textContent = 'TLS sin problemas detectados';
         if (p)  p.textContent  = 'Los certificados analizados son válidos y seguros.';
       }
     },
     onError() { btn('btn-tls', false, '▶ Escanear TLS'); },
-  }, 'Escaneo TLS/SSL', '🔒');
+  }, 'Escaneo TLS/SSL', '');
 }
 
 function runWebHeadersScan() {
@@ -1603,7 +1603,7 @@ function runWebHeadersScan() {
   const raw = (document.getElementById('webhdr-urls').value || '').trim();
   const urls = raw ? raw.split('\n').map(s => s.trim()).filter(Boolean) : [];
   if (!urls.length) { toast('Introduce al menos una URL'); return; }
-  btn('btn-webhdr', true, '⏳ Analizando…');
+  btn('btn-webhdr', true, 'Analizando…');
 
   wsRunWithActivity('web_headers', { urls }, {
     onFinding(f) {
@@ -1614,7 +1614,7 @@ function runWebHeadersScan() {
       tr.onclick = () => openDrawer(f);
       tr.innerHTML = `
         <td>${sevBadge(f.severity)}</td>
-        <td style="font-size:.8rem">🌐 ${esc(f.source_host || '—')}</td>
+        <td style="font-size:.8rem">${esc(f.source_host || '—')}</td>
         <td><b>${esc(f.title)}</b></td>
         <td style="font-size:.78rem;color:var(--text2)">${esc((f.remediation||'').substring(0,70))}</td>`;
       tbody.appendChild(tr);
@@ -1628,12 +1628,12 @@ function runWebHeadersScan() {
       } else {
         const h3 = document.querySelector('#webhdr-empty h3');
         const p  = document.querySelector('#webhdr-empty p');
-        if (h3) h3.textContent = '✅ Cabeceras correctamente configuradas';
+        if (h3) h3.textContent = 'Cabeceras correctamente configuradas';
         if (p)  p.textContent  = 'No se detectaron problemas en las cabeceras de seguridad.';
       }
     },
     onError() { btn('btn-webhdr', false, '▶ Analizar cabeceras'); },
-  }, 'Cabeceras de seguridad web', '🌐');
+  }, 'Cabeceras de seguridad web', '');
 }
 
 function runWebExposureScan() {
@@ -1645,7 +1645,7 @@ function runWebExposureScan() {
   const raw = (document.getElementById('webexp-urls').value || '').trim();
   const urls = raw ? raw.split('\n').map(s => s.trim()).filter(Boolean) : [];
   if (!urls.length) { toast('Introduce al menos una URL'); return; }
-  btn('btn-webexp', true, '⏳ Analizando…');
+  btn('btn-webexp', true, 'Analizando…');
 
   wsRunWithActivity('web_exposure', { urls }, {
     onFinding(f) {
@@ -1656,7 +1656,7 @@ function runWebExposureScan() {
       tr.onclick = () => openDrawer(f);
       tr.innerHTML = `
         <td>${sevBadge(f.severity)}</td>
-        <td style="font-size:.8rem">🕵️ ${esc(f.source_host || '—')}</td>
+        <td style="font-size:.8rem">${esc(f.source_host || '—')}</td>
         <td><b>${esc(f.title)}</b></td>
         <td style="font-size:.78rem;color:var(--text2)">${esc((f.remediation||'').substring(0,70))}</td>`;
       tbody.appendChild(tr);
@@ -1670,12 +1670,12 @@ function runWebExposureScan() {
       } else {
         const h3 = document.querySelector('#webexp-empty h3');
         const p  = document.querySelector('#webexp-empty p');
-        if (h3) h3.textContent = '✅ Sin exposiciones detectadas';
+        if (h3) h3.textContent = 'Sin exposiciones detectadas';
         if (p)  p.textContent  = 'No se encontraron recursos sensibles accesibles públicamente.';
       }
     },
     onError() { btn('btn-webexp', false, '▶ Analizar exposición'); },
-  }, 'Exposición de recursos web', '🕵️');
+  }, 'Exposición de recursos web', '');
 }
 
 function runAPISecurityScan() {
@@ -1687,7 +1687,7 @@ function runAPISecurityScan() {
   const raw = (document.getElementById('apisec-urls').value || '').trim();
   const urls = raw ? raw.split('\n').map(s => s.trim()).filter(Boolean) : [];
   if (!urls.length) { toast('Introduce al menos una URL'); return; }
-  btn('btn-apisec', true, '⏳ Analizando…');
+  btn('btn-apisec', true, 'Analizando…');
 
   wsRunWithActivity('api_security', { urls }, {
     onFinding(f) {
@@ -1698,7 +1698,7 @@ function runAPISecurityScan() {
       tr.onclick = () => openDrawer(f);
       tr.innerHTML = `
         <td>${sevBadge(f.severity)}</td>
-        <td style="font-size:.8rem">🔌 ${esc(f.source_host || '—')}</td>
+        <td style="font-size:.8rem">${esc(f.source_host || '—')}</td>
         <td><b>${esc(f.title)}</b></td>
         <td style="font-size:.78rem;color:var(--text2)">${esc((f.remediation||'').substring(0,70))}</td>`;
       tbody.appendChild(tr);
@@ -1712,12 +1712,12 @@ function runAPISecurityScan() {
       } else {
         const h3 = document.querySelector('#apisec-empty h3');
         const p  = document.querySelector('#apisec-empty p');
-        if (h3) h3.textContent = '✅ API/CORS sin problemas detectados';
+        if (h3) h3.textContent = 'API/CORS sin problemas detectados';
         if (p)  p.textContent  = 'No se detectaron fallos de CORS ni documentación expuesta.';
       }
     },
     onError() { btn('btn-apisec', false, '▶ Analizar API/CORS'); },
-  }, 'Seguridad de API / CORS', '🔌');
+  }, 'Seguridad de API / CORS', '');
 }
 
 function runDNSScan() {
@@ -1729,7 +1729,7 @@ function runDNSScan() {
   const raw = (document.getElementById('dnssec-domains').value || '').trim();
   const domains = raw ? raw.split('\n').map(s => s.trim()).filter(Boolean) : [];
   if (!domains.length) { toast('Introduce al menos un dominio'); return; }
-  btn('btn-dnssec', true, '⏳ Auditando…');
+  btn('btn-dnssec', true, 'Auditando…');
 
   wsRunWithActivity('dns', { domains }, {
     onFinding(f) {
@@ -1740,7 +1740,7 @@ function runDNSScan() {
       tr.onclick = () => openDrawer(f);
       tr.innerHTML = `
         <td>${sevBadge(f.severity)}</td>
-        <td style="font-size:.8rem">📛 ${esc(f.source_host || '—')}</td>
+        <td style="font-size:.8rem">${esc(f.source_host || '—')}</td>
         <td><b>${esc(f.title)}</b></td>
         <td style="font-size:.78rem;color:var(--text2)">${esc((f.remediation||'').substring(0,70))}</td>`;
       tbody.appendChild(tr);
@@ -1754,12 +1754,12 @@ function runDNSScan() {
       } else {
         const h3 = document.querySelector('#dnssec-empty h3');
         const p  = document.querySelector('#dnssec-empty p');
-        if (h3) h3.textContent = '✅ DNS correctamente configurado';
+        if (h3) h3.textContent = 'DNS correctamente configurado';
         if (p)  p.textContent  = 'SPF, DMARC, DNSSEC y CAA en orden.';
       }
     },
     onError() { btn('btn-dnssec', false, '▶ Auditar DNS'); },
-  }, 'Seguridad DNS', '📛');
+  }, 'Seguridad DNS', '');
 }
 
 function runSubdomainScan() {
@@ -1771,7 +1771,7 @@ function runSubdomainScan() {
   const raw = (document.getElementById('subenum-domains').value || '').trim();
   const domains = raw ? raw.split('\n').map(s => s.trim()).filter(Boolean) : [];
   if (!domains.length) { toast('Introduce al menos un dominio'); return; }
-  btn('btn-subenum', true, '⏳ Enumerando…');
+  btn('btn-subenum', true, 'Enumerando…');
 
   wsRunWithActivity('subdomain_enum', { domains }, {
     onFinding(f) {
@@ -1782,7 +1782,7 @@ function runSubdomainScan() {
       tr.onclick = () => openDrawer(f);
       tr.innerHTML = `
         <td>${sevBadge(f.severity)}</td>
-        <td style="font-size:.8rem">🌐 ${esc(f.source_host || '—')}</td>
+        <td style="font-size:.8rem">${esc(f.source_host || '—')}</td>
         <td><b>${esc(f.title)}</b></td>
         <td style="font-size:.78rem;color:var(--text2)">${esc((f.evidence||'').substring(0,70))}</td>`;
       tbody.appendChild(tr);
@@ -1801,7 +1801,7 @@ function runSubdomainScan() {
       }
     },
     onError() { btn('btn-subenum', false, '▶ Enumerar subdominios'); },
-  }, 'Enumeración de subdominios', '🌐');
+  }, 'Enumeración de subdominios', '');
 }
 
 function runNucleiScan() {
@@ -1813,7 +1813,7 @@ function runNucleiScan() {
   const raw = (document.getElementById('nuclei-urls').value || '').trim();
   const urls = raw ? raw.split('\n').map(s => s.trim()).filter(Boolean) : [];
   if (!urls.length) { toast('Introduce al menos una URL'); return; }
-  btn('btn-nuclei', true, '⏳ Escaneando…');
+  btn('btn-nuclei', true, 'Escaneando…');
 
   wsRunWithActivity('nuclei', { urls }, {
     onFinding(f) {
@@ -1824,7 +1824,7 @@ function runNucleiScan() {
       tr.onclick = () => openDrawer(f);
       tr.innerHTML = `
         <td>${sevBadge(f.severity)}</td>
-        <td style="font-size:.8rem">🌐 ${esc(f.source_host || '—')}</td>
+        <td style="font-size:.8rem">${esc(f.source_host || '—')}</td>
         <td><b>${esc(f.title)}</b></td>
         <td style="font-size:.78rem;color:var(--text2)">${esc((f.evidence||'').substring(0,70))}</td>`;
       tbody.appendChild(tr);
@@ -1843,7 +1843,7 @@ function runNucleiScan() {
       }
     },
     onError() { btn('btn-nuclei', false, '▶ Ejecutar Nuclei'); },
-  }, 'Nuclei', '☢️');
+  }, 'Nuclei', '');
 }
 
 // ── 2FA ───────────────────────────────────────────────────────────────────────
@@ -1926,7 +1926,7 @@ async function updateYaraRules() {
   if (!sources.length) { toast('Selecciona al menos una fuente'); return; }
 
   const msg = document.getElementById('yara-update-msg');
-  if (msg) { msg.textContent = '⏳ Descargando reglas…'; msg.style.color = 'var(--text2)'; }
+  if (msg) { msg.textContent = 'Descargando reglas…'; msg.style.color = 'var(--text2)'; }
 
   const r = await fetch('/api/yara/update', {
     method: 'POST', headers: {'Content-Type':'application/json'},
@@ -2007,7 +2007,7 @@ async function openHistoryDetail(scanId) {
     const badge = isFixed
       ? '<span style="font-size:.7rem;color:var(--green)">✓ Corregido</span>'
       : isNew
-      ? '<span style="font-size:.7rem;color:var(--red)">🆕 Nuevo</span>'
+      ? '<span style="font-size:.7rem;color:var(--red)">Nuevo</span>'
       : '';
     return `<tr>
       <td>${sevBadge(f.severity)}</td>
@@ -2097,7 +2097,7 @@ function initPushWebSocket() {
   };
 
   _pushWs.onopen = () => {
-    appendLog('info', '📡 Canal de notificaciones push conectado');
+    appendLog('info', 'Canal de notificaciones push conectado');
     if (_pushReconnectTimer) { clearTimeout(_pushReconnectTimer); _pushReconnectTimer = null; }
   };
 
@@ -2122,8 +2122,8 @@ function handlePushEvent(msg) {
       // Hay nuevos hallazgos críticos
       const { critical, total, scan_id, score, titles } = msg.data || {};
       if (critical > 0) {
-        toast(`🔴 ${critical} hallazgo(s) crítico(s) detectado(s)`, 'critical');
-        addActivityItem('push', '🔴',
+        toast(`${critical} hallazgo(s) crítico(s) detectado(s)`, 'critical');
+        addActivityItem('push', '',
           `${critical} hallazgo(s) CRÍTICO(S)`,
           titles?.join(' · ') || '',
           'critical');
@@ -2134,7 +2134,7 @@ function handlePushEvent(msg) {
 
     case 'scan_complete':
       // Un scan automático (scheduler) terminó
-      addActivityItem('scheduler', '✅',
+      addActivityItem('scheduler', '',
         `Scan automático completado: ${msg.data?.scan_type || ''}`,
         `Score: ${msg.data?.score ?? '—'}/100`,
         'ok');
@@ -2143,8 +2143,8 @@ function handlePushEvent(msg) {
 
     case 'new_device':
       // Nuevo dispositivo detectado en la red
-      toast(`📡 Nuevo dispositivo en la red: ${msg.data?.ip || ''}`, 'warning');
-      addActivityItem('monitor', '📡',
+      toast(`Nuevo dispositivo en la red: ${msg.data?.ip || ''}`, 'warning');
+      addActivityItem('monitor', '',
         `Nuevo dispositivo: ${msg.data?.ip || ''}`,
         msg.data?.hostname || '',
         'high');
@@ -2212,7 +2212,7 @@ async function runLDAPScan() {
   };
 
   const btnEl = document.getElementById('btn-ldap');
-  if (btnEl) { btnEl.disabled = true; btnEl.textContent = '⏳ Analizando…'; }
+  if (btnEl) { btnEl.disabled = true; btnEl.textContent = 'Analizando…'; }
 
   try {
     const r = await fetch('/api/scan/ldap', {
@@ -2286,10 +2286,10 @@ async function loadQuarantine() {
       <td style="font-size:.78rem;color:var(--text2)">${esc((item.finding_title||'').substring(0,40))}</td>
       <td style="font-size:.75rem;color:var(--text2)">${new Date(item.quarantined_at).toLocaleString('es')}</td>
       <td style="font-size:.75rem;color:var(--text2)">${(item.size_bytes/1024).toFixed(1)} KB</td>
-      <td><span style="font-size:.72rem;padding:2px 6px;border-radius:3px;background:var(--bg3)">${item.restored?'🔄 Restaurado':'🔒 Cuarentena'}</span></td>
+      <td><span style="font-size:.72rem;padding:2px 6px;border-radius:3px;background:var(--bg3)">${item.restored?'Restaurado':'Cuarentena'}</span></td>
       <td>
-        <button class="btn-secondary small" onclick="restoreQuarantine('${esc(item.quarantine_name)}')">↩ Restaurar</button>
-        <button class="btn-danger small" onclick="deleteQuarantine('${esc(item.quarantine_name)}')">🗑 Eliminar</button>
+        <button class="btn-secondary small" onclick="restoreQuarantine('${esc(item.quarantine_name)}')">Restaurar</button>
+        <button class="btn-danger small" onclick="deleteQuarantine('${esc(item.quarantine_name)}')">Eliminar</button>
       </td>
     </tr>`).join('');
 }
@@ -2335,7 +2335,7 @@ function openDrawerWithQuarantine(f) {
       const btn = document.createElement('button');
       btn.className = 'btn-danger small';
       btn.style.marginTop = '12px';
-      btn.textContent = '🔒 Enviar a cuarentena';
+      btn.textContent = 'Enviar a cuarentena';
       btn.onclick = () => quarantineFile(f.file_path, f.id || f.finding_id, f.title);
       body.appendChild(btn);
     }
@@ -2351,7 +2351,7 @@ async function generateSBOM() {
 
   const summaryEl = document.getElementById('sbom-summary');
   const result    = document.getElementById('sbom-result');
-  if (summaryEl) summaryEl.textContent = '⏳ Generando SBOM… (puede tardar 10-30s)';
+  if (summaryEl) summaryEl.textContent = 'Generando SBOM… (puede tardar 10-30s)';
   if (result)    result.style.display = '';
 
   try {
@@ -2456,7 +2456,7 @@ async function downloadPDF(scanType) {
       return;
     }
 
-    toast('⏳ Generando PDF…');
+    toast('Generando PDF…');
     const r = await fetch('/api/report/pdf', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
@@ -2497,7 +2497,7 @@ async function loadCompliance() {
   const result  = document.getElementById('compliance-result');
   const cards   = document.getElementById('compliance-cards');
   if (result) result.style.display = '';
-  if (cards)  cards.innerHTML = '<div style="color:var(--text2);font-size:.82rem">⏳ Analizando cumplimiento…</div>';
+  if (cards)  cards.innerHTML = '<div style="color:var(--text2);font-size:.82rem">Analizando cumplimiento…</div>';
 
   try {
     const r = await fetch('/api/compliance', {
@@ -2627,7 +2627,7 @@ async function loadMonitorHistory() {
     feed.innerHTML = events.slice(0, 50).map(f => {
       const dt    = new Date(f.scan_time || '').toLocaleTimeString('es');
       const color = sevColors[f.severity] || 'var(--text2)';
-      const icon  = f.severity === 'critical' ? '🔴' : f.severity === 'high' ? '🟠' : '🟡';
+      const icon  = f.severity === 'critical' ? '' : f.severity === 'high' ? '' : '';
       return `<div style="padding:4px 0;border-bottom:1px solid var(--bg3)">
         <span style="color:var(--text2)">[${dt}]</span>
         <span style="color:${color};margin:0 4px">${icon}</span>
@@ -2648,7 +2648,7 @@ async function runDockerImageScan() {
   const empty   = document.getElementById('img-scan-empty');
   const tbody   = document.getElementById('img-scan-tbody');
 
-  if (btnEl) { btnEl.disabled = true; btnEl.textContent = '⏳ Analizando imágenes…'; }
+  if (btnEl) { btnEl.disabled = true; btnEl.textContent = 'Analizando imágenes…'; }
   if (results) results.style.display = 'none';
   if (empty)   empty.textContent = '';
 
@@ -2665,7 +2665,7 @@ async function runDockerImageScan() {
     }
 
     if (!d.findings?.length) {
-      if (empty) empty.textContent = '✅ Sin hallazgos en las imágenes analizadas.';
+      if (empty) empty.textContent = 'Sin hallazgos en las imágenes analizadas.';
       return;
     }
 
@@ -2683,13 +2683,13 @@ async function runDockerImageScan() {
     }
 
     appendLog('ok', `✓ Docker image scan: ${d.findings.length} hallazgos`);
-    addActivityItem('docker', '🔍', `Image scan: ${d.findings.length} hallazgos`,
+    addActivityItem('docker', '', `Image scan: ${d.findings.length} hallazgos`,
       `${images?.join(', ') || 'imágenes locales'}`, d.findings[0]?.severity || 'info');
 
   } catch(e) {
     if (empty) empty.textContent = '✗ Error: ' + e.message;
   } finally {
-    if (btnEl) { btnEl.disabled = false; btnEl.textContent = '🔍 Analizar imágenes'; }
+    if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'Analizar imágenes'; }
   }
 }
 
@@ -2715,7 +2715,7 @@ async function runAnsiblePlaybook() {
   const pbEl     = document.getElementById('ansible-playbook');
 
   if (result)   result.style.display = '';
-  if (statusEl) statusEl.textContent = '⏳ Lanzando playbook…';
+  if (statusEl) statusEl.textContent = 'Lanzando playbook…';
   if (outputEl) outputEl.textContent = '';
 
   const body = { mode, target };
@@ -2748,7 +2748,7 @@ async function runAnsiblePlaybook() {
     // Actualizar lista de jobs
     await loadAnsibleJobs();
     toast(d.status === 'successful' ? '✓ Playbook completado' : '⚠ Playbook con errores');
-    addActivityItem('ansible', d.status === 'successful' ? '✅' : '❌',
+    addActivityItem('ansible', d.status === 'successful' ? '' : '',
       `Playbook Ansible: ${d.status}`, `target=${target}`, d.status === 'successful' ? 'ok' : 'high');
   } catch(e) {
     if (statusEl) { statusEl.textContent = `✗ Error: ${e.message}`; statusEl.style.color='var(--red)'; }
@@ -2767,7 +2767,7 @@ async function loadAnsibleJobs() {
       return `<div style="padding:4px 0;border-bottom:1px solid var(--border);font-size:.78rem;display:flex;gap:8px">
         <span style="color:${color};font-weight:600">#${j.job_id}</span>
         <span style="color:${color}">${j.status}</span>
-        <span style="color:var(--text2)">${j.mode} → ${j.target}</span>
+        <span style="color:var(--text2)">${j.mode} ${j.target}</span>
         <span style="color:var(--text2);margin-left:auto">${new Date(j.started_at).toLocaleTimeString('es')}</span>
       </div>`;
     }).join('');
@@ -2783,7 +2783,7 @@ async function runRuntimeScan() {
   const empty   = document.getElementById('rt-empty');
   const tbody   = document.getElementById('rt-tbody');
 
-  if (btnEl) { btnEl.disabled=true; btnEl.textContent='⏳ Analizando…'; }
+  if (btnEl) { btnEl.disabled=true; btnEl.textContent='Analizando…'; }
   if (results) results.style.display = 'none';
   if (empty)   empty.textContent = '';
 
@@ -2796,7 +2796,7 @@ async function runRuntimeScan() {
 
     if (d.error) { if (empty) empty.textContent = '✗ ' + d.error; return; }
     if (!d.findings?.length) {
-      if (empty) empty.textContent = '✅ Sin comportamiento anómalo detectado en los contenedores activos.';
+      if (empty) empty.textContent = 'Sin comportamiento anómalo detectado en los contenedores activos.';
       return;
     }
 
@@ -2811,12 +2811,12 @@ async function runRuntimeScan() {
           <td style="font-size:.75rem;color:var(--text2)">${esc((f.evidence||'').substring(0,60))}</td>
         </tr>`).join('');
     }
-    addActivityItem('runtime', '🔄', `Runtime scan: ${d.findings.length} hallazgos`, '', d.findings[0]?.severity||'info');
+    addActivityItem('runtime', '', `Runtime scan: ${d.findings.length} hallazgos`, '', d.findings[0]?.severity||'info');
     toast(`✓ Runtime scan: ${d.findings.length} hallazgos`);
   } catch(e) {
     if (empty) empty.textContent = '✗ Error: ' + e.message;
   } finally {
-    if (btnEl) { btnEl.disabled=false; btnEl.textContent='🔄 Analizar runtime'; }
+    if (btnEl) { btnEl.disabled=false; btnEl.textContent='Analizar runtime'; }
   }
 }
 
@@ -2990,7 +2990,7 @@ document.addEventListener('keydown', e => {
     if (dest) {
       showPanel(dest);
       _keyBuffer = '';
-      toast(`→ ${dest.charAt(0).toUpperCase() + dest.slice(1)}`);
+      toast(`${dest.charAt(0).toUpperCase() + dest.slice(1)}`);
     }
   }
 });
@@ -3076,7 +3076,7 @@ async function requestBrowserNotifications() {
 
 function sendBrowserNotif(title, body, severity = 'info') {
   if (!_browserNotifEnabled || Notification.permission !== 'granted') return;
-  const icons = { critical: '🔴', high: '🟠', medium: '🟡', low: '🔵', info: 'ℹ️' };
+  const icons = { critical: '', high: '', medium: '', low: '', info: 'ℹ️' };
   const tag = `cyberhound-${severity}-${Date.now()}`;
   const n = new Notification(`${icons[severity] || 'ℹ️'} CyberHound: ${title}`, {
     body,
@@ -3205,7 +3205,7 @@ async function loadIntelConfig() {
 
     if (cfg.configured_count === 0) {
       el.innerHTML += `<div style="padding:5px 10px;color:var(--yellow);font-size:.78rem">
-        ⚠ Sin API keys configuradas — ir a ⚙ Config → 🔑 API Keys
+        ⚠ Sin API keys configuradas — ir a Config API Keys
       </div>`;
     }
   } catch(e) {}
@@ -3219,7 +3219,7 @@ async function runIntelLookup() {
 
   if (!target) { toast('Introduce una IP o dominio', 'warning'); return; }
 
-  if (btnEl) { btnEl.disabled = true; btnEl.textContent = '⏳ Consultando…'; }
+  if (btnEl) { btnEl.disabled = true; btnEl.textContent = 'Consultando…'; }
   _showIntelLoading();
 
   try {
@@ -3234,19 +3234,19 @@ async function runIntelLookup() {
     }
 
     _renderIntelResults(d);
-    addActivityItem('intel', '🌐', `Intel: ${target}`, `${d.count} hallazgos`, d.summary?.risk_level || 'info');
+    addActivityItem('intel', '', `Intel: ${target}`, `${d.count} hallazgos`, d.summary?.risk_level || 'info');
 
   } catch(e) {
     _showIntelEmpty(`✗ Error: ${e.message}`);
   } finally {
-    if (btnEl) { btnEl.disabled = false; btnEl.textContent = '🔍 Consultar'; }
+    if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'Consultar'; }
   }
 }
 
 // ── Scan masivo desde network scan ────────────────────────────────────────────
 async function runIntelScan() {
   const btnEl = document.getElementById('btn-intel-scan');
-  if (btnEl) { btnEl.disabled = true; btnEl.textContent = '⏳ Analizando…'; }
+  if (btnEl) { btnEl.disabled = true; btnEl.textContent = 'Analizando…'; }
   _showIntelLoading();
 
   try {
@@ -3268,7 +3268,7 @@ async function runIntelScan() {
   } catch(e) {
     _showIntelEmpty(`✗ Error: ${e.message}`);
   } finally {
-    if (btnEl) { btnEl.disabled = false; btnEl.textContent = '🌐 Analizar IPs del último scan de red'; }
+    if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'Analizar IPs del último scan de red'; }
   }
 }
 
@@ -3282,7 +3282,7 @@ function _renderIntelResults(data) {
 
   if (emptyEl) emptyEl.textContent = '';
   if (!data.findings?.length) {
-    _showIntelEmpty('✅ Sin hallazgos de threat intelligence para estos targets.');
+    _showIntelEmpty('Sin hallazgos de threat intelligence para estos targets.');
     return;
   }
 
@@ -3339,7 +3339,7 @@ function _showIntelLoading() {
   const resultsEl = document.getElementById('intel-results');
   const emptyEl   = document.getElementById('intel-empty');
   if (resultsEl) resultsEl.style.display = 'none';
-  if (emptyEl) emptyEl.innerHTML = '<div style="color:var(--text2);font-size:.85rem">⏳ Consultando fuentes de inteligencia…</div>';
+  if (emptyEl) emptyEl.innerHTML = '<div style="color:var(--text2);font-size:.85rem">Consultando fuentes de inteligencia…</div>';
 }
 
 function _showIntelEmpty(msg) {
@@ -3432,7 +3432,7 @@ async function importAuditFile() {
   const file = fileInput?.files?.[0];
   if (!file) { toast('Selecciona un fichero de auditoría', 'warning'); return; }
 
-  if (btnEl) { btnEl.disabled = true; btnEl.textContent = '⏳ Importando…'; }
+  if (btnEl) { btnEl.disabled = true; btnEl.textContent = 'Importando…'; }
   if (resultEl) resultEl.style.display = 'none';
   if (errorEl)  errorEl.textContent = '';
 
@@ -3453,7 +3453,7 @@ async function importAuditFile() {
     // Mostrar resumen
     if (resultEl) resultEl.style.display = '';
     if (summaryEl) {
-      const typeLabel = d.source === 'xccdf' ? '⚖️ Cumplimiento/bastionado' : '🔴 Vulnerabilidades';
+      const typeLabel = d.source === 'xccdf' ? 'Cumplimiento/bastionado' : 'Vulnerabilidades';
       summaryEl.innerHTML = `
         <div style="display:flex;gap:16px;flex-wrap:wrap">
           <span><strong>Formato:</strong> ${esc(d.source)}</span>
@@ -3471,7 +3471,7 @@ async function importAuditFile() {
     if (tbodyEl) {
       tbodyEl.innerHTML = (d.findings || []).slice(0, 10).map(f => {
         const isCompliance = (f.category||'').startsWith('compliance');
-        const typeIcon = isCompliance ? '⚖️' : '🔴';
+        const typeIcon = isCompliance ? '' : '';
         return `<tr>
           <td style="font-size:.75rem;color:var(--text2)">${typeIcon} ${esc((f.category||'').split('/').pop())}</td>
           <td>${sevBadge(f.severity)}</td>
@@ -3482,7 +3482,7 @@ async function importAuditFile() {
     }
 
     toast(`✓ ${d.imported} hallazgos importados (scan #${d.scan_id})`, 'ok');
-    addActivityItem('import', '📥', `Import: ${file.name}`, `${d.imported} hallazgos`, d.imported > 0 ? 'ok' : 'info');
+    addActivityItem('import', '', `Import: ${file.name}`, `${d.imported} hallazgos`, d.imported > 0 ? 'ok' : 'info');
 
     // Limpiar el input
     if (fileInput) fileInput.value = '';
@@ -3491,6 +3491,6 @@ async function importAuditFile() {
   } catch(e) {
     if (errorEl) errorEl.textContent = `✗ Error: ${e.message}`;
   } finally {
-    if (btnEl) { btnEl.disabled = false; btnEl.textContent = '📥 Importar'; }
+    if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'Importar'; }
   }
 }

@@ -21,6 +21,9 @@
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* Garantía dura: nunca scroll horizontal a nivel de página, en ningún monitor. */
+html, body { max-width: 100%; overflow-x: hidden; }
+
 body {
   background: var(--bg);
   color: var(--text);
@@ -56,14 +59,63 @@ body {
 .dot.error   { background: var(--red); }
 @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
 
-.top-nav { display: flex; gap: 2px; margin: 0 8px; }
-.nav-tab {
+/* ── Navegación: limpia y minimalista (estilo refinado, sin sobrecarga) ── */
+.top-nav { display: flex; gap: 2px; margin: 0 6px; flex-wrap: wrap; align-items: center; }
+.nav-tab, .nav-group > summary.nav-trigger {
   background: none; border: none; color: var(--text2);
-  padding: 6px 12px; border-radius: 6px; font-size: .85rem;
-  cursor: pointer; transition: all .15s; white-space: nowrap;
+  padding: 7px 14px; border-radius: 8px;
+  font-size: .85rem; font-weight: 500; letter-spacing: .005em;
+  cursor: pointer; white-space: nowrap;
+  transition: background .18s ease, color .18s ease;
 }
-.nav-tab:hover { background: var(--bg3); color: var(--text); }
-.nav-tab.active { background: var(--blue); color: #0d1117; font-weight: 600; }
+.nav-tab:hover { background: rgba(255,255,255,.06); color: var(--text); }
+/* Estado activo: píldora translúcida con acento (suave, no bloque sólido). */
+.nav-tab.active { background: rgba(88,166,255,.14); color: var(--blue); font-weight: 600; }
+
+.nav-group { position: relative; }
+.nav-group > summary.nav-trigger {
+  list-style: none; user-select: none;
+  display: inline-flex; align-items: center; gap: 5px;
+}
+.nav-group > summary.nav-trigger::-webkit-details-marker { display: none; }
+.nav-group > summary.nav-trigger::after {
+  content: ""; width: 5px; height: 5px; margin-left: 1px;
+  border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor;
+  transform: translateY(-1px) rotate(45deg); opacity: .5; transition: transform .18s ease;
+}
+.nav-group > summary.nav-trigger:hover { background: rgba(255,255,255,.06); color: var(--text); }
+.nav-group[open] > summary.nav-trigger { color: var(--text); }
+.nav-group[open] > summary.nav-trigger::after { transform: translateY(1px) rotate(225deg); opacity: .8; }
+/* Resalta el grupo que contiene el panel activo. Vía clase (robusto en todos los
+   navegadores); `:has` queda como mejora progresiva. */
+.top-nav .nav-group.has-active > summary.nav-trigger { color: #58a6ff; font-weight: 600; }
+.top-nav .nav-group:has(.nav-tab.active) > summary.nav-trigger { color: #58a6ff; font-weight: 600; }
+
+.nav-menu {
+  position: absolute; top: calc(100% + 8px); left: 0;
+  display: flex; flex-direction: column; gap: 1px; padding: 7px;
+  background: var(--bg2); border: 1px solid var(--border);
+  border-radius: 12px; box-shadow: 0 12px 34px rgba(0,0,0,.45);
+  min-width: 196px; max-width: calc(100vw - 16px); z-index: 300;
+  transform-origin: top left; animation: navMenuIn .16s ease;
+}
+@keyframes navMenuIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+.nav-menu .nav-tab { text-align: left; width: 100%; font-weight: 500; }
+
+/* Etiqueta sutil "Auto-fix" (sustituye al icono ⚡, estilo limpio). */
+.fix-tag {
+  align-self: center; white-space: nowrap;
+  font-size: .68rem; font-weight: 600; letter-spacing: .02em;
+  color: var(--blue); background: rgba(88,166,255,.12);
+  padding: 2px 8px; border-radius: 999px;
+}
+
+/* Hamburguesa: oculta en escritorio, visible en móvil (media query). */
+.nav-toggle {
+  display: none; background: none; border: 1px solid var(--border);
+  color: var(--text); padding: 5px 11px; border-radius: 8px;
+  font-size: 1.1rem; line-height: 1; cursor: pointer;
+}
 
 #log-toggle {
   margin-left: auto;
@@ -125,7 +177,7 @@ body {
 
 .quick-actions { display: flex; flex-direction: column; gap: 8px; }
 .quick-btn {
-  display: grid; grid-template-columns: 24px 1fr auto;
+  display: grid; grid-template-columns: 1fr auto;
   align-items: center; gap: 10px;
   background: var(--bg3); border: 1px solid var(--border);
   color: var(--text); padding: 10px 14px; border-radius: 6px;
@@ -133,6 +185,8 @@ body {
   transition: border-color .15s;
 }
 .quick-btn small { color: var(--text2); font-size: .75rem; }
+/* Oculta el slot de icono vacío (se eliminaron los emojis) para no dejar hueco. */
+.quick-btn > span:empty { display: none; }
 .quick-btn:hover { border-color: var(--blue); }
 
 .hint { font-size: .82rem; color: var(--text2); margin-bottom: 10px; }
@@ -548,17 +602,12 @@ body.activity-open #main { margin-right:320px; }
     gap: 8px;
   }
   .top-nav {
-    gap: 2px;
-    overflow-x: auto;
-    flex-wrap: nowrap;
-    scrollbar-width: none;
+    gap: 4px;
+    flex-wrap: wrap;
   }
-  .top-nav::-webkit-scrollbar { display: none; }
-  .nav-tab {
-    font-size: .72rem;
-    padding: 5px 8px;
-    white-space: nowrap;
-    flex-shrink: 0;
+  .nav-tab, .nav-group > summary.nav-trigger {
+    font-size: .78rem;
+    padding: 5px 9px;
   }
   #main {
     padding: 12px;
@@ -588,26 +637,33 @@ body.activity-open #main { margin-right:320px; }
   }
 
   .logo { order: 1; }
-  #log-toggle { order: 2; margin-left: auto; }
-  .logout-btn { order: 3; }
-  #status-area { order: 4; width: 100%; font-size: .75rem; }
+  .nav-toggle { display: inline-block; order: 2; }
+  #log-toggle { order: 3; margin-left: auto; }
+  .logout-btn { order: 4; }
+  #status-area { order: 5; width: 100%; font-size: .75rem; }
 
+  /* La navegación se colapsa tras la hamburguesa; al abrir, menú vertical. */
   .top-nav {
-    order: 5;
+    order: 6;
     width: 100%;
-    overflow-x: auto;
-    flex-wrap: nowrap;
+    flex-direction: column;
+    gap: 4px;
     border-top: 1px solid var(--border);
-    padding-top: 6px;
-    margin-top: 2px;
-    scrollbar-width: none;
-    -ms-overflow-style: none;
+    padding-top: 8px;
+    margin: 4px 0 0;
+    display: none;
   }
-  .top-nav::-webkit-scrollbar { display: none; }
-  .nav-tab {
-    font-size: .7rem;
-    padding: 5px 8px;
-    white-space: nowrap;
+  .top-nav.open { display: flex; }
+  .top-nav .nav-tab,
+  .nav-group, .nav-group > summary.nav-trigger { width: 100%; }
+  .nav-tab, .nav-group > summary.nav-trigger {
+    font-size: .85rem;
+    padding: 9px 12px;
+  }
+  /* En móvil los submenús se muestran en línea (sin capa flotante). */
+  .nav-menu {
+    position: static; box-shadow: none; border: none;
+    background: var(--bg); padding: 2px 0 2px 18px; min-width: 0;
   }
 
   #main {
