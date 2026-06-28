@@ -312,6 +312,8 @@ class CyberHoundServer:
         app.router.add_post("/api/config/siem/test",    self.api_test_siem)
 
         # ── Modo agente ───────────────────────────────────────────────────────
+        app.router.add_get ("/api/config/agent",     self.api_get_agent_cfg)
+        app.router.add_post("/api/config/agent",     self.api_save_agent_cfg)
         app.router.add_post("/api/agent/report",     self.api_agent_report)
         app.router.add_post("/api/agent/heartbeat",  self.api_agent_heartbeat)
         app.router.add_get ("/api/agent/list",       self.api_agent_list)
@@ -1730,6 +1732,32 @@ class CyberHoundServer:
             return web.json_response({"error": str(e)}, status=500)
 
     # ── Modo agente ───────────────────────────────────────────────────────────
+
+    async def api_get_agent_cfg(self, request: web.Request) -> web.Response:
+        a = self.cfg.agent
+        return web.json_response({
+            "mode":        a.mode,
+            "manager_url": a.manager_url,
+            "agent_name":  a.agent_name,
+            "has_key":     bool(a.agent_key),   # la clave nunca se devuelve
+        })
+
+    async def api_save_agent_cfg(self, request: web.Request) -> web.Response:
+        try:
+            body = await _read_json(request)
+            a = self.cfg.agent
+            mode = body.get("mode")
+            if mode in ("standalone", "manager", "agent"):
+                a.mode = mode
+            for field in ("manager_url", "agent_name"):
+                if field in body:
+                    setattr(a, field, str(body[field] or ""))
+            if body.get("agent_key"):            # solo si no está vacío
+                a.agent_key = str(body["agent_key"])
+            self.cfg.save()
+            return web.json_response({"ok": True})
+        except Exception as e:
+            return web.json_response({"ok": False, "error": str(e)}, status=400)
 
     async def api_agent_report(self, request: web.Request) -> web.Response:
         """Recibe hallazgos enviados por un agente remoto."""
