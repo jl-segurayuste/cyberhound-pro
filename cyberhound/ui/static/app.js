@@ -2748,3 +2748,131 @@ loadDashboard = async function() {
   await _origLoadDashboard();
   loadDashboardCompliance();
 };
+
+// ══════════════════════════════════════════════════════════════════════════════
+// NOTIFICACIONES PUSH DEL NAVEGADOR
+// ══════════════════════════════════════════════════════════════════════════════
+
+let _browserNotifEnabled = false;
+
+async function requestBrowserNotifications() {
+  if (!('Notification' in window)) {
+    toast('Tu navegador no soporta notificaciones push', 'warning');
+    return false;
+  }
+  if (Notification.permission === 'granted') {
+    _browserNotifEnabled = true;
+    return true;
+  }
+  if (Notification.permission === 'denied') {
+    toast('Notificaciones bloqueadas — actívalas en la configuración del navegador', 'warning');
+    return false;
+  }
+  const perm = await Notification.requestPermission();
+  _browserNotifEnabled = perm === 'granted';
+  if (_browserNotifEnabled) {
+    toast('✓ Notificaciones activadas', 'ok');
+    new Notification('CyberHound Pro', {
+      body: 'Recibirás alertas cuando se detecten hallazgos críticos.',
+      icon: '/favicon.ico',
+    });
+  }
+  return _browserNotifEnabled;
+}
+
+function sendBrowserNotif(title, body, severity = 'info') {
+  if (!_browserNotifEnabled || Notification.permission !== 'granted') return;
+  const icons = { critical: '🔴', high: '🟠', medium: '🟡', low: '🔵', info: 'ℹ️' };
+  const tag = `cyberhound-${severity}-${Date.now()}`;
+  const n = new Notification(`${icons[severity] || 'ℹ️'} CyberHound: ${title}`, {
+    body,
+    icon: '/favicon.ico',
+    tag,
+    requireInteraction: severity === 'critical',
+  });
+  n.onclick = () => { window.focus(); n.close(); };
+  // Auto-cerrar en 8s excepto críticos
+  if (severity !== 'critical') setTimeout(() => n.close(), 8000);
+}
+
+// Integrar con el canal WebSocket push — notificar hallazgos críticos al llegar
+const _origPushHandler = window._wsPushHandler;
+window._wsPushHandler = function(event) {
+  if (_origPushHandler) _origPushHandler(event);
+  try {
+    const msg = JSON.parse(event.data);
+    if (msg.type === 'new_findings' && msg.critical > 0) {
+      sendBrowserNotif(
+        `${msg.critical} hallazgo(s) crítico(s)`,
+        `Scan de ${msg.scan_type || 'seguridad'} completado en ${msg.target || 'localhost'}`,
+        'critical',
+      );
+    } else if (msg.type === 'scan_complete' && msg.score < 50) {
+      sendBrowserNotif(
+        `Score bajo: ${msg.score}/100`,
+        `El análisis de ${msg.scan_type || 'seguridad'} obtuvo un score preocupante.`,
+        'high',
+      );
+    } else if (msg.type === 'new_device') {
+      sendBrowserNotif(
+        `Nuevo dispositivo detectado`,
+        `IP: ${msg.ip || '?'} — Verifica si está autorizado en el panel de Assets.`,
+        'medium',
+      );
+    }
+  } catch(e) { /* ignorar mensajes no JSON */ }
+};
+
+// ── Panel de estado del sistema ────────────────────────────────────────────────
+async function loadSystemStatus() {
+  try {
+    const [monR, licR, schedR] = await Promise.all([
+      fetch('/api/monitor/status'),
+      fetch('/api/license'),
+      fetch('/api/scheduler'),
+    ]);
+    const mon   = monR.ok   ? await monR.json()   : {};
+    const lic   = licR.ok   ? await licR.json()   : {};
+    const sched = schedR.ok ? await schedR.json() : {};
+
+    const el = document.getElementById('dash-system-status');
+    if (!el) return;
+
+    const items = [
+      {
+        label: 'Monitor',
+        value: mon.active ? `Activo (${mon.mode})` : 'Inactivo',
+        color: mon.active ? 'var(--green)' : 'var(--yellow)',
+        tip:   mon.active ? '' : 'sudo apt install auditd',
+      },
+      {
+        label: 'Licencia',
+        value: lic.tier ? `${lic.tier} — ${lic.licensee || 'Community'}` : '?',
+        color: 'var(--text)',
+      },
+      {
+        label: 'Notif. push',
+        value: _browserNotifEnabled ? 'Activadas' : 'Desactivadas',
+        color: _browserNotifEnabled ? 'var(--green)' : 'var(--text2)',
+        onclick: 'requestBrowserNotifications()',
+      },
+    ];
+
+    el.innerHTML = items.map(item => `
+      <div style="display:flex;justify-content:space-between;align-items:center;
+                  padding:5px 0;border-bottom:1px solid var(--border);font-size:.8rem"
+           ${item.onclick ? `onclick="${item.onclick}" style="cursor:pointer"` : ''}>
+        <span style="color:var(--text2)">${item.label}</span>
+        <span style="color:${item.color}">${item.value}
+          ${item.tip ? `<span style="color:var(--text2);font-size:.72rem"> — ${item.tip}</span>` : ''}
+        </span>
+      </div>`).join('');
+  } catch(e) {}
+}
+
+// ── Extender loadDashboard para incluir el estado del sistema ─────────────────
+const _loadDashWithSystem = loadDashboard;
+loadDashboard = async function() {
+  await _loadDashWithSystem();
+  loadSystemStatus();
+};

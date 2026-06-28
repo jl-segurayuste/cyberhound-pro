@@ -121,9 +121,20 @@
       <div class="dash-card">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
           <h3 style="margin:0">⚖️ Cumplimiento</h3>
-          <button class="btn-secondary small" onclick="showPanel('reports');showCfgTab && setTimeout(()=>showPanel('reports'),0)">Ver detalle</button>
+          <button class="btn-secondary small" onclick="showPanel('reports')">Ver detalle</button>
         </div>
         <div id="dash-compliance-mini">
+          <div style="color:var(--text2);font-size:.8rem">Cargando…</div>
+        </div>
+      </div>
+
+      <!-- Estado del sistema -->
+      <div class="dash-card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <h3 style="margin:0">⚡ Estado del sistema</h3>
+          <button class="btn-secondary small" onclick="requestBrowserNotifications()" title="Activar notificaciones push">🔔</button>
+        </div>
+        <div id="dash-system-status">
           <div style="color:var(--text2);font-size:.8rem">Cargando…</div>
         </div>
       </div>
