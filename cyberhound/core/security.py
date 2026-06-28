@@ -434,15 +434,18 @@ class CsrfProtection:
     Protección CSRF para formularios POST.
     Usa el patrón Double Submit Cookie:
       1. Genera un token aleatorio por sesión
-      2. Lo incluye en el formulario como campo oculto
-      3. Lo verifica en cada POST comparando con la cookie
+      2. Lo incluye en el formulario como campo oculto (_csrf)
+      3. En cada POST del formulario verifica que cookie == campo
+
+    RUTAS EXENTAS:
+      - /login:  gestiona su propio token (lo verifica en login_post)
+      - /logout: GET
+      - /api/*:  autenticadas con JWT, no necesitan CSRF
+      - /ws:     WebSocket, no aplica
     """
 
     COOKIE_NAME = "ch_csrf"
     FIELD_NAME  = "_csrf"
-    # Rutas POST que no necesitan CSRF (API JSON con JWT)
-    EXEMPT_PATHS = {"/api/fix/local", "/api/fix/remote", "/api/report",
-                    "/api/config/keys"}
 
     @staticmethod
     def generate_token() -> str:
@@ -453,48 +456,60 @@ class CsrfProtection:
         return request.cookies.get(CsrfProtection.COOKIE_NAME) or CsrfProtection.generate_token()
 
     @staticmethod
-    def inject_token(response: web.Response, token: str) -> None:
+    def inject_token(response: web.Response, token: str, is_https: bool = True) -> None:
+        """Inyecta la cookie CSRF. Siempre Secure=True cuando hay HTTPS."""
         response.set_cookie(
             CsrfProtection.COOKIE_NAME, token,
-            httponly=False,   # JS necesita leerla para incluirla en formularios
+            httponly=False,        # JS necesita leerla para formularios dinámicos
             samesite="Strict",
-            secure=False,     # True si HTTPS
+            secure=is_https,       # True en producción (HTTPS), False solo en dev HTTP
+            max_age=3600,
         )
 
-    def middleware_factory(self):
+    def middleware_factory(self, is_https: bool = True):
         csrf = self
 
         @web.middleware
         async def csrf_middleware(request: web.Request, handler):
-            # Solo verificar en POST/PUT/DELETE
+            # Solo verificar métodos que modifican estado
             if request.method not in ("POST", "PUT", "DELETE", "PATCH"):
                 return await handler(request)
 
-            # Exentar rutas API JSON (usan JWT)
-            if any(request.path.startswith(p) for p in csrf.EXEMPT_PATHS):
-                return await handler(request)
-
-            # Exentar WebSocket
+            # Exentar WebSocket upgrades
             if request.headers.get("Upgrade", "").lower() == "websocket":
                 return await handler(request)
 
+            # Exentar /login y /logout (gestionan su propio token)
+            if request.path in ("/login", "/logout"):
+                return await handler(request)
+
+            # Exentar todas las rutas /api/* (autenticadas con JWT Bearer)
+            if request.path.startswith("/api/"):
+                return await handler(request)
+
+            # Para cualquier otro POST de formulario: verificar double-submit
             cookie_token = request.cookies.get(csrf.COOKIE_NAME)
             if not cookie_token:
-                logger.warning("CSRF: cookie ausente en %s desde %s",
-                               request.path, _get_real_ip(request))
+                logger.warning(
+                    "CSRF: cookie '%s' ausente en POST %s desde %s",
+                    csrf.COOKIE_NAME, request.path, _get_real_ip(request),
+                )
                 raise web.HTTPForbidden(reason="CSRF token requerido")
 
-            # Verificar en body del formulario
             try:
                 data = await request.post()
                 form_token = data.get(csrf.FIELD_NAME, "")
             except Exception:
                 form_token = ""
 
-            if not secrets.compare_digest(cookie_token, form_token):
-                logger.warning("CSRF: token inválido en %s desde %s",
-                               request.path, _get_real_ip(request))
-                audit_log.auth_failure(_get_real_ip(request), f"CSRF mismatch en {request.path}")
+            if not form_token or not secrets.compare_digest(cookie_token, form_token):
+                logger.warning(
+                    "CSRF: token inválido en POST %s desde %s",
+                    request.path, _get_real_ip(request),
+                )
+                audit_log.auth_failure(
+                    _get_real_ip(request), f"CSRF mismatch en {request.path}"
+                )
                 raise web.HTTPForbidden(reason="CSRF token inválido")
 
             return await handler(request)

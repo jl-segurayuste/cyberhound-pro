@@ -62,6 +62,27 @@ class ServerSettings:
 
 
 @dataclass
+class SIEMSettings:
+    wazuh_enabled:    bool = False
+    wazuh_host:       str  = "localhost"
+    wazuh_port:       int  = 1514
+    wazuh_api_url:    str  = ""
+    wazuh_api_user:   str  = ""
+    wazuh_api_pass:   str  = ""
+    elk_enabled:      bool = False
+    elk_url:          str  = "http://localhost:9200"
+    elk_index:        str  = "cyberhound-findings"
+    elk_user:         str  = ""
+    elk_pass:         str  = ""
+    elk_api_key:      str  = ""
+    splunk_enabled:   bool = False
+    splunk_hec_url:   str  = "https://localhost:8088/services/collector"
+    splunk_hec_token: str  = ""
+    splunk_index:     str  = "cyberhound"
+    min_severity:     str  = "medium"
+
+
+@dataclass
 class SchedulerSettings:
     enabled:         bool = True
     audit_enabled:   bool = True
@@ -98,6 +119,7 @@ class CyberHoundConfig:
     server:        ServerSettings       = field(default_factory=ServerSettings)
     scheduler:     SchedulerSettings    = field(default_factory=SchedulerSettings)
     notifications: NotificationSettings = field(default_factory=NotificationSettings)
+    siem:          SIEMSettings         = field(default_factory=SIEMSettings)
     db_path:       str = field(default_factory=lambda: str(DEFAULT_DB_PATH))
 
     @classmethod
@@ -192,6 +214,29 @@ class CyberHoundConfig:
         )
 
         cfg.db_path = raw.get("db_path", str(DEFAULT_DB_PATH))
+
+        # SIEM
+        sr = raw.get("siem", {})
+        cfg.siem = SIEMSettings(
+            wazuh_enabled=sr.get("wazuh_enabled", False),
+            wazuh_host=sr.get("wazuh_host", "localhost"),
+            wazuh_port=sr.get("wazuh_port", 1514),
+            wazuh_api_url=sr.get("wazuh_api_url", ""),
+            wazuh_api_user=sr.get("wazuh_api_user", ""),
+            wazuh_api_pass=sr.get("wazuh_api_pass", os.environ.get("CH_WAZUH_PASS", "")),
+            elk_enabled=sr.get("elk_enabled", False),
+            elk_url=sr.get("elk_url", "http://localhost:9200"),
+            elk_index=sr.get("elk_index", "cyberhound-findings"),
+            elk_user=sr.get("elk_user", ""),
+            elk_pass=sr.get("elk_pass", os.environ.get("CH_ELK_PASS", "")),
+            elk_api_key=sr.get("elk_api_key", os.environ.get("CH_ELK_API_KEY", "")),
+            splunk_enabled=sr.get("splunk_enabled", False),
+            splunk_hec_url=sr.get("splunk_hec_url", "https://localhost:8088/services/collector"),
+            splunk_hec_token=sr.get("splunk_hec_token", os.environ.get("CH_SPLUNK_TOKEN", "")),
+            splunk_index=sr.get("splunk_index", "cyberhound"),
+            min_severity=sr.get("min_severity", "medium"),
+        )
+
         return cfg
 
     def save(self, path: Path = DEFAULT_CONFIG_PATH) -> None:
@@ -215,6 +260,10 @@ class CyberHoundConfig:
                 if k != "smtp_password"  # no guardar contraseña SMTP en YAML
             },
             "db_path": self.db_path,
+            "siem": {
+                k: v for k, v in self.siem.__dict__.items()
+                if k not in ("wazuh_api_pass", "elk_pass", "splunk_hec_token")
+            },
         }
         with open(path, "w", encoding="utf-8") as f:
             yaml.dump(data, f, default_flow_style=False, allow_unicode=True)
