@@ -203,7 +203,7 @@ async def check_pam_faillock() -> list[Finding]:
             return []  # OK
 
     return [_f(
-        "no_pam_faillock", "authentication", "high",
+        "no_pam_faillock", "authentication", "medium",
         "pam_faillock no configurado",
         "Sin bloqueo de cuenta por intentos fallidos de autenticación. "
         "Facilita ataques de fuerza bruta contra contraseñas locales.",
@@ -243,14 +243,14 @@ async def check_password_policy() -> list[Finding]:
 
 async def check_auditd() -> list[Finding]:
     if not command_exists("auditd") and not command_exists("auditctl"):
-        return [_f("no_auditd", "audit", "high",
+        return [_f("no_auditd", "audit", "medium",
                    "auditd no instalado",
                    "Sin sistema de auditoría de eventos del kernel.",
                    "apt install auditd && systemctl enable --now auditd",
                    auto_fix=True)]
     proc = await run_command(["systemctl", "is-active", "auditd"], timeout=10)
     if "active" not in proc.stdout:
-        return [_f("auditd_inactive", "audit", "high",
+        return [_f("auditd_inactive", "audit", "medium",
                    "auditd instalado pero inactivo",
                    f"Estado: {proc.stdout.strip()}",
                    "systemctl enable --now auditd",
@@ -399,7 +399,7 @@ async def check_unattended_upgrades() -> list[Finding]:
 
 async def check_aide() -> list[Finding]:
     if not command_exists("aide"):
-        return [_f("no_aide", "integrity", "high",
+        return [_f("no_aide", "integrity", "medium",
                    "AIDE (monitor de integridad) no instalado",
                    "Sin sistema de detección de modificaciones en ficheros del sistema.",
                    "apt install aide && aideinit",
@@ -407,7 +407,7 @@ async def check_aide() -> list[Finding]:
     for db in [Path("/var/lib/aide/aide.db"), Path("/var/lib/aide/aide.db.gz")]:
         if db.exists():
             return []
-    return [_f("aide_db_missing", "integrity", "high",
+    return [_f("aide_db_missing", "integrity", "medium",
                "AIDE instalado pero base de datos no inicializada",
                "Sin base de datos de referencia AIDE no puede detectar cambios.",
                "aideinit && mv /var/lib/aide/aide.db.new /var/lib/aide/aide.db",
@@ -551,7 +551,7 @@ async def check_tmp_noexec() -> list[Finding]:
             missing.append("nosuid")
         if missing:
             results.append(_f(
-                f"tmp_{check_label}_{'_'.join(missing)}", "filesystem", "high",
+                f"tmp_{check_label}_{'_'.join(missing)}", "filesystem", "medium",
                 f"{mount_point} sin {', '.join(missing)}",
                 f"{mount_point} permite ejecución de binarios o SUID. "
                 "Es el vector de ataque más común para escalada de privilegios.",
