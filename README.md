@@ -1,105 +1,126 @@
-# 🐾 CyberHound Pro
+# CyberHound Pro
 
-> **Plataforma de auditoría y seguridad para PYMEs**  
-> Analiza toda tu red, detecta vulnerabilidades y las corrige — sin agentes, sin configuración compleja.
+**Plataforma de auditoría, seguridad y monitoreo continuo para PYMEs**
+
+> Analiza tu red, servidores, contenedores y código. Detecta vulnerabilidades, malware y configuraciones inseguras. Corrige automáticamente. Monitoriza en tiempo real.
 
 [![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://python.org)
+[![Tests](https://img.shields.io/badge/tests-195%20passed-green.svg)](#tests)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](Dockerfile)
 
 ---
 
-## 📋 Índice
+## Índice
 
-- [¿Qué es CyberHound?](#qué-es-cyberhound)
+- [¿Qué hace?](#qué-hace)
+- [Instalación rápida](#instalación-rápida)
 - [Funcionalidades](#funcionalidades)
 - [Arquitectura](#arquitectura)
-- [Instalación](#instalación)
-- [Uso](#uso)
-- [Módulos en detalle](#módulos-en-detalle)
+- [Checks de hardening](#checks-de-hardening-26-checks)
+- [Checks Docker y Kubernetes](#checks-docker-y-kubernetes)
 - [API REST y WebSocket](#api-rest-y-websocket)
-- [Seguridad](#seguridad)
+- [Seguridad implementada](#seguridad-implementada)
+- [SIEM — Integración externa](#siem--integración-externa)
 - [Configuración](#configuración)
-- [Contribuir](#contribuir)
+- [Tests](#tests)
 - [Roadmap](#roadmap)
 
 ---
 
-## ¿Qué es CyberHound?
+## ¿Qué hace?
 
-CyberHound Pro es una herramienta de auditoría de seguridad diseñada para **pequeñas y medianas empresas** que no tienen un equipo de ciberseguridad dedicado. Proporciona:
+CyberHound Pro es una herramienta todo-en-uno de ciberseguridad orientada a entornos Linux sin equipo de seguridad dedicado:
 
-- **Descubrimiento automático** de todos los dispositivos conectados a la red
-- **Auditoría de seguridad** con más de 70 checks configurables
-- **Detección de malware** mediante YARA, análisis de hashes y comportamiento
-- **Corrección automática** de vulnerabilidades con un clic
-- **Análisis remoto** de múltiples hosts simultáneamente vía SSH seguro
-- **Interfaz web** intuitiva orientada a usuarios no técnicos
+| Módulo | Descripción |
+|--------|-------------|
+| **🔍 Hardening Audit** | 26 checks de configuración con corrección automática |
+| **📡 Network Scan** | Descubrimiento de red, OS detection, CVEs via nmap |
+| **🖥️ SSH Audit** | Audit remoto de múltiples hosts en paralelo |
+| **🦠 Malware Scan** | YARA, hashes (VT/MalwareBazaar), auditd, cron, webshells |
+| **🐳 Docker + K8s** | 7 checks Docker + 11 checks Kubernetes |
+| **📝 Code Audit** | bandit, shellcheck, eslint + detección de secretos |
+| **🌐 Intel** | Shodan, VirusTotal, AbuseIPDB, GreyNoise, HIBP |
+| **📊 Scoring** | Score contextual 0-100 con factor de exposición |
+| **📡 Monitoreo** | Panel de actividad en tiempo real, alertas automáticas |
+| **🛡 SIEM** | Wazuh, Elasticsearch, Splunk HEC |
+
+---
+
+## Instalación rápida
+
+### Docker (recomendado)
+
+```bash
+git clone https://github.com/jl-segurayuste/cyberhound-pro.git
+cd cyberhound-pro
+cp .env.example .env
+nano .env        # Cambiar CH_PASSWORD
+docker compose up -d
+# Abrir https://localhost:8443
+```
+
+### Manual (Linux)
+
+```bash
+git clone https://github.com/jl-segurayuste/cyberhound-pro.git
+cd cyberhound-pro
+chmod +x install.sh && ./install.sh
+sudo cyberhound web --port 8443
+```
+
+**Cambiar contraseña:**
+```bash
+sudo cyberhound setup
+```
 
 ---
 
 ## Funcionalidades
 
-### 🔍 Hardening Audit
+### Panel de actividad en tiempo real
 
-Analiza la configuración de seguridad del sistema con más de 70 checks:
+El panel lateral muestra en tiempo real cada hallazgo conforme se detecta, con:
+- Icono de severidad (🔴 crítico, 🟠 alto, 🟡 medio, 🔵 bajo)
+- Barra de progreso animada por cada scan activo
+- Contadores en tiempo real (críticos, altos, medios)
+- Apertura automática cuando aparece un hallazgo crítico
+- Monitoreo periódico de nuevos dispositivos en la red (cada 15 min)
 
-| Categoría | Checks |
-|-----------|--------|
-| **SSH** | PermitRootLogin, PasswordAuthentication, MaxAuthTries, X11Forwarding, Protocol |
-| **Firewall** | UFW/firewalld activo |
-| **Kernel** | ASLR, SYN cookies, IP forwarding, ICMP redirects, log martians |
-| **Autenticación** | pam_faillock, política de contraseñas (login.defs) |
-| **Servicios** | Telnet, rsh, nis, finger, tftp, xinetd activos |
-| **Filesystem** | Ficheros world-writable, permisos de logs |
-| **Integridad** | AIDE, auditd |
-| **Sistema** | Core dumps, USB storage, Ctrl+Alt+Del, AppArmor |
-| **Actualizaciones** | unattended-upgrades |
+### Escaneos paralelos
 
-Cada hallazgo incluye severidad, descripción en lenguaje claro, remediación exacta y botón de corrección automática.
+Puedes ejecutar múltiples análisis simultáneamente:
+- Lanzar Docker scan mientras corre el Network scan
+- Malware scan en segundo plano mientras revisas resultados del audit
+- Cada scan tiene su propia barra de progreso independiente
 
-### 📡 Network Scan
+### Scoring contextual (0-100)
 
-1. **Descubrimiento** mediante nmap, arp-scan y caché ARP
-2. **Análisis profundo**: puertos, servicios, versiones, OS detection
-3. **CVEs** mediante scripts NSE de nmap
-4. **Clasificación de riesgo** automática por dispositivo
-5. **SSH audit** automático en hosts con SSH abierto
+El score no es una simple resta de puntos — tiene en cuenta:
 
-### 🖥️ SSH Audit
+| Factor | Impacto |
+|--------|---------|
+| Categoría | `docker/escape` ×2.0, `ssh` ×1.5, `updates` ×0.7 |
+| Exposición | Internet-facing +40%, web server +20% |
+| Auto-fix disponible | Penalización -25% (el riesgo es manejable) |
+| Acumulación | El décimo finding del mismo tipo pesa ×0.8^9 menos |
+| Bonus | +2pts si SSH bien configurado, +2pts si firewall OK |
 
-- Usa **asyncssh** — credenciales nunca en `ps aux`
-- Copia el script vía SFTP (no SCP externo)
-- Concurrencia configurable (5 hosts por defecto)
-- Corrección remota con whitelist de comandos seguros
+Grades: **A** (≥90) · **B** (≥75) · **C** (≥60) · **D** (≥40) · **F** (<40)
 
-### 🦠 Malware Scan
+### Corrección automática
 
-| Módulo | Descripción |
-|--------|-------------|
-| **YARA** | Reglas integradas + externas. Detecta webshells, reverse shells, ELF en /tmp |
-| **Hash Scanner** | SHA-256 de binarios contra MalwareBazaar (sin key) y VirusTotal |
-| **Auditd Monitor** | Analiza audit.log buscando 12 patrones de comportamiento malicioso |
-| **Cron Analyzer** | Detecta cron/systemd sospechosos: pipe a shell, scripts en /tmp, IPs hardcodeadas |
-| **Webshell Scanner** | Análisis heurístico de PHP/JSP/ASP con puntuación ponderada |
+Los hallazgos con ⚡ pueden corregirse con un clic, tanto en local como en hosts remotos vía SSH:
 
-### 📝 Code Audit + Secretos
-
-- **bandit** (Python), **shellcheck** (Bash), **eslint** (JS/TS)
-- Secretos: **gitleaks** → **trufflehog** → **semgrep** → regex (fallback)
-- Detecta `.env` expuestos y claves privadas en el repo
-
-### 🌐 Intel Scan
-
-Shodan · VirusTotal · AbuseIPDB · GreyNoise · AlienVault OTX · HaveIBeenPwned
-
-### 🔧 Remediación automática
-
-Todos los hallazgos con fix posible tienen botón ⚡, tanto para el sistema local como para hosts remotos vía SSH.
-
-### 📊 Exportación
-
-HTML · Ansible Playbook · JSON (SIEM) · Log de sesión
+| Categoría | Ejemplos de fixes |
+|-----------|------------------|
+| SSH | PermitRootLogin no, PasswordAuthentication no, MaxAuthTries 4 |
+| Firewall | ufw enable, systemctl enable --now firewalld |
+| Kernel | sysctl -w + persistencia en /etc/sysctl.d/ |
+| Auth | pam_faillock, login.defs policy |
+| Sistema | ctrl-alt-del mask, USB blacklist, core dumps off |
+| Banners | Crear /etc/issue, /etc/issue.net, /etc/motd |
+| NTP | apt install chrony + enable |
+| OpenSSH CVE | apt upgrade openssh-server |
 
 ---
 
@@ -107,529 +128,340 @@ HTML · Ansible Playbook · JSON (SIEM) · Log de sesión
 
 ```
 cyberhound/
-├── __main__.py          # Punto de entrada CLI
-├── pyproject.toml       # Metadatos y dependencias
+├── __main__.py              # CLI: web / setup / version
+├── pyproject.toml           # v6.1.0, deps, pytest config
 │
-├── core/                # Módulos base
-│   ├── models.py        # Finding, HostResult, ScanReport
-│   ├── config.py        # Configuración tipada YAML + env vars
-│   ├── auth.py          # JWT/Basic Auth + middleware aiohttp
-│   ├── logging.py       # Logging estructurado JSON + journald
-│   └── executor.py      # Comandos async + ThreadPoolExecutor
+├── core/
+│   ├── models.py            # Finding, HostResult, ScanReport
+│   ├── config.py            # YAML + env vars + validate() eager
+│   ├── auth.py              # JWT HS256 + rate limiting + CSRF
+│   ├── security.py          # RateLimiter, InputValidator, TLSManager, CSRF
+│   ├── logging.py           # JSON estructurado + journald + SecurityAuditLogger
+│   ├── executor.py          # Comandos async + ThreadPoolExecutor
+│   ├── database.py          # SQLite WAL: scans, findings, assets, suppressions, users
+│   ├── scheduler.py         # Loop asyncio: audit 02:00, malware lun 03:00, network 04:00
+│   ├── notifications.py     # Email SMTP+TLS + webhooks Slack/Teams
+│   ├── scoring.py           # Motor de scoring contextual (5 factores)
+│   └── siem.py              # Wazuh UDP/API + Elasticsearch + Splunk HEC
 │
-├── scanners/            # Módulos de análisis
-│   ├── hardening.py     # Checks de hardening + HardeningFixer
-│   ├── malware.py       # YARA + hashes + auditd + cron + webshells
-│   ├── network.py       # Descubrimiento + nmap XML parsing
-│   ├── ssh_audit.py     # Audit remoto con asyncssh
-│   ├── code.py          # bandit + shellcheck + eslint
-│   ├── secrets.py       # gitleaks → trufflehog → semgrep → regex
-│   ├── intel.py         # APIs externas
-│   └── reports.py       # HTML + Ansible
+├── scanners/
+│   ├── hardening.py         # 26 checks + HardeningFixer (todos los fixes)
+│   ├── malware.py           # YARA + MalwareBazaar/VT + auditd + cron + webshells
+│   ├── network.py           # nmap XML, OS detection, CVEs, risk level
+│   ├── ssh_audit.py         # asyncssh, SFTP para script remoto, whitelist fixes
+│   ├── docker_scan.py       # 7 checks Docker + integración K8s
+│   ├── kubernetes_scan.py   # 11 checks Kubernetes via kubectl
+│   ├── code.py              # bandit + shellcheck + eslint
+│   ├── secrets.py           # gitleaks → trufflehog → semgrep → regex
+│   ├── intel.py             # Shodan, VT, AbuseIPDB, GreyNoise, OTX, HIBP
+│   └── reports.py           # HTML + Ansible playbook
 │
 ├── api/
-│   └── server.py        # aiohttp + WebSocket + auth middleware
+│   └── server.py            # aiohttp + WebSocket streaming + 25+ endpoints REST
 │
 └── ui/static/
-    ├── index.html       # SPA
-    ├── style.css        # Dark theme
-    └── app.js           # WebSocket, dashboard, filtros
-```
-
-### Flujo de comunicación
-
-```
-Browser ──WebSocket──► api/server.py ──► scanners/*
-                                    ◄── findings (streaming en tiempo real)
-        ──REST POST──► /api/fix/*   ──► HardeningFixer / RemoteAuditor
-        ──REST POST──► /api/report  ──► ReportGenerator
+    ├── index.html           # SPA — 9 secciones + panel de actividad
+    ├── style.css            # Dark theme corporativo
+    └── app.js               # WebSocket, dashboard, scoring, actividad en tiempo real
 ```
 
 ---
 
-## Instalación
+## Checks de hardening (26 checks)
 
-### Docker (recomendado)
+### SSH (`/etc/ssh/sshd_config`)
+| ID | Verifica | Fix |
+|----|---------|-----|
+| `ssh_PermitRootLogin` | PermitRootLogin yes | ✅ |
+| `ssh_PasswordAuthentication` | PasswordAuthentication yes | ✅ |
+| `ssh_PermitEmptyPasswords` | PermitEmptyPasswords yes | ✅ |
+| `ssh_X11Forwarding` | X11Forwarding yes | ✅ |
+| `ssh_MaxAuthTries` | MaxAuthTries > 4 | ✅ |
+| `ssh_protocol1` | Protocol 1 activo | ✅ |
 
-```bash
-git clone https://github.com/qjossyx/cyberhound-pro.git
-cd cyberhound-pro
-cp .env.example .env
-nano .env          # Cambiar CH_PASSWORD
-docker compose up -d
-# Abrir http://localhost:8443
-```
+### Firewall
+| ID | Verifica | Fix |
+|----|---------|-----|
+| `fw_ufw_inactive` | UFW instalado pero inactivo | ✅ |
+| `fw_firewalld_inactive` | firewalld inactivo | ✅ |
+| `fw_none` | Sin firewall detectado | ❌ manual |
 
-**Sin docker-compose:**
-```bash
-docker run -d \
-  --name cyberhound \
-  --network host \
-  --cap-add NET_ADMIN --cap-add NET_RAW \
-  -e CH_PASSWORD=mi_contraseña_segura \
-  -v cyberhound-data:/data \
-  -v ~/.ssh:/root/.ssh:ro \
-  ghcr.io/qjossyx/cyberhound-pro:latest
-```
+### Kernel (`/proc/sys/`)
+10 parámetros: ASLR, SYN cookies, IP forwarding, ICMP redirects, source routing, log martians, rp_filter, dmesg_restrict, perf_event_paranoid, IPv6. Todos con fix automático vía sysctl + persistencia.
 
-**Variables de entorno Docker:**
+### Autenticación y contraseñas
+| ID | Verifica | Fix |
+|----|---------|-----|
+| `no_pam_faillock` | pam_faillock no configurado | ✅ |
+| `login_defs_PASS_MAX_DAYS` | > 90 días | ✅ |
+| `login_defs_PASS_MIN_DAYS` | < 1 día | ✅ |
+| `login_defs_PASS_WARN_AGE` | < 7 días aviso | ✅ |
+| `login_defs_LOGIN_RETRIES` | > 5 reintentos | ✅ |
 
-| Variable | Por defecto | Descripción |
-|----------|-------------|-------------|
-| `CH_USERNAME` | `admin` | Usuario de acceso |
-| `CH_PASSWORD` | `cyberhound` | Contraseña (cambiar siempre) |
-| `CH_PORT` | `8443` | Puerto de escucha |
-| `SHODAN_API_KEY` | — | API key de Shodan |
-| `VT_API_KEY` | — | API key de VirusTotal |
-| `ABUSEIPDB_KEY` | — | API key de AbuseIPDB |
-
-### Instalación manual
-
-```bash
-git clone https://github.com/qjossyx/cyberhound-pro.git
-cd cyberhound-pro
-chmod +x install.sh && ./install.sh
-sudo cyberhound web --port 8443
-```
-
----
-
-## Uso
-
-### Interfaz web
-
-| Sección | Descripción |
-|---------|-------------|
-| 🏠 **Inicio** | Dashboard: puntuación de seguridad (0-100), contadores, problemas críticos |
-| 📡 **Mi Red** | Escaneo de red + audit SSH en todos los dispositivos |
-| 🔍 **Seguridad** | Hardening audit del sistema local |
-| 🦠 **Malware** | Escaneo de malware con todos los módulos |
-| 📝 **Código** | Análisis estático de proyectos |
-| 📊 **Informes** | Exportar en HTML, Ansible, JSON |
-| ⚙️ **Config** | API keys, SSH, contraseña |
-
-### CLI
-
-```bash
-cyberhound version          # Ver versión
-sudo cyberhound setup       # Configuración inicial / cambiar contraseña
-sudo cyberhound web --port 8443          # Lanzar servidor
-sudo cyberhound web --port 8443 &        # En segundo plano
-```
-
-### Cambiar contraseña
-
-```bash
-sudo cyberhound setup
-```
-
-O manualmente:
-```bash
-HASH=$(python3 -c "import hashlib; print(hashlib.sha256(b'nueva_pass').hexdigest())")
-sudo sed -i "s/password_hash:.*/password_hash: $HASH/" /root/.cyberhound/config.yaml
-```
+### Sistema general
+| ID | Verifica | Fix |
+|----|---------|-----|
+| `check_umask` | umask 022 en /etc/profile | ✅ |
+| `no_ntp` | Sin NTP/chrony activo | ✅ |
+| `no_banner_*` | Banners de login vacíos | ✅ |
+| `empty_password_*` | Cuentas sin contraseña en /etc/shadow | ✅ bloquear |
+| `duplicate_uid0_*` | UID 0 en cuenta que no es root | ❌ manual |
+| `tmp_*_noexec` | /tmp sin noexec/nosuid | ❌ manual |
+| `tmp_no_sticky_bit` | /tmp sin sticky bit | ✅ |
+| `svc_listen_all_*` | Servicios DB/cache en 0.0.0.0 | ❌ manual |
+| `openssh_cve_*` | Versión OpenSSH con CVEs conocidos | ✅ apt upgrade |
+| `ww_*` | Ficheros world-writable | ✅ chmod o-w |
+| `log_perm_*` | Logs legibles por todos | ✅ chmod o-r |
+| `no_auditd` | auditd no instalado/activo | ✅ |
+| `no_aide` | AIDE no instalado | ✅ |
+| `apparmor_inactive` | AppArmor inactivo | ✅ |
+| `core_dumps_enabled` | Core dumps activos | ✅ |
+| `usb_storage_enabled` | USB storage no bloqueado | ✅ |
+| `ctrlaltdel_enabled` | Ctrl+Alt+Del habilitado | ✅ |
+| `no_unattended_upgrades` | Updates automáticos no configurados | ✅ |
 
 ---
 
-## Módulos en detalle
+## Checks Docker y Kubernetes
 
-## Checks de Hardening — Detalle completo
+### Docker (7 checks)
+| Check | Severidad | Descripción |
+|-------|-----------|-------------|
+| `containers_root` | High | Contenedores sin runAsUser ni User definido |
+| `privileged` | Critical | Contenedores con `--privileged` |
+| `docker_socket` | Critical | `/var/run/docker.sock` montado |
+| `env_secrets` | High | Credenciales en variables de entorno |
+| `dangerous_mounts` | Critical | Rutas del host como `/etc`, `/proc`, `/` montadas |
+| `old_images` | Medium | Imágenes con más de 90 días sin actualizar |
+| `images_cve` | Critical/High | CVEs en imágenes (requiere Trivy) |
 
-Cuando ejecutas **🔍 Análisis de seguridad**, CyberHound realiza los siguientes checks en el servidor local. Cada check está implementado en `cyberhound/scanners/hardening.py`.
-
----
-
-### 🔐 SSH (`/etc/ssh/sshd_config`)
-
-| ID | Parámetro verificado | Valor inseguro | Severidad | Fix automático |
-|----|---------------------|----------------|-----------|----------------|
-| `ssh_PermitRootLogin` | PermitRootLogin | yes | High | ✅ `PermitRootLogin no` |
-| `ssh_PasswordAuthentication` | PasswordAuthentication | yes | High | ✅ `PasswordAuthentication no` |
-| `ssh_PermitEmptyPasswords` | PermitEmptyPasswords | yes | Critical | ✅ `PermitEmptyPasswords no` |
-| `ssh_X11Forwarding` | X11Forwarding | yes | Medium | ✅ `X11Forwarding no` |
-| `ssh_MaxAuthTries` | MaxAuthTries | > 4 | Medium | ✅ `MaxAuthTries 4` |
-| `ssh_protocol1` | Protocol | 1 | Critical | ✅ Eliminar `Protocol 1` |
-
-**Cómo funciona:** Lee `/etc/ssh/sshd_config` con `read_file_async()` y busca con regex línea por línea. Tras aplicar el fix, ejecuta `systemctl reload sshd`.
-
----
-
-### 🔥 Firewall
-
-| ID | Qué verifica | Severidad | Fix automático |
-|----|-------------|-----------|----------------|
-| `fw_ufw_inactive` | UFW instalado pero inactivo (`ufw status` → inactive) | Critical | ✅ `ufw --force enable` |
-| `fw_firewalld_inactive` | firewalld instalado pero inactivo | Critical | ✅ `systemctl enable --now firewalld` |
-| `fw_none` | Ni UFW ni firewalld detectados | Critical | ❌ Manual |
-
----
-
-### ⚙️ Parámetros del Kernel (`/proc/sys/`)
-
-Lee directamente desde `/proc/sys/` sin ejecutar `sysctl`. Tras el fix, persiste en `/etc/sysctl.d/99-cyberhound.conf`.
-
-| ID | Parámetro | Valor esperado | Severidad | Descripción |
-|----|-----------|---------------|-----------|-------------|
-| `kernel_net_ipv4_ip_forward` | net.ipv4.ip_forward | 0 | High | Previene que el servidor actúe como router no intencionado |
-| `kernel_net_ipv4_tcp_syncookies` | net.ipv4.tcp_syncookies | 1 | High | Protección contra ataques SYN flood |
-| `kernel_kernel_randomize_va_space` | kernel.randomize_va_space | 2 | High | ASLR completo activado (mitigación de exploits) |
-| `kernel_net_ipv4_conf_all_accept_source_route` | net.ipv4.conf.all.accept_source_route | 0 | High | Deshabilita enrutamiento por origen (IP spoofing) |
-| `kernel_net_ipv4_conf_all_send_redirects` | net.ipv4.conf.all.send_redirects | 0 | High | Deshabilita envío de ICMP redirects |
-| `kernel_net_ipv4_conf_all_log_martians` | net.ipv4.conf.all.log_martians | 1 | Medium | Loguea paquetes con IPs imposibles |
-| `kernel_net_ipv4_conf_all_rp_filter` | net.ipv4.conf.all.rp_filter | 1 | Medium | Filtro de ruta inversa anti-spoofing |
-| `kernel_kernel_dmesg_restrict` | kernel.dmesg_restrict | 1 | Medium | Restringe acceso a dmesg sin privilegios |
-| `kernel_kernel_perf_event_paranoid` | kernel.perf_event_paranoid | 2 | Medium | Restringe acceso a eventos de rendimiento |
-| `kernel_net_ipv6_conf_all_disable_ipv6` | net.ipv6.conf.all.disable_ipv6 | 1 | Info | IPv6 activo (revisar si se usa) |
-
----
-
-### 🔒 Autenticación y contraseñas
-
-| ID | Qué verifica | Archivo | Severidad | Fix automático |
-|----|-------------|---------|-----------|----------------|
-| `no_pam_faillock` | pam_faillock configurado en PAM | `/etc/pam.d/common-auth` | High | ✅ Inserta `auth required pam_faillock.so deny=5 unlock_time=600` |
-| `login_defs_PASS_MAX_DAYS` | Caducidad máxima contraseñas ≤ 90 días | `/etc/login.defs` | Medium | ✅ `PASS_MAX_DAYS 90` |
-| `login_defs_PASS_MIN_DAYS` | Días mínimos antes de cambiar ≥ 1 | `/etc/login.defs` | Low | ✅ `PASS_MIN_DAYS 1` |
-| `login_defs_PASS_WARN_AGE` | Aviso de expiración ≥ 7 días | `/etc/login.defs` | Low | ✅ `PASS_WARN_AGE 7` |
-| `login_defs_LOGIN_RETRIES` | Intentos de login ≤ 5 | `/etc/login.defs` | Medium | ✅ `LOGIN_RETRIES 5` |
-
-**pam_faillock:** Bloquea la cuenta tras 5 intentos fallidos durante 600 segundos. También añade `account required pam_faillock.so` en `common-account`.
-
----
-
-### 📁 Sistema de ficheros
-
-| ID | Qué verifica | Severidad | Fix automático |
-|----|-------------|-----------|----------------|
-| `ww_<ruta>` | Fichero world-writable en `/etc`, `/usr/bin`, `/sbin`, etc. | High | ✅ `chmod o-w <ruta>` |
-| `log_perm_<nombre>` | Fichero de log en `/var/log` legible por todos | Low | ✅ `chmod o-r <ruta>` |
-
-**World-writable:** Escanea `/etc`, `/usr/bin`, `/usr/sbin`, `/bin`, `/sbin`, `/usr/local/bin`. Genera un Finding individual por fichero (máx. configurable con `scan.max_ww_files`). Los ficheros bajo `/var/lib/kubelet/` y `/var/lib/docker/` se ignoran automáticamente.
-
----
-
-### 🛡️ Control de Acceso Obligatorio (MAC)
-
-| ID | Qué verifica | Severidad | Fix automático |
-|----|-------------|-----------|----------------|
-| `apparmor_inactive` | AppArmor instalado pero no activo | Medium | ✅ `systemctl enable --now apparmor` |
-
-**Nota:** Si el sistema usa SELinux en lugar de AppArmor, este check no aplica y no genera hallazgo.
-
----
-
-### 📋 Auditoría del sistema
-
-| ID | Qué verifica | Severidad | Fix automático |
-|----|-------------|-----------|----------------|
-| `no_auditd` | auditd no instalado | High | ✅ `apt install auditd && systemctl enable --now auditd` |
-| `auditd_inactive` | auditd instalado pero inactivo | High | ✅ `systemctl enable --now auditd` |
-| `no_aide` | AIDE (monitor de integridad) no instalado | High | ✅ `apt install aide` |
-| `aide_db_missing` | AIDE instalado pero base de datos no inicializada | High | ✅ `aideinit` + renombrar DB |
-
----
-
-### ⚠️ Servicios inseguros
-
-Detecta servicios activos con vulnerabilidades conocidas o protocolos obsoletos:
-
-| ID | Servicio | Por qué es inseguro | Severidad | Fix automático |
-|----|---------|--------------------|-----------|----|
-| `svc_telnet` | telnet | Credenciales en texto plano | High | ✅ `systemctl disable --now telnet` |
-| `svc_rsh` | rsh | Sin cifrado, vulnerable | High | ✅ |
-| `svc_rlogin` | rlogin | Sin cifrado, vulnerable | High | ✅ |
-| `svc_finger` | finger | Expone información de usuarios | High | ✅ |
-| `svc_talk` | talk | Protocolo obsoleto sin cifrado | High | ✅ |
-| `svc_tftp` | tftp | Sin autenticación | High | ✅ |
-| `svc_xinetd` | xinetd | Reemplazado por systemd | High | ✅ |
-| `svc_nis` | nis | Protocolo obsoleto, vulnerable a MITM | High | ✅ |
-
----
-
-### 🔑 Privilegios (sudo)
-
-| ID | Qué verifica | Archivos | Severidad | Fix automático |
-|----|-------------|---------|-----------|----------------|
-| `sudoers_nopasswd_<archivo>_<línea>` | Entradas NOPASSWD en sudoers | `/etc/sudoers`, `/etc/sudoers.d/*` | High | ❌ Requiere revisión manual |
-
-**Por qué no tiene fix automático:** Eliminar un NOPASSWD incorrecto podría romper scripts de automatización legítimos. Se reporta con la línea exacta para revisión manual.
-
----
-
-### 🖥️ Sistema general
-
-| ID | Qué verifica | Severidad | Fix automático |
-|----|-------------|-----------|----------------|
-| `core_dumps_enabled` | Core dumps no deshabilitados en `limits.conf` | Medium | ✅ Añade `* hard core 0` + `sysctl fs.suid_dumpable=0` |
-| `usb_storage_enabled` | Módulo `usb-storage` no bloqueado | Medium | ✅ Crea `/etc/modprobe.d/cyberhound-usb.conf` |
-| `ctrlaltdel_enabled` | Ctrl+Alt+Del puede reiniciar el sistema | Medium | ✅ `systemctl mask ctrl-alt-del.target` |
-| `cron_unrestricted` | Sin `/etc/cron.allow` ni `/etc/cron.deny` | Low | ❌ Requiere definir usuarios autorizados |
-| `no_unattended_upgrades` | Actualizaciones automáticas no configuradas | Medium | ✅ `apt install unattended-upgrades` + reconfigurar |
-
----
-
-### 📊 Cálculo de la puntuación de seguridad
-
-La puntuación (0-100) se calcula en el dashboard restando penalizaciones por cada hallazgo:
-
-| Severidad | Penalización |
-|-----------|-------------|
-| Critical | -20 puntos |
-| High | -10 puntos |
-| Medium | -4 puntos |
-| Low | -1 punto |
-| Info | -0 puntos |
-
-Una instalación limpia recién configurada suele tener entre 40-60 puntos. Aplicar todos los fixes automáticos típicamente lleva la puntuación por encima de 85.
-
----
-
-### `core/models.py` — Modelos de datos
-
-```python
-@dataclass
-class Finding:
-    id:          str    # Identificador único
-    category:    str    # "ssh", "firewall", "malware/yara"...
-    severity:    str    # "critical"|"high"|"medium"|"low"|"info"
-    title:       str    # Título legible
-    description: str    # Descripción detallada
-    remediation: str    # Cómo solucionarlo
-    evidence:    str    # Evidencia técnica
-    auto_fix:    bool   # True si hay corrección automática
-    file_path:   str    # Ruta del fichero afectado
-    line_number: int    # Línea (para code audit)
-    source_host: str    # Host de origen (SSH/network scan)
-```
-
-### `core/auth.py` — Autenticación
-
-Tres modos configurables:
-- **`jwt`** (por defecto): Token JWT HS256, cookie httponly, SameSite=Strict
-- **`basic`**: HTTP Basic Auth sobre HTTPS
-- **`none`**: Sin auth, solo localhost
-
-### `core/executor.py` — Ejecución de comandos
-
-- `run_command()`: async con timeout obligatorio
-- `read_file_async()`: sin bloquear el event loop
-- `find_files_async()`: búsqueda en background
-- Los errores de permisos SELinux/AppArmor se loguean, nunca se silencian
-
-### `scanners/hardening.py` — Fixes disponibles
-
-| Finding ID | Acción automática |
-|-----------|------------------|
-| `ssh_PermitRootLogin` | sed en sshd_config + reload |
-| `fw_ufw_inactive` | `ufw --force enable` |
-| `kernel_*` | `sysctl -w` + persistencia |
-| `ww_*` | `chmod o-w <fichero>` |
-| `no_pam_faillock` | Inserta línea en common-auth |
-| `svc_*` | `systemctl disable --now` |
-| `login_defs_*` | Edita `/etc/login.defs` |
-| `ctrlaltdel_enabled` | `systemctl mask ctrl-alt-del.target` |
-| `log_perm_*` | `chmod o-r <fichero>` |
-
-### `scanners/network.py` — Nmap XML parsing
-
-Parsea la salida XML de nmap para extraer:
-- OS detection (nombre + % de confianza)
-- Puertos abiertos con servicio, producto, versión y CPE
-- CVEs via scripts NSE `vuln`
-- MAC address y fabricante (OUI)
+### Kubernetes (11 checks via kubectl)
+| Check | Severidad | Descripción |
+|-------|-----------|-------------|
+| `pods_as_root` | High | Pods sin `runAsNonRoot: true` |
+| `privileged_pods` | Critical | Contenedores con `privileged: true` |
+| `rbac_wildcards` | Critical | ClusterRoles con permisos `*` |
+| `automount_service_account` | Medium | Token ServiceAccount no desactivado |
+| `no_network_policy` | High | Namespaces sin NetworkPolicy |
+| `no_resource_limits` | Medium | Contenedores sin límites CPU/memoria |
+| `latest_image_tag` | Low | Imágenes con tag `:latest` |
+| `env_secrets` | High | Secretos hardcodeados en env vars |
+| `dangerous_hostpath` | Critical | HostPath con rutas peligrosas del host |
+| `kubernetes_version` | High | Versión de K8s con CVEs conocidos |
+| `pod_security_standards` | Medium | Namespaces sin Pod Security Admission |
 
 ---
 
 ## API REST y WebSocket
 
-### Endpoints REST
+### Endpoints principales
 
-| Método | Ruta | Auth | Descripción |
-|--------|------|------|-------------|
-| `GET` | `/health` | No | Healthcheck |
-| `GET/POST` | `/login` | No | Autenticación |
-| `GET` | `/logout` | — | Cerrar sesión |
-| `GET` | `/ws` | Sí | WebSocket streaming |
-| `POST` | `/api/fix/local` | Sí | Fix local |
-| `POST` | `/api/fix/remote` | Sí | Fix remoto SSH |
-| `POST` | `/api/report/html` | Sí | Informe HTML |
-| `POST` | `/api/report/ansible` | Sí | Playbook Ansible |
-| `GET/POST` | `/api/config/keys` | Sí | API keys |
-| `GET` | `/api/network/discover` | Sí | Descubrir hosts |
+| Método | Ruta | Descripción |
+|--------|------|-------------|
+| `GET/POST` | `/login` | Autenticación |
+| `GET` | `/ws` | WebSocket streaming de scans |
+| `GET` | `/health` | Healthcheck |
+| `GET` | `/api/dashboard` | Stats del dashboard |
+| `GET` | `/api/history` | Histórico de scans |
+| `GET` | `/api/history/{id}/compare` | Comparación entre scans |
+| `GET` | `/api/score/trend` | Tendencia de score 30 días |
+| `GET` | `/api/score/detail` | Desglose contextual del score |
+| `GET/POST` | `/api/assets` | Inventario de dispositivos |
+| `POST` | `/api/assets/{ip}/authorize` | Autorizar/denegar dispositivo |
+| `GET/POST/DELETE` | `/api/suppressions` | Gestión de falsos positivos |
+| `GET/POST/PATCH/DELETE` | `/api/users` | Gestión de usuarios |
+| `GET/POST` | `/api/scheduler/{name}/run` | Scheduler de tareas |
+| `POST` | `/api/fix/local` | Aplicar fix local |
+| `POST` | `/api/fix/remote` | Aplicar fix remoto via SSH |
+| `POST` | `/api/report/{html\|ansible}` | Generar informes |
+| `GET/POST` | `/api/config/keys` | API keys |
+| `GET/POST` | `/api/config/notifications` | Config notificaciones |
+| `GET/POST` | `/api/config/siem` | Config SIEM |
+| `POST` | `/api/config/siem/test` | Test de conectividad SIEM |
 
-### WebSocket — Protocolo
+### Tareas WebSocket disponibles
 
-**Cliente → Servidor:**
 ```json
 { "task": "audit" }
 { "task": "malware", "skip": ["hash"], "yara_rules": "/ruta/" }
-{ "task": "network", "networks": "192.168.1.0/24", "ssh_user": "root", "ssh_audit": true }
-{ "task": "ssh", "hosts": "192.168.1.10,192.168.1.20", "ssh_key": "/ruta/clave" }
+{ "task": "network", "networks": "192.168.1.0/24", "ssh_audit": true }
+{ "task": "ssh", "hosts": "192.168.1.10,192.168.1.20", "ssh_key": "/ruta" }
+{ "task": "docker", "scan_images_cve": true, "scan_k8s": true }
 { "task": "code", "path": "/var/www/html" }
-{ "task": "intel", "target": "1.2.3.4", "modules": ["shodan", "virustotal"] }
-```
-
-**Servidor → Cliente (streaming):**
-```json
-{ "type": "log",         "level": "info", "text": "Iniciando audit..." }
-{ "type": "finding",     "data": { Finding } }
-{ "type": "devices",     "data": [ NetworkDevice ] }
-{ "type": "host_result", "data": { "host": "...", "status": "ok", "count": 12 } }
-{ "type": "done",        "count": 42 }
-{ "type": "error",       "text": "Descripción del error" }
+{ "task": "intel", "target": "1.2.3.4", "modules": ["shodan","virustotal"] }
 ```
 
 ---
 
-## Seguridad
+## Seguridad implementada
 
-### Medidas implementadas
+### Autenticación y sesión
+- **JWT HS256** con secreto persistente en `config.yaml` (permisos 600)
+- **Cookie** `httponly` + `SameSite=Strict` + `Secure` (dinámico según TLS)
+- **Rate limiting**: 5 intentos/15min → bloqueo 15min/1h/24h (exponencial)
+- **Rate limiting** nunca bloquea localhost
+- **CSRF**: double-submit cookie en formularios POST; `/api/*` exentas (JWT)
+- **JWT expirado**: redirige al login limpiando la cookie inválida
 
-| Área | Medida |
-|------|--------|
-| **Auth** | JWT HS256, cookie httponly+SameSite, TTL configurable |
-| **Headers HTTP** | X-Frame-Options, X-Content-Type-Options, CSP, Cache-Control: no-store |
-| **SSH** | asyncssh (sin sshpass), credenciales en memoria |
-| **Fixes remotos** | Whitelist de comandos (chmod, systemctl, sysctl, sed, ufw, apt-get) |
-| **Logging** | `security_audit.log` separado: logins, fixes, scans |
-| **Errores** | Permisos SELinux/AppArmor logueados, nunca silenciados |
-| **Instalación** | venv aislado, sin `--break-system-packages` |
+### TLS automático
+- Certificado RSA 4096 auto-firmado generado en el primer arranque
+- TLS 1.2+ obligatorio, cifrados modernos únicamente (ECDHE+AES-GCM, ChaCha20)
+- Soporte de certificados externos (Let's Encrypt compatible)
 
-### Log de auditoría
+### Validación de inputs
+- `InputValidator.ws_message()`: whitelist de tareas, bloqueo de path traversal
+- IPs validadas con `ipaddress.ip_address()` (no regex — evita falsos positivos)
+- CIDRs máximo /16 (no se permiten /8 o más grandes)
+- Máximo 50 hosts por scan, máximo 5 redes por petición
 
-`/var/log/cyberhound/security_audit.log` registra:
-- Login exitoso/fallido con IP de origen
-- Cada fix aplicado (finding ID, usuario, host, dry-run)
-- Cada escaneo iniciado
+### Headers HTTP
+`X-Content-Type-Options`, `X-Frame-Options: DENY`, `X-XSS-Protection`, `CSP`, `Cache-Control: no-store`
+
+### Logging de auditoría
+`/var/log/cyberhound/security_audit.log`: logins, fixes aplicados, scans iniciados
+
+---
+
+## SIEM — Integración externa
+
+Envío automático de findings en tiempo real a:
+
+### Wazuh
+- **UDP socket** (agente activo, puerto 1514)
+- **API REST** del Wazuh Manager (opcional)
+- Formato compatible con decoders custom de Wazuh
+
+### Elasticsearch / ELK
+- Indexación directa en el índice configurado
+- Autenticación: API Key o usuario/contraseña
+- Índice por defecto: `cyberhound-findings`
+
+### Splunk HEC
+- HTTP Event Collector
+- Token configurable, índice y sourcetype configurables
+
+**Configuración** desde la UI: ⚙️ Config → 🛡 SIEM
 
 ---
 
 ## Configuración
 
-`/root/.cyberhound/config.yaml`:
+`~/.cyberhound/config.yaml` (o `/root/.cyberhound/config.yaml` con sudo):
 
 ```yaml
 auth:
-  mode: jwt                     # jwt | basic | none
+  mode: jwt
   username: admin
-  password_hash: "sha256hex"    # cyberhound setup para generarlo
+  password_hash: "sha256hex"    # cyberhound setup
+  secret: "hex32chars"          # persistido automáticamente
   token_ttl_hours: 8
 
 server:
   host: "0.0.0.0"
   port: 8443
-  tls_cert: "/etc/ssl/certs/ch.pem"   # opcional — activa HTTPS
-  tls_key: "/etc/ssl/private/ch.key"
-
-api_keys:
-  shodan:     ""
-  virustotal: ""
-  abuseipdb:  ""
+  tls_cert: null    # null = auto-firmado
+  tls_key: null
 
 scan:
   ssh_key_path: "~/.ssh/id_ed25519"
   ssh_default_user: root
-  ssh_default_port: 22
   ssh_concurrency: 5
   max_ww_files: 200
-  hash_scan_max: 50
-  nmap_timeout: 180
+
+scheduler:
+  enabled: true
+  audit_hour: 2        # audit diario 02:00
+  malware_day: 0       # malware los lunes (0=lunes)
+  malware_hour: 3
+  network_hour: 4
+
+notifications:
+  email_enabled: false
+  smtp_host: smtp.gmail.com
+  min_level: warning   # info | warning | critical
+
+siem:
+  wazuh_enabled: false
+  elk_enabled: false
+  splunk_enabled: false
+  min_severity: medium
 ```
+
+### Variables de entorno (Docker)
+
+| Variable | Descripción |
+|----------|-------------|
+| `CH_PASSWORD` | Contraseña de acceso |
+| `CH_USERNAME` | Usuario (defecto: admin) |
+| `SHODAN_API_KEY` | API key de Shodan |
+| `VT_API_KEY` | API key de VirusTotal |
+| `CH_SMTP_PASSWORD` | Contraseña SMTP (no en YAML) |
+| `CH_WAZUH_PASS` | Contraseña API Wazuh |
+| `CH_ELK_API_KEY` | API key Elasticsearch |
+| `CH_SPLUNK_TOKEN` | Token Splunk HEC |
 
 ---
 
-## Herramientas recomendadas
+## Tests
 
-| Herramienta | Función | Instalación |
+**195 tests** distribuidos en 7 ficheros:
+
+```bash
+# Ejecutar todos los tests
+pytest tests/ -v
+
+# Con cobertura
+pytest tests/ --cov=cyberhound --cov-report=term-missing
+```
+
+| Fichero | Tests | Cobertura |
+|---------|-------|-----------|
+| `test_security.py` | 45 | RateLimiter, InputValidator, TLS |
+| `test_database.py` | 40 | Scans, assets, supresiones, usuarios, stats |
+| `test_hardening.py` | 22 | Checks individuales + HardeningFixer |
+| `test_scheduler.py` | 13 | Scheduler, entries, run_now |
+| `test_scoring.py` | 25 | Motor de scoring, contexto, grades |
+| `test_config.py` | 22 | Validación eager, save/reload |
+| `test_docker_k8s.py` | 28 | Docker y Kubernetes checks |
+
+---
+
+## Herramientas del sistema recomendadas
+
+| Herramienta | Para qué | Instalación |
 |-------------|---------|-------------|
 | `nmap` | Network scan, OS detection, CVEs | `sudo apt install nmap` |
 | `arp-scan` | Descubrimiento LAN | `sudo apt install arp-scan` |
+| `kubectl` | Kubernetes scan | [kubernetes.io/docs](https://kubernetes.io/docs/tasks/tools/) |
+| `trivy` | CVEs en imágenes Docker | [aquasecurity.github.io](https://aquasecurity.github.io/trivy/) |
 | `gitleaks` | Secretos en código | [github.com/gitleaks](https://github.com/gitleaks/gitleaks/releases) |
 | `shellcheck` | Análisis Bash | `sudo apt install shellcheck` |
 | `bandit` | Análisis Python | `pip install bandit` |
 | `semgrep` | Análisis multi-lenguaje | `pip install semgrep` |
-| `trufflehog` | Secretos verificados | [github.com/trufflesecurity](https://github.com/trufflesecurity/trufflehog/releases) |
+| `auditd` | Logging kernel | `sudo apt install auditd` |
 
 ---
 
-## Contribuir
+## Roadmap — Pendiente
 
-### Añadir un nuevo check de hardening
+### Alta prioridad
+- [ ] **Análisis de servicios específicos** — nginx, apache, mysql, postgresql (checks de configuración)
+- [ ] **Sistema de licencias** para comercialización (JWT firmado con fecha de expiración y límite de hosts)
+- [ ] **2FA/TOTP** — segundo factor de autenticación opcional
+- [ ] **Historial visual** — gráfico de tendencia interactivo en el panel de historial
 
-```python
-# En scanners/hardening.py
+### Media prioridad
+- [ ] **Integración Wazuh nativa** — envío activo + reglas de decodificación custom
+- [ ] **Análisis de AD/LDAP** — usuarios sin contraseña, cuentas inactivas, permisos excesivos
+- [ ] **Actualización automática de reglas YARA** desde repositorios públicos
+- [ ] **Modo agente** — despliegue en múltiples servidores con reporting central
+- [ ] **Notificaciones push** — WebSocket notificaciones al navegador sin polling
 
-async def check_mi_check() -> list[Finding]:
-    content = await read_file_async("/etc/fichero")
-    if content and "patron_inseguro" in content:
-        return [_f(
-            id="mi_check_id",
-            category="categoria",
-            severity="high",
-            title="Descripción del problema",
-            description="Explicación para el usuario",
-            remediation="comando --corrector",
-            auto_fix=True,
-        )]
-    return []
-
-# Añadir a HardeningAuditor.CHECKS
-# Si auto_fix=True, añadir en HardeningFixer.fix() y _fix_mi_check()
-```
-
-### Añadir un módulo de malware
-
-```python
-# En scanners/malware.py
-
-async def scan_mi_modulo() -> list[Finding]:
-    findings = []
-    # lógica de detección
-    return findings
-
-# Añadir en MalwareScanner.full_scan():
-if "mi_modulo" not in skip:
-    tasks["mi_modulo"] = scan_mi_modulo()
-```
-
-### Tests
-
-```bash
-# Verificar sintaxis de todos los módulos
-python -m py_compile cyberhound/**/*.py cyberhound/*.py
-
-# Verificar imports
-python -c "
-from cyberhound.core.models import Finding
-from cyberhound.core.auth import AuthConfig
-from cyberhound.scanners.hardening import HardeningAuditor
-from cyberhound.api.server import CyberHoundServer
-print('OK')
-"
-```
-
----
-
-## Roadmap
-
-### v6.1
-- [ ] Tests unitarios (pytest + pytest-asyncio)
-- [ ] TLS auto-firmado en primer arranque
-- [ ] Notificaciones email/Slack para hallazgos críticos
-- [ ] Scheduler para auditorías periódicas automáticas
-- [ ] Histórico: evolución de la puntuación de seguridad
-
-### v6.2
-- [ ] Integración con Wazuh/OSSEC
-- [ ] Análisis de Active Directory / LDAP
-- [ ] Soporte Windows vía PowerShell remoting
-- [ ] Dashboard multi-tenant para MSPs
-
-### v7.0
-- [ ] Arquitectura de microservicios
-- [ ] Base de datos PostgreSQL para histórico
-- [ ] Monitorización continua con inotify/eBPF
-- [ ] Actualización automática de reglas YARA
+### Mejoras técnicas
+- [ ] **Streaming con generators** para YARA y world-writable en servidores con millones de ficheros
+- [ ] **PostgreSQL** como alternativa a SQLite para despliegues multi-instancia
+- [ ] **eBPF monitoring** — detección de comportamiento malicioso en tiempo real sin auditd
+- [ ] **SBOM** — Software Bill of Materials para cumplimiento normativo
 
 ---
 
@@ -637,6 +469,4 @@ print('OK')
 
 MIT License — ver [LICENSE](LICENSE)
 
----
-
-*Desarrollado para hacer la ciberseguridad accesible a las PYMEs* 🐾
+*Desarrollado para hacer la ciberseguridad accesible a las PYMEs*
