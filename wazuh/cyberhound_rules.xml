@@ -1,0 +1,136 @@
+<!--
+  CyberHound Pro — Reglas Wazuh
+  
+  Coloca este fichero en: /var/ossec/etc/rules/cyberhound_rules.xml
+  Reinicia Wazuh: systemctl restart wazuh-manager
+  
+  Genera alertas Wazuh basadas en los hallazgos de CyberHound.
+  Los niveles siguen la escala Wazuh (1-15):
+    3  = info
+    7  = low  
+    10 = medium
+    12 = high
+    15 = critical
+-->
+<group name="cyberhound,security">
+
+  <!-- Regla base para todos los eventos de CyberHound -->
+  <rule id="100500" level="3">
+    <decoded_as>cyberhound</decoded_as>
+    <description>CyberHound Pro: evento de seguridad</description>
+    <group>cyberhound</group>
+  </rule>
+
+  <!-- Hallazgo crítico -->
+  <rule id="100501" level="15" frequency="1">
+    <if_sid>100500</if_sid>
+    <field name="cyberhound.severity">critical</field>
+    <description>CyberHound: hallazgo CRÍTICO — $(cyberhound.title)</description>
+    <group>cyberhound,critical</group>
+    <mitre>
+      <id>T1078</id>
+    </mitre>
+  </rule>
+
+  <!-- Hallazgo alto -->
+  <rule id="100502" level="12">
+    <if_sid>100500</if_sid>
+    <field name="cyberhound.severity">high</field>
+    <description>CyberHound: hallazgo ALTO — $(cyberhound.title)</description>
+    <group>cyberhound,high</group>
+  </rule>
+
+  <!-- Hallazgo medio -->
+  <rule id="100503" level="10">
+    <if_sid>100500</if_sid>
+    <field name="cyberhound.severity">medium</field>
+    <description>CyberHound: hallazgo MEDIO — $(cyberhound.title)</description>
+    <group>cyberhound,medium</group>
+  </rule>
+
+  <!-- Resumen de scan con hallazgos críticos -->
+  <rule id="100504" level="13">
+    <if_sid>100500</if_sid>
+    <decoded_as>cyberhound_summary</decoded_as>
+    <field name="cyberhound.score" type="pcre2">^([0-9]|[1-2][0-9]|3[0-9])$</field>
+    <description>CyberHound: score crítico $(cyberhound.score)/100 en scan $(cyberhound.scan_type)</description>
+    <group>cyberhound,low_score</group>
+  </rule>
+
+  <!-- Categorías específicas con reglas dedicadas -->
+
+  <!-- SSH vulnerabilidades -->
+  <rule id="100510" level="14">
+    <if_sid>100501">100502</if_sid>
+    <field name="cyberhound.category">ssh|ssh/cve</field>
+    <description>CyberHound: vulnerabilidad SSH — $(cyberhound.title)</description>
+    <group>cyberhound,ssh,authentication</group>
+    <mitre>
+      <id>T1021.004</id>
+    </mitre>
+  </rule>
+
+  <!-- Malware detectado -->
+  <rule id="100511" level="15">
+    <if_sid>100500</if_sid>
+    <field name="cyberhound.category">malware/yara|malware/hash|malware/webshell</field>
+    <description>CyberHound: MALWARE detectado — $(cyberhound.title)</description>
+    <group>cyberhound,malware,intrusion_detection</group>
+    <mitre>
+      <id>T1059</id>
+      <id>T1505.003</id>
+    </mitre>
+  </rule>
+
+  <!-- Monitor en tiempo real: comando sospechoso -->
+  <rule id="100512" level="15">
+    <if_sid>100500</if_sid>
+    <field name="cyberhound.category">monitor/exec</field>
+    <description>CyberHound Monitor: comando sospechoso detectado — $(cyberhound.title)</description>
+    <group>cyberhound,monitor,execution</group>
+    <mitre>
+      <id>T1059</id>
+    </mitre>
+  </rule>
+
+  <!-- Monitor: fichero crítico modificado -->
+  <rule id="100513" level="13">
+    <if_sid>100500</if_sid>
+    <field name="cyberhound.category">monitor/integrity</field>
+    <description>CyberHound Monitor: fichero crítico modificado — $(cyberhound.title)</description>
+    <group>cyberhound,monitor,integrity</group>
+    <mitre>
+      <id>T1565.001</id>
+    </mitre>
+  </rule>
+
+  <!-- Docker/K8s: escape o privilegio -->
+  <rule id="100514" level="15">
+    <if_sid>100500</if_sid>
+    <field name="cyberhound.category">docker/escape|docker/privilege|kubernetes/rbac</field>
+    <description>CyberHound: riesgo de escape de contenedor — $(cyberhound.title)</description>
+    <group>cyberhound,containers,privilege_escalation</group>
+    <mitre>
+      <id>T1611</id>
+    </mitre>
+  </rule>
+
+  <!-- Firewall desactivado -->
+  <rule id="100515" level="13">
+    <if_sid>100501">100502</if_sid>
+    <field name="cyberhound.category">firewall</field>
+    <description>CyberHound: problema de firewall — $(cyberhound.title)</description>
+    <group>cyberhound,firewall,network</group>
+    <mitre>
+      <id>T1562.004</id>
+    </mitre>
+  </rule>
+
+  <!-- Score bajo — múltiples hallazgos -->
+  <rule id="100520" level="10" frequency="5" timeframe="300">
+    <if_matched_sid>100500</if_matched_sid>
+    <description>CyberHound: múltiples hallazgos de seguridad en 5 minutos</description>
+    <group>cyberhound,audit</group>
+  </rule>
+
+</group>
