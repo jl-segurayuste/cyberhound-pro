@@ -3,7 +3,7 @@
 
 // ── Estado global ──────────────────────────────────────────────────────────
 const S = {
-  findings: { audit: [], malware: [], code: [], network: [], services: [], tls: [] },
+  findings: { audit: [], malware: [], code: [], network: [], services: [], tls: [], webhdr: [] },
   devices:  [],
   ws:       null,
   wsRetries: 0,
@@ -1592,6 +1592,48 @@ function runTLSScan() {
     },
     onError() { btn('btn-tls', false, '▶ Escanear TLS'); },
   }, 'Escaneo TLS/SSL', '🔒');
+}
+
+function runWebHeadersScan() {
+  S.findings.webhdr = [];
+  document.getElementById('webhdr-results').style.display = 'none';
+  document.getElementById('webhdr-empty').style.display = '';
+  document.getElementById('webhdr-tbody').innerHTML = '';
+
+  const raw = (document.getElementById('webhdr-urls').value || '').trim();
+  const urls = raw ? raw.split('\n').map(s => s.trim()).filter(Boolean) : [];
+  if (!urls.length) { toast('Introduce al menos una URL'); return; }
+  btn('btn-webhdr', true, '⏳ Analizando…');
+
+  wsRunWithActivity('web_headers', { urls }, {
+    onFinding(f) {
+      S.findings.webhdr.push(f);
+      const tbody = document.getElementById('webhdr-tbody');
+      const tr = document.createElement('tr');
+      tr.dataset.sev = f.severity;
+      tr.onclick = () => openDrawer(f);
+      tr.innerHTML = `
+        <td>${sevBadge(f.severity)}</td>
+        <td style="font-size:.8rem">🌐 ${esc(f.source_host || '—')}</td>
+        <td><b>${esc(f.title)}</b></td>
+        <td style="font-size:.78rem;color:var(--text2)">${esc((f.remediation||'').substring(0,70))}</td>`;
+      tbody.appendChild(tr);
+    },
+    onDone() {
+      btn('btn-webhdr', false, '▶ Analizar cabeceras');
+      if (S.findings.webhdr.length) {
+        document.getElementById('webhdr-results').style.display = '';
+        document.getElementById('webhdr-empty').style.display = 'none';
+        renderSummary('webhdr-summary-bar', S.findings.webhdr);
+      } else {
+        const h3 = document.querySelector('#webhdr-empty h3');
+        const p  = document.querySelector('#webhdr-empty p');
+        if (h3) h3.textContent = '✅ Cabeceras correctamente configuradas';
+        if (p)  p.textContent  = 'No se detectaron problemas en las cabeceras de seguridad.';
+      }
+    },
+    onError() { btn('btn-webhdr', false, '▶ Analizar cabeceras'); },
+  }, 'Cabeceras de seguridad web', '🌐');
 }
 
 // ── 2FA ───────────────────────────────────────────────────────────────────────
