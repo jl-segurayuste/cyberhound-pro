@@ -8,7 +8,591 @@
 </head>
 <body>
 
-<!-- TOPBAR -->
+<header id="topbar">
+  <span class="logo">🐾 CyberHound Pro</span>
+  <div id="status-area">
+    <span id="status-dot" class="dot idle"></span>
+    <span id="status-label">Listo</span>
+  </div>
+  <nav class="top-nav">
+    <button class="nav-tab active" data-panel="dashboard" onclick="showPanel('dashboard')">🏠 Inicio</button>
+    <button class="nav-tab" data-panel="network"   onclick="showPanel('network')">📡 Mi Red</button>
+    <button class="nav-tab" data-panel="audit"     onclick="showPanel('audit')">🔍 Seguridad</button>
+    <button class="nav-tab" data-panel="malware"   onclick="showPanel('malware')">🦠 Malware</button>
+    <button class="nav-tab" data-panel="docker"    onclick="showPanel('docker')">🐳 Docker</button>
+    <button class="nav-tab" data-panel="code"      onclick="showPanel('code')">📝 Código</button>
+    <button class="nav-tab" data-panel="history"   onclick="showPanel('history')">📅 Historial</button>
+    <button class="nav-tab" data-panel="reports"   onclick="showPanel('reports')">📊 Informes</button>
+    <button class="nav-tab" data-panel="settings"  onclick="showPanel('settings')">⚙️ Config</button>
+  </nav>
+  <button id="log-toggle" onclick="toggleLog()">📋 Log</button>
+  <a href="/logout" class="logout-btn">Salir</a>
+</header>
+
+<main id="main">
+
+  <!-- ═══ DASHBOARD ═══ -->
+  <section class="panel active" id="panel-dashboard">
+    <div class="page-header">
+      <h1>Estado de seguridad de tu empresa</h1>
+      <p>Datos en tiempo real de los últimos análisis realizados.</p>
+    </div>
+    <div class="dash-grid">
+
+      <div class="dash-card score-card" id="score-card">
+        <div class="score-circle" id="score-circle">
+          <span id="score-num">—</span><small>/ 100</small>
+        </div>
+        <div>
+          <div class="score-label" id="score-label">Cargando…</div>
+          <div class="score-hint" id="score-hint">Último audit: —</div>
+          <div id="score-grade" style="margin-top:6px;font-size:.8rem;color:var(--text2)"></div>
+          <div id="score-trend-mini" style="margin-top:4px;font-size:.78rem;color:var(--text2)"></div>
+        </div>
+      </div>
+
+      <div class="dash-card counters-card">
+        <h3>Problemas encontrados</h3>
+        <div class="counters">
+          <div class="counter critical"><span id="cnt-critical">—</span><label>Críticos</label></div>
+          <div class="counter high"><span id="cnt-high">—</span><label>Altos</label></div>
+          <div class="counter medium"><span id="cnt-medium">—</span><label>Medios</label></div>
+          <div class="counter low"><span id="cnt-low">—</span><label>Bajos</label></div>
+        </div>
+        <div id="dash-comparison" style="margin-top:10px;font-size:.78rem"></div>
+      </div>
+
+      <div class="dash-card">
+        <h3>📡 Dispositivos en red</h3>
+        <div id="dash-devices-count" class="big-number">—</div>
+        <div id="dash-unauth" style="font-size:.8rem;color:var(--red);margin-top:4px"></div>
+        <button class="btn-primary small" style="margin-top:8px" onclick="showPanel('network')">Ver dispositivos</button>
+      </div>
+
+      <div class="dash-card">
+        <h3>⚡ Acciones rápidas</h3>
+        <div class="quick-actions">
+          <button class="quick-btn" onclick="quickAudit()"><span>🔍</span><span>Analizar seguridad</span><small>~2 min</small></button>
+          <button class="quick-btn" onclick="quickNetwork()"><span>📡</span><span>Escanear red</span><small>~5 min</small></button>
+          <button class="quick-btn" onclick="quickMalware()"><span>🦠</span><span>Buscar malware</span><small>~3 min</small></button>
+          <button class="quick-btn" onclick="quickDocker()"><span>🐳</span><span>Analizar Docker</span><small>~1 min</small></button>
+        </div>
+      </div>
+
+      <!-- Score breakdown -->
+      <div class="dash-card" id="score-breakdown-card" style="display:none">
+        <h3>📊 Desglose de puntuación</h3>
+        <div id="score-breakdown-list" style="font-size:.82rem"></div>
+        <div style="margin-top:8px;font-size:.75rem;color:var(--text2)" id="score-exposure"></div>
+      </div>
+
+      <!-- Trend chart -->
+      <div class="dash-card wide" id="trend-card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <h3>📈 Evolución del score (30 días)</h3>
+          <button class="btn-secondary small" onclick="loadDashboard()">↻</button>
+        </div>
+        <div id="trend-chart" style="height:80px;position:relative">
+          <div style="color:var(--text2);font-size:.82rem;text-align:center;padding-top:28px">Sin datos todavía — ejecuta el primer análisis</div>
+        </div>
+      </div>
+
+      <div class="dash-card wide">
+        <h3>🚨 Problemas que requieren atención inmediata</h3>
+        <div id="dash-critical-list">
+          <div class="empty-hint"><span>✅</span><p>Ejecuta un análisis para ver los problemas detectados.</p></div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ═══ NETWORK ═══ -->
+  <section class="panel" id="panel-network">
+    <div class="page-header"><h1>📡 Dispositivos en tu red</h1>
+      <p>Detecta automáticamente todos los equipos conectados y analiza sus vulnerabilidades.</p>
+    </div>
+    <div class="config-bar">
+      <div class="field"><label>Redes a escanear <span class="hint-text">(vacío = autodetectar)</span></label>
+        <input type="text" id="net-networks" placeholder="192.168.1.0/24 o vacío"></div>
+      <div class="field-group">
+        <div class="field narrow"><label>Usuario SSH</label><input type="text" id="net-user" value="root"></div>
+        <div class="field narrow"><label>Puerto SSH</label><input type="number" id="net-port" value="22" style="width:80px"></div>
+      </div>
+      <div class="field"><label>Clave SSH</label><input type="text" id="net-key" placeholder="~/.ssh/id_ed25519"></div>
+      <div class="field"><label>Contraseña SSH <span class="hint-text">(solo si no hay clave)</span></label>
+        <input type="password" id="net-pass" placeholder="Dejar vacío si usas clave"></div>
+      <div class="action-group">
+        <button class="btn-secondary" onclick="discoverOnly()">🔍 Solo descubrir</button>
+        <button class="btn-primary" id="btn-network" onclick="runNetworkScan()">▶ Descubrir y analizar</button>
+      </div>
+      <div class="field">
+        <label class="checkbox-label"><input type="checkbox" id="vuln-scan"> Análisis CVE (más lento)</label>
+      </div>
+    </div>
+    <div id="host-chips" style="padding:12px 20px;display:flex;flex-wrap:wrap;gap:8px;border-bottom:1px solid var(--border)"></div>
+    <div class="table-area">
+      <div class="empty-panel" id="network-empty">
+        <div class="empty-icon">📡</div><h3>Sin datos de red todavía</h3>
+        <p>Pulsa "Descubrir dispositivos" para ver todos los equipos conectados.</p>
+        <button class="btn-primary" onclick="discoverOnly()">🔍 Descubrir ahora</button>
+      </div>
+      <table id="network-table" style="display:none">
+        <thead><tr><th>Dispositivo</th><th>Sistema Operativo</th><th>Servicios</th><th>Riesgo</th><th>CVEs</th><th>Acciones</th></tr></thead>
+        <tbody id="network-tbody"></tbody>
+      </table>
+    </div>
+    <div id="ssh-findings-area" style="display:none">
+      <div style="padding:12px 20px;border-top:2px solid var(--border);font-weight:600;color:var(--text2)">Problemas encontrados en los equipos</div>
+      <div class="toolbar">
+        <button class="filter active" onclick="filterTable('network','all',this)">Todos</button>
+        <button class="filter" data-sev="critical" onclick="filterTable('network','critical',this)">Crítico</button>
+        <button class="filter" data-sev="high" onclick="filterTable('network','high',this)">Alto</button>
+        <button class="filter" data-sev="medium" onclick="filterTable('network','medium',this)">Medio</button>
+        <input type="text" placeholder="🔎 Buscar…" oninput="searchTable('network-findings-tbody',this.value)">
+        <button class="btn-secondary small" onclick="exportJSON('network')">⬇ JSON</button>
+      </div>
+      <table><thead><tr><th>Equipo</th><th>Severidad</th><th>Problema</th><th>Solución</th><th></th></tr></thead>
+        <tbody id="network-findings-tbody"></tbody></table>
+    </div>
+  </section>
+
+  <!-- ═══ AUDIT ═══ -->
+  <section class="panel" id="panel-audit">
+    <div class="page-header"><h1>🔍 Análisis de seguridad de este equipo</h1>
+      <p>Comprueba la configuración de seguridad del servidor donde está instalado CyberHound.</p>
+    </div>
+    <div class="config-bar">
+      <button class="btn-primary large" id="btn-audit" onclick="runAudit()">▶ Iniciar análisis completo</button>
+      <div class="field"><label class="checkbox-label"><input type="checkbox" id="audit-fix-all"> Aplicar correcciones automáticas al terminar</label></div>
+    </div>
+    <div id="audit-results" style="display:none">
+      <div id="audit-summary-bar"></div>
+      <div class="toolbar">
+        <button class="filter active" onclick="filterTable('audit','all',this)">Todos</button>
+        <button class="filter" data-sev="critical" onclick="filterTable('audit','critical',this)">Crítico</button>
+        <button class="filter" data-sev="high" onclick="filterTable('audit','high',this)">Alto</button>
+        <button class="filter" data-sev="medium" onclick="filterTable('audit','medium',this)">Medio</button>
+        <button class="filter" data-sev="low" onclick="filterTable('audit','low',this)">Bajo</button>
+        <input type="text" placeholder="🔎 Buscar…" oninput="searchTable('audit-tbody',this.value)">
+        <button class="btn-primary small" id="btn-fix-all" onclick="fixAll('audit')" style="display:none">⚡ Corregir todo</button>
+        <button class="btn-secondary small" onclick="exportJSON('audit')">⬇ JSON</button>
+      </div>
+      <table><thead><tr><th style="width:100px">Severidad</th><th>Qué ocurre</th><th>Descripción</th><th style="width:120px">Acción</th></tr></thead>
+        <tbody id="audit-tbody"></tbody></table>
+    </div>
+    <div class="empty-panel" id="audit-empty">
+      <div class="empty-icon">🔍</div><h3>Análisis no ejecutado</h3>
+      <p>Pulsa el botón para comprobar la seguridad de este equipo.</p>
+    </div>
+  </section>
+
+  <!-- ═══ MALWARE ═══ -->
+  <section class="panel" id="panel-malware">
+    <div class="page-header"><h1>🦠 Detección de malware y amenazas</h1>
+      <p>Busca virus, backdoors, tareas maliciosas y comportamiento sospechoso.</p>
+    </div>
+    <div class="config-bar">
+      <div class="field"><label>Módulos</label>
+        <div class="checkbox-row">
+          <label class="checkbox-label"><input type="checkbox" id="m-yara" checked> YARA (patrones de malware)</label>
+          <label class="checkbox-label"><input type="checkbox" id="m-hash" checked> Verificación hashes (VT/MalwareBazaar)</label>
+          <label class="checkbox-label"><input type="checkbox" id="m-auditd" checked> Comportamiento (audit.log)</label>
+          <label class="checkbox-label"><input type="checkbox" id="m-cron" checked> Tareas programadas sospechosas</label>
+          <label class="checkbox-label"><input type="checkbox" id="m-webshell" checked> Webshells en directorios web</label>
+        </div>
+      </div>
+      <div class="field"><label>Reglas YARA personalizadas</label><input type="text" id="yara-rules" placeholder="/etc/yara/mis_reglas.yar"></div>
+      <div class="field"><label>Directorios web adicionales</label><input type="text" id="web-roots" placeholder="/var/www/html"></div>
+      <button class="btn-primary" id="btn-malware" onclick="runMalware()">▶ Iniciar escaneo</button>
+    </div>
+    <div id="malware-results" style="display:none">
+      <div id="malware-summary-bar"></div>
+      <div class="toolbar">
+        <button class="filter active" onclick="filterTable('malware','all',this)">Todos</button>
+        <button class="filter" data-sev="critical" onclick="filterTable('malware','critical',this)">Crítico</button>
+        <button class="filter" data-sev="high" onclick="filterTable('malware','high',this)">Alto</button>
+        <button class="filter" data-sev="medium" onclick="filterTable('malware','medium',this)">Medio</button>
+        <input type="text" placeholder="🔎 Buscar…" oninput="searchTable('malware-tbody',this.value)">
+        <button class="btn-secondary small" onclick="exportJSON('malware')">⬇ JSON</button>
+      </div>
+      <table><thead><tr><th>Severidad</th><th>Tipo</th><th>Descripción</th><th>Fichero</th><th>Acción</th></tr></thead>
+        <tbody id="malware-tbody"></tbody></table>
+    </div>
+    <div class="empty-panel" id="malware-empty">
+      <div class="empty-icon">🦠</div><h3>Escaneo no ejecutado</h3><p>Pulsa el botón para buscar amenazas.</p>
+    </div>
+  </section>
+
+  <!-- ═══ DOCKER ═══ -->
+  <section class="panel" id="panel-docker">
+    <div class="page-header"><h1>🐳 Seguridad de contenedores Docker</h1>
+      <p>Analiza la configuración de seguridad de tus contenedores e imágenes.</p>
+    </div>
+    <div class="config-bar">
+      <div class="field">
+        <label class="checkbox-label"><input type="checkbox" id="docker-scan-cve" checked> Analizar CVEs en imágenes (requiere Trivy, más lento)</label>
+      </div>
+      <button class="btn-primary" id="btn-docker" onclick="runDocker()">▶ Analizar Docker</button>
+    </div>
+
+    <!-- Resumen visual -->
+    <div id="docker-summary" style="display:none;padding:0 0 16px">
+      <div style="display:flex;gap:12px;flex-wrap:wrap" id="docker-chips"></div>
+    </div>
+
+    <div id="docker-results" style="display:none">
+      <div id="docker-summary-bar"></div>
+      <div class="toolbar">
+        <button class="filter active" onclick="filterTable('docker','all',this)">Todos</button>
+        <button class="filter" data-sev="critical" onclick="filterTable('docker','critical',this)">Crítico</button>
+        <button class="filter" data-sev="high" onclick="filterTable('docker','high',this)">Alto</button>
+        <button class="filter" data-sev="medium" onclick="filterTable('docker','medium',this)">Medio</button>
+        <input type="text" placeholder="🔎 Buscar…" oninput="searchTable('docker-tbody',this.value)">
+        <button class="btn-secondary small" onclick="exportJSON('docker')">⬇ JSON</button>
+      </div>
+      <table>
+        <thead><tr><th>Severidad</th><th>Tipo de problema</th><th>Descripción</th><th>Cómo solucionarlo</th></tr></thead>
+        <tbody id="docker-tbody"></tbody>
+      </table>
+    </div>
+    <div class="empty-panel" id="docker-empty">
+      <div class="empty-icon">🐳</div>
+      <h3>Análisis Docker no ejecutado</h3>
+      <p>Comprueba si tienes Docker instalado y activo antes de ejecutar el análisis.</p>
+      <button class="btn-primary" onclick="runDocker()">▶ Analizar ahora</button>
+    </div>
+  </section>
+
+  <!-- ═══ CODE ═══ -->
+  <section class="panel" id="panel-code">
+    <div class="page-header"><h1>📝 Análisis de código</h1>
+      <p>Detecta vulnerabilidades, secretos hardcodeados y malas prácticas.</p>
+    </div>
+    <div class="config-bar">
+      <div class="field"><label>Directorio del proyecto</label>
+        <input type="text" id="code-path" placeholder="/var/www/html o /home/usuario/proyecto" style="min-width:320px"></div>
+      <button class="btn-primary" id="btn-code" onclick="runCode()">▶ Analizar</button>
+    </div>
+    <div id="code-results" style="display:none">
+      <div class="toolbar">
+        <button class="filter active" onclick="filterTable('code','all',this)">Todos</button>
+        <button class="filter" data-sev="critical" onclick="filterTable('code','critical',this)">Crítico</button>
+        <button class="filter" data-sev="high" onclick="filterTable('code','high',this)">Alto</button>
+        <button class="filter" data-sev="medium" onclick="filterTable('code','medium',this)">Medio</button>
+        <input type="text" placeholder="🔎 Buscar…" oninput="searchTable('code-tbody',this.value)">
+        <button class="btn-secondary small" onclick="exportJSON('code')">⬇ JSON</button>
+      </div>
+      <table><thead><tr><th>Severidad</th><th>Fichero</th><th>Problema</th><th>Solución</th></tr></thead>
+        <tbody id="code-tbody"></tbody></table>
+    </div>
+    <div class="empty-panel" id="code-empty">
+      <div class="empty-icon">📝</div><h3>Introduce la ruta del proyecto</h3>
+      <p>Se analizarán Python, Bash, JavaScript y se buscarán secretos expuestos.</p>
+    </div>
+  </section>
+
+  <!-- ═══ HISTORIAL ═══ -->
+  <section class="panel" id="panel-history">
+    <div class="page-header"><h1>📅 Historial de análisis</h1>
+      <p>Todos los análisis realizados, con comparación y evolución del score.</p>
+    </div>
+    <div class="config-bar" style="gap:8px">
+      <div class="field"><label>Tipo</label>
+        <select id="hist-type" onchange="loadHistory()">
+          <option value="">Todos</option>
+          <option value="audit">Seguridad</option>
+          <option value="malware">Malware</option>
+          <option value="network">Red</option>
+          <option value="docker">Docker</option>
+          <option value="code">Código</option>
+        </select>
+      </div>
+      <button class="btn-secondary" onclick="loadHistory()">↻ Actualizar</button>
+    </div>
+
+    <!-- Mini gráfico de tendencia -->
+    <div id="history-trend-wrap" style="padding:0 0 16px;display:none">
+      <div style="font-size:.78rem;color:var(--text2);margin-bottom:6px">Score de seguridad — últimos 30 días</div>
+      <div id="history-trend-chart" style="height:60px"></div>
+    </div>
+
+    <div style="overflow-y:auto;flex:1">
+      <div class="empty-panel" id="history-empty">
+        <div class="empty-icon">📅</div><h3>Sin historial todavía</h3>
+        <p>Los análisis se guardan automáticamente. Ejecuta el primero para empezar.</p>
+      </div>
+      <table id="history-table" style="display:none">
+        <thead><tr>
+          <th>Fecha</th><th>Tipo</th><th>Objetivo</th>
+          <th style="width:80px">Score</th>
+          <th style="width:260px">Hallazgos</th>
+          <th>Duración</th><th>Origen</th><th>Acciones</th>
+        </tr></thead>
+        <tbody id="history-tbody"></tbody>
+      </table>
+    </div>
+
+    <div id="history-detail" style="display:none;border-top:2px solid var(--border);margin-top:16px">
+      <div style="padding:12px 20px;display:flex;justify-content:space-between;align-items:center">
+        <h3 id="history-detail-title" style="font-size:.95rem"></h3>
+        <div id="history-comparison" style="font-size:.82rem;display:flex;gap:12px"></div>
+        <button onclick="closeHistoryDetail()" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:1.1rem">✕</button>
+      </div>
+      <div class="toolbar" style="padding:0 20px 8px">
+        <button class="filter active" onclick="filterTable('hist-detail','all',this)">Todos</button>
+        <button class="filter" data-sev="critical" onclick="filterTable('hist-detail','critical',this)">Crítico</button>
+        <button class="filter" data-sev="high" onclick="filterTable('hist-detail','high',this)">Alto</button>
+        <button class="filter" data-sev="medium" onclick="filterTable('hist-detail','medium',this)">Medio</button>
+      </div>
+      <table><thead><tr><th>Severidad</th><th>Categoría</th><th>Hallazgo</th><th>Estado</th></tr></thead>
+        <tbody id="hist-detail-tbody"></tbody></table>
+    </div>
+  </section>
+
+  <!-- ═══ REPORTS ═══ -->
+  <section class="panel" id="panel-reports">
+    <div class="page-header"><h1>📊 Informes y exportación</h1></div>
+    <div class="reports-grid">
+      <div class="report-card"><div class="report-icon">📄</div><h3>Informe HTML</h3>
+        <p>Informe completo coloreado por severidad. Ideal para imprimir o enviar.</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn-primary small" onclick="downloadReport('html','audit')">⬇ Seguridad</button>
+          <button class="btn-primary small" onclick="downloadReport('html','malware')">⬇ Malware</button>
+          <button class="btn-primary small" onclick="downloadReport('html','docker')">⬇ Docker</button>
+        </div>
+      </div>
+      <div class="report-card"><div class="report-icon">🤖</div><h3>Playbook Ansible</h3>
+        <p>Script automatizado para aplicar correcciones en múltiples equipos.</p>
+        <button class="btn-primary small" onclick="downloadReport('ansible','audit')">⬇ Descargar</button>
+      </div>
+      <div class="report-card"><div class="report-icon">🗂</div><h3>JSON para SIEM</h3>
+        <p>Datos estructurados para Splunk, ELK, Wazuh u otras plataformas.</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn-secondary small" onclick="exportJSON('audit')">⬇ Seguridad</button>
+          <button class="btn-secondary small" onclick="exportJSON('malware')">⬇ Malware</button>
+          <button class="btn-secondary small" onclick="exportJSON('docker')">⬇ Docker</button>
+          <button class="btn-secondary small" onclick="exportJSON('code')">⬇ Código</button>
+        </div>
+      </div>
+      <div class="report-card"><div class="report-icon">📋</div><h3>Log de sesión</h3>
+        <button class="btn-secondary small" onclick="downloadLog()">⬇ Descargar log</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ SETTINGS ═══ -->
+  <section class="panel" id="panel-settings">
+    <div class="page-header"><h1>⚙️ Configuración</h1></div>
+    <div style="display:flex;gap:2px;padding:0 0 0 0;border-bottom:1px solid var(--border);margin-bottom:20px;flex-wrap:wrap">
+      <button class="cfg-tab active" data-cfg="keys"          onclick="showCfgTab('keys')">🔑 API Keys</button>
+      <button class="cfg-tab"        data-cfg="notifications" onclick="showCfgTab('notifications')">🔔 Notificaciones</button>
+      <button class="cfg-tab"        data-cfg="siem"          onclick="showCfgTab('siem')">🛡 SIEM</button>
+      <button class="cfg-tab"        data-cfg="scheduler"     onclick="showCfgTab('scheduler')">🕐 Scheduler</button>
+      <button class="cfg-tab"        data-cfg="users"         onclick="showCfgTab('users')">👥 Usuarios</button>
+      <button class="cfg-tab"        data-cfg="suppressions"  onclick="showCfgTab('suppressions')">🔕 Supresiones</button>
+    </div>
+
+    <!-- API Keys -->
+    <div class="cfg-panel active" id="cfg-keys">
+      <div class="settings-grid">
+        <div class="settings-card">
+          <h3>🔑 API Keys para inteligencia de amenazas</h3>
+          <p class="hint">Opcional. Consulta bases de datos externas de amenazas.</p>
+          <div class="field"><label>Shodan</label><input type="password" id="key-shodan" placeholder="shodan.io"></div>
+          <div class="field"><label>VirusTotal</label><input type="password" id="key-vt" placeholder="virustotal.com"></div>
+          <div class="field"><label>AbuseIPDB</label><input type="password" id="key-abuse" placeholder="abuseipdb.com"></div>
+          <div class="field"><label>GreyNoise</label><input type="password" id="key-grey" placeholder="greynoise.io"></div>
+          <div class="field"><label>HIBP</label><input type="password" id="key-hibp" placeholder="haveibeenpwned.com"></div>
+          <div style="display:flex;gap:8px;margin-top:12px">
+            <button class="btn-primary" onclick="saveKeys()">💾 Guardar</button>
+            <button class="btn-secondary" onclick="loadKeys()">↻ Cargar</button>
+          </div>
+          <div id="keys-msg" style="margin-top:8px;font-size:.82rem"></div>
+        </div>
+        <div class="settings-card">
+          <h3>🖥️ SSH por defecto</h3>
+          <div class="field"><label>Clave privada</label><input type="text" id="cfg-ssh-key" placeholder="~/.ssh/id_ed25519"></div>
+          <div class="field"><label>Usuario</label><input type="text" id="cfg-ssh-user" value="root"></div>
+          <div class="field"><label>Puerto</label><input type="number" id="cfg-ssh-port" value="22"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Notificaciones -->
+    <div class="cfg-panel" id="cfg-notifications">
+      <div class="settings-grid">
+        <div class="settings-card">
+          <h3>📧 Email (SMTP)</h3>
+          <div class="field"><label class="checkbox-label"><input type="checkbox" id="notif-email-enabled" onchange="toggleNotifEmail()"> Activar notificaciones por email</label></div>
+          <div id="notif-email-fields">
+            <div class="field"><label>Servidor SMTP</label><input type="text" id="notif-smtp-host" placeholder="smtp.gmail.com"></div>
+            <div class="field-group">
+              <div class="field"><label>Puerto</label><input type="number" id="notif-smtp-port" value="587" style="width:80px"></div>
+              <div class="field"><label>Usuario</label><input type="text" id="notif-smtp-user" placeholder="tu@email.com"></div>
+            </div>
+            <div class="field"><label>Contraseña SMTP</label><input type="password" id="notif-smtp-pass" placeholder="contraseña o token de app"></div>
+            <div class="field"><label>De (from)</label><input type="text" id="notif-email-from" placeholder="cyberhound@empresa.com"></div>
+            <div class="field"><label>Para (to, separados por coma)</label><input type="text" id="notif-email-to" placeholder="admin@empresa.com"></div>
+          </div>
+        </div>
+        <div class="settings-card">
+          <h3>🔗 Webhook (Slack / Teams / Discord)</h3>
+          <div class="field"><label class="checkbox-label"><input type="checkbox" id="notif-webhook-enabled"> Activar webhook</label></div>
+          <div class="field"><label>URL del webhook</label><input type="text" id="notif-webhook-url" placeholder="https://hooks.slack.com/services/..."></div>
+          <div class="field"><label>Nivel mínimo</label>
+            <select id="notif-min-level">
+              <option value="info">Todo (info, warning, critical)</option>
+              <option value="warning" selected>Warning y critical</option>
+              <option value="critical">Solo crítico</option>
+            </select>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+            <button class="btn-primary" onclick="saveNotifications()">💾 Guardar</button>
+            <button class="btn-secondary" onclick="testNotifications()">🧪 Enviar prueba</button>
+          </div>
+          <div id="notif-msg" style="margin-top:8px;font-size:.82rem"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SIEM -->
+    <div class="cfg-panel" id="cfg-siem">
+      <div class="settings-grid">
+        <div class="settings-card">
+          <h3>🛡 Wazuh</h3>
+          <p class="hint">Envío de hallazgos al agente activo de Wazuh o al Manager vía API REST.</p>
+          <div class="field"><label class="checkbox-label"><input type="checkbox" id="siem-wazuh-enabled"> Activar integración Wazuh</label></div>
+          <div class="field"><label>Host del agente</label><input type="text" id="siem-wazuh-host" placeholder="localhost"></div>
+          <div class="field-group">
+            <div class="field"><label>Puerto UDP</label><input type="number" id="siem-wazuh-port" value="1514" style="width:90px"></div>
+            <div class="field"><label>API URL (opcional)</label><input type="text" id="siem-wazuh-api" placeholder="https://wazuh-manager:55000"></div>
+          </div>
+        </div>
+        <div class="settings-card">
+          <h3>🔍 Elasticsearch / ELK</h3>
+          <p class="hint">Indexa hallazgos directamente en Elasticsearch.</p>
+          <div class="field"><label class="checkbox-label"><input type="checkbox" id="siem-elk-enabled"> Activar ELK</label></div>
+          <div class="field"><label>URL de Elasticsearch</label><input type="text" id="siem-elk-url" placeholder="http://localhost:9200"></div>
+          <div class="field"><label>Índice</label><input type="text" id="siem-elk-index" placeholder="cyberhound-findings"></div>
+          <div class="field"><label>API Key (o usuario:contraseña)</label><input type="password" id="siem-elk-key" placeholder="API Key de Elasticsearch"></div>
+        </div>
+        <div class="settings-card">
+          <h3>⚡ Splunk HEC</h3>
+          <p class="hint">Envío al HTTP Event Collector de Splunk.</p>
+          <div class="field"><label class="checkbox-label"><input type="checkbox" id="siem-splunk-enabled"> Activar Splunk</label></div>
+          <div class="field"><label>HEC URL</label><input type="text" id="siem-splunk-url" placeholder="https://splunk:8088/services/collector"></div>
+          <div class="field"><label>HEC Token</label><input type="password" id="siem-splunk-token" placeholder="Token del HEC"></div>
+          <div class="field"><label>Índice Splunk</label><input type="text" id="siem-splunk-index" placeholder="cyberhound"></div>
+        </div>
+        <div class="settings-card">
+          <h3>⚙️ Opciones SIEM</h3>
+          <div class="field"><label>Severidad mínima a enviar</label>
+            <select id="siem-min-severity">
+              <option value="low">Todo (low, medium, high, critical)</option>
+              <option value="medium" selected>Medium y superior</option>
+              <option value="high">Solo high y critical</option>
+              <option value="critical">Solo critical</option>
+            </select>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+            <button class="btn-primary" onclick="saveSIEM()">💾 Guardar</button>
+            <button class="btn-secondary" onclick="testSIEM()">🧪 Probar conexión</button>
+          </div>
+          <div id="siem-msg" style="margin-top:8px;font-size:.82rem"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Scheduler -->
+    <div class="cfg-panel" id="cfg-scheduler">
+      <div style="max-width:700px">
+        <p style="color:var(--text2);font-size:.88rem;margin-bottom:16px">
+          Las tareas se ejecutan automáticamente. Puedes ejecutarlas manualmente en cualquier momento.
+        </p>
+        <div id="scheduler-list" style="display:flex;flex-direction:column;gap:10px"></div>
+        <button class="btn-secondary" style="margin-top:12px" onclick="loadScheduler()">↻ Actualizar</button>
+      </div>
+    </div>
+
+    <!-- Usuarios -->
+    <div class="cfg-panel" id="cfg-users">
+      <div style="max-width:800px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+          <p style="color:var(--text2);font-size:.88rem">
+            <b>admin:</b> acceso total · <b>operator:</b> escanear y corregir · <b>viewer:</b> solo consulta
+          </p>
+          <button class="btn-primary small" onclick="showCreateUser()">+ Nuevo usuario</button>
+        </div>
+        <div id="create-user-form" style="display:none;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:16px;margin-bottom:16px">
+          <h4 style="margin-bottom:12px">Crear usuario</h4>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+            <div class="field"><label>Username</label><input type="text" id="new-username" placeholder="usuario123" style="min-width:140px"></div>
+            <div class="field"><label>Contraseña</label><input type="password" id="new-password" placeholder="mínimo 8 chars"></div>
+            <div class="field"><label>Rol</label>
+              <select id="new-role">
+                <option value="viewer">viewer</option>
+                <option value="operator">operator</option>
+                <option value="admin">admin</option>
+              </select>
+            </div>
+            <button class="btn-primary small" onclick="createUser()">Crear</button>
+            <button class="btn-secondary small" onclick="document.getElementById('create-user-form').style.display='none'">Cancelar</button>
+          </div>
+          <div id="user-create-msg" style="margin-top:8px;font-size:.82rem"></div>
+        </div>
+        <table id="users-table">
+          <thead><tr><th>Usuario</th><th>Rol</th><th>Último acceso</th><th>Estado</th><th>Acciones</th></tr></thead>
+          <tbody id="users-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Supresiones -->
+    <div class="cfg-panel" id="cfg-suppressions">
+      <div style="max-width:800px">
+        <p style="color:var(--text2);font-size:.88rem;margin-bottom:12px">
+          Los hallazgos suprimidos no aparecerán en futuros análisis. Usa <code>*</code> como comodín.
+          Ejemplo: <code>ww_/var/lib/kubelet*</code>
+        </p>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:16px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:14px">
+          <div class="field"><label>Patrón del finding ID</label><input type="text" id="supp-pattern" placeholder="ww_/var/lib/kubelet*" style="min-width:240px"></div>
+          <div class="field"><label>Motivo</label><input type="text" id="supp-reason" placeholder="Falso positivo — Kubelet legítimo" style="min-width:200px"></div>
+          <div class="field"><label>Expira (opcional)</label><input type="date" id="supp-expires"></div>
+          <button class="btn-primary small" onclick="addSuppression()">+ Añadir</button>
+        </div>
+        <table id="suppressions-table">
+          <thead><tr><th>Patrón</th><th>Motivo</th><th>Creado por</th><th>Expira</th><th></th></tr></thead>
+          <tbody id="suppressions-tbody"></tbody>
+        </table>
+        <div class="empty-panel" id="suppressions-empty" style="padding:30px">
+          <p>Sin supresiones configuradas.</p>
+        </div>
+      </div>
+    </div>
+
+  </section>
+
+</main>
+
+<!-- DETAIL DRAWER -->
+<div id="drawer"><div id="drawer-head">
+  <div><span id="drawer-sev-badge"></span><span id="drawer-title"></span></div>
+  <button onclick="closeDrawer()">✕</button>
+</div><div id="drawer-body"></div></div>
+<div id="drawer-backdrop" onclick="closeDrawer()"></div>
+
+<!-- LOG -->
+<div id="log-overlay">
+  <div id="log-header"><span>📋 Registro de actividad</span><button onclick="toggleLog()">✕</button></div>
+  <div id="log-body"></div>
+</div>
+
+<div id="toast"></div>
+<script src="/static/app.js"></script>
+</body>
+</html>
+
 <header id="topbar">
   <span class="logo">🐾 CyberHound Pro</span>
   <div id="status-area">
@@ -21,6 +605,7 @@
     <button class="nav-tab" data-panel="audit"     onclick="showPanel('audit')">🔍 Seguridad</button>
     <button class="nav-tab" data-panel="malware"   onclick="showPanel('malware')">🦠 Malware</button>
     <button class="nav-tab" data-panel="code"      onclick="showPanel('code')">📝 Código</button>
+    <button class="nav-tab" data-panel="history"   onclick="showPanel('history')">📅 Historial</button>
     <button class="nav-tab" data-panel="reports"   onclick="showPanel('reports')">📊 Informes</button>
     <button class="nav-tab" data-panel="settings"  onclick="showPanel('settings')">⚙️ Config</button>
   </nav>
@@ -28,30 +613,27 @@
   <a href="/logout" class="logout-btn">Salir</a>
 </header>
 
-<!-- MAIN -->
 <main id="main">
 
-  <!-- ═══ PANEL: DASHBOARD ═══ -->
+  <!-- ═══ DASHBOARD ═══ -->
   <section class="panel active" id="panel-dashboard">
     <div class="page-header">
       <h1>Estado de seguridad de tu empresa</h1>
-      <p>Resumen de los últimos análisis realizados en tu red.</p>
+      <p>Datos en tiempo real de los últimos análisis realizados.</p>
     </div>
-
     <div class="dash-grid">
-      <!-- Puntuación global -->
+
       <div class="dash-card score-card" id="score-card">
         <div class="score-circle" id="score-circle">
-          <span id="score-num">—</span>
-          <small>/ 100</small>
+          <span id="score-num">—</span><small>/ 100</small>
         </div>
         <div>
-          <div class="score-label" id="score-label">Sin datos</div>
-          <div class="score-hint">Ejecuta un análisis de seguridad para ver tu puntuación</div>
+          <div class="score-label" id="score-label">Cargando…</div>
+          <div class="score-hint" id="score-hint">Último audit: —</div>
+          <div id="score-trend-mini" style="margin-top:8px;font-size:.78rem;color:var(--text2)"></div>
         </div>
       </div>
 
-      <!-- Contadores por severidad -->
       <div class="dash-card counters-card">
         <h3>Problemas encontrados</h3>
         <div class="counters">
@@ -60,113 +642,81 @@
           <div class="counter medium"><span id="cnt-medium">—</span><label>Medios</label></div>
           <div class="counter low"><span id="cnt-low">—</span><label>Bajos</label></div>
         </div>
+        <div id="dash-comparison" style="margin-top:10px;font-size:.78rem"></div>
       </div>
 
-      <!-- Dispositivos en red -->
       <div class="dash-card">
         <h3>📡 Dispositivos en red</h3>
         <div id="dash-devices-count" class="big-number">—</div>
-        <p class="hint">Dispositivos detectados en el último escaneo de red</p>
-        <button class="btn-primary small" onclick="showPanel('network')">Ver dispositivos</button>
+        <div id="dash-unauth" style="font-size:.8rem;margin-top:4px"></div>
+        <button class="btn-primary small" style="margin-top:10px" onclick="showPanel('network')">Ver dispositivos</button>
       </div>
 
-      <!-- Acciones rápidas -->
+      <div class="dash-card">
+        <h3>🕐 Últimos análisis</h3>
+        <div id="dash-last-scans" style="display:flex;flex-direction:column;gap:6px;font-size:.82rem"></div>
+      </div>
+
       <div class="dash-card">
         <h3>⚡ Acciones rápidas</h3>
         <div class="quick-actions">
-          <button class="quick-btn" onclick="quickAudit()">
-            <span>🔍</span><span>Analizar seguridad</span>
-            <small>~2 min</small>
-          </button>
-          <button class="quick-btn" onclick="quickNetwork()">
-            <span>📡</span><span>Escanear red</span>
-            <small>~5 min</small>
-          </button>
-          <button class="quick-btn" onclick="quickMalware()">
-            <span>🦠</span><span>Buscar malware</span>
-            <small>~3 min</small>
-          </button>
+          <button class="quick-btn" onclick="quickAudit()"><span>🔍</span><span>Analizar seguridad</span><small>~2 min</small></button>
+          <button class="quick-btn" onclick="quickNetwork()"><span>📡</span><span>Escanear red</span><small>~5 min</small></button>
+          <button class="quick-btn" onclick="quickMalware()"><span>🦠</span><span>Buscar malware</span><small>~3 min</small></button>
         </div>
       </div>
 
-      <!-- Últimos hallazgos críticos -->
       <div class="dash-card wide">
-        <h3>🚨 Problemas que requieren atención inmediata</h3>
+        <h3>🚨 Problemas críticos activos</h3>
         <div id="dash-critical-list">
-          <div class="empty-hint">
-            <span>✅</span>
-            <p>Ejecuta un análisis para ver los problemas detectados en tu sistema.</p>
-          </div>
+          <div class="empty-hint"><span>⏳</span><p>Cargando datos del último análisis…</p></div>
         </div>
       </div>
+
+      <div class="dash-card wide">
+        <h3>📈 Evolución de la puntuación (30 días)</h3>
+        <div id="dash-trend-chart" style="height:80px;display:flex;align-items:flex-end;gap:4px;padding:8px 0">
+          <div class="empty-hint" style="padding:0"><span style="font-size:1.2rem">📊</span><p style="font-size:.8rem">Sin datos históricos todavía</p></div>
+        </div>
+      </div>
+
     </div>
   </section>
 
-  <!-- ═══ PANEL: NETWORK ═══ -->
+  <!-- ═══ NETWORK ═══ -->
   <section class="panel" id="panel-network">
     <div class="page-header">
       <h1>📡 Dispositivos en tu red</h1>
-      <p>Detecta automáticamente todos los equipos conectados y analiza sus vulnerabilidades.</p>
+      <p>Detecta todos los equipos conectados y analiza sus vulnerabilidades.</p>
     </div>
-
-    <!-- Configuración -->
     <div class="config-bar">
-      <div class="field">
-        <label>Redes a escanear <span class="hint-text">(deja vacío para autodetectar)</span></label>
-        <input type="text" id="net-networks" placeholder="192.168.1.0/24 o vacío para autodetectar">
-      </div>
+      <div class="field"><label>Redes <span class="hint-text">(vacío = autodetectar)</span></label>
+        <input type="text" id="net-networks" placeholder="192.168.1.0/24"></div>
       <div class="field-group">
-        <div class="field narrow">
-          <label>Usuario SSH</label>
-          <input type="text" id="net-user" value="root">
-        </div>
-        <div class="field narrow">
-          <label>Puerto SSH</label>
-          <input type="number" id="net-port" value="22" style="width:80px">
-        </div>
+        <div class="field narrow"><label>Usuario SSH</label><input type="text" id="net-user" value="root"></div>
+        <div class="field narrow"><label>Puerto</label><input type="number" id="net-port" value="22" style="width:80px"></div>
       </div>
-      <div class="field">
-        <label>Clave SSH <span class="hint-text">(recomendado para acceso seguro)</span></label>
-        <input type="text" id="net-key" placeholder="~/.ssh/id_ed25519">
-      </div>
-      <div class="field">
-        <label>Contraseña SSH <span class="hint-text">(solo si no hay clave)</span></label>
-        <input type="password" id="net-pass" placeholder="Dejar vacío si usas clave">
-      </div>
+      <div class="field"><label>Clave SSH</label><input type="text" id="net-key" placeholder="~/.ssh/id_ed25519"></div>
+      <div class="field"><label>Contraseña SSH <span class="hint-text">(solo si no hay clave)</span></label>
+        <input type="password" id="net-pass"></div>
       <div class="action-group">
-        <button class="btn-secondary" onclick="discoverOnly()">🔍 Solo descubrir dispositivos</button>
-        <button class="btn-primary" id="btn-network" onclick="runNetworkScan()">▶ Descubrir y analizar todo</button>
+        <button class="btn-secondary" onclick="discoverOnly()">🔍 Solo descubrir</button>
+        <button class="btn-primary" id="btn-network" onclick="runNetworkScan()">▶ Descubrir y analizar</button>
       </div>
-      <div class="field">
-        <label class="checkbox-label">
-          <input type="checkbox" id="vuln-scan">
-          Análisis de vulnerabilidades CVE (más lento)
-        </label>
-      </div>
+      <div class="field"><label class="checkbox-label"><input type="checkbox" id="vuln-scan"> Análisis CVE (más lento)</label></div>
     </div>
-
-    <!-- Resumen de hosts -->
-    <div id="host-chips" style="padding:12px 20px;display:flex;flex-wrap:wrap;gap:8px;border-bottom:1px solid var(--border)"></div>
-
-    <!-- Tabla de dispositivos -->
+    <div id="host-chips" style="padding:10px 20px;display:flex;flex-wrap:wrap;gap:8px;border-bottom:1px solid var(--border);min-height:40px"></div>
     <div class="table-area">
       <div class="empty-panel" id="network-empty">
-        <div class="empty-icon">📡</div>
-        <h3>Sin datos de red todavía</h3>
-        <p>Pulsa "Descubrir dispositivos" para ver todos los equipos conectados a tu red.</p>
+        <div class="empty-icon">📡</div><h3>Sin datos de red todavía</h3>
+        <p>Pulsa "Descubrir dispositivos" para ver todos los equipos de tu red.</p>
         <button class="btn-primary" onclick="discoverOnly()">🔍 Descubrir ahora</button>
       </div>
       <table id="network-table" style="display:none">
-        <thead><tr>
-          <th>Dispositivo</th><th>Sistema Operativo</th>
-          <th>Servicios abiertos</th><th>Riesgo</th>
-          <th>Vulnerabilidades</th><th>Acciones</th>
-        </tr></thead>
+        <thead><tr><th>Dispositivo</th><th>SO</th><th>Servicios</th><th>Riesgo</th><th>CVEs</th><th>Estado</th><th>Acciones</th></tr></thead>
         <tbody id="network-tbody"></tbody>
       </table>
     </div>
-
-    <!-- Hallazgos SSH audit -->
     <div id="ssh-findings-area" style="display:none">
       <div style="padding:12px 20px;border-top:2px solid var(--border);font-weight:600;color:var(--text2)">
         Problemas de seguridad encontrados en los equipos
@@ -177,34 +727,23 @@
         <button class="filter" data-sev="high" onclick="filterTable('network','high',this)">Alto</button>
         <button class="filter" data-sev="medium" onclick="filterTable('network','medium',this)">Medio</button>
         <input type="text" placeholder="🔎 Buscar…" oninput="searchTable('network-findings-tbody',this.value)">
-        <button class="btn-secondary small" onclick="exportJSON('network')">⬇ Exportar</button>
+        <button class="btn-secondary small" onclick="exportJSON('network')">⬇ JSON</button>
       </div>
-      <table>
-        <thead><tr><th>Equipo</th><th>Severidad</th><th>Problema</th><th>Solución</th><th></th></tr></thead>
-        <tbody id="network-findings-tbody"></tbody>
-      </table>
+      <table><thead><tr><th>Equipo</th><th>Severidad</th><th>Problema</th><th>Solución</th><th></th></tr></thead>
+        <tbody id="network-findings-tbody"></tbody></table>
     </div>
   </section>
 
-  <!-- ═══ PANEL: AUDIT ═══ -->
+  <!-- ═══ AUDIT ═══ -->
   <section class="panel" id="panel-audit">
     <div class="page-header">
-      <h1>🔍 Análisis de seguridad de este equipo</h1>
+      <h1>🔍 Análisis de seguridad</h1>
       <p>Comprueba la configuración de seguridad del servidor donde está instalado CyberHound.</p>
     </div>
-
     <div class="config-bar">
-      <button class="btn-primary large" id="btn-audit" onclick="runAudit()">
-        ▶ Iniciar análisis completo
-      </button>
-      <div class="field">
-        <label class="checkbox-label">
-          <input type="checkbox" id="audit-fix-all">
-          Aplicar correcciones automáticas al terminar
-        </label>
-      </div>
+      <button class="btn-primary large" id="btn-audit" onclick="runAudit()">▶ Iniciar análisis completo</button>
+      <div class="field"><label class="checkbox-label"><input type="checkbox" id="audit-fix-all"> Aplicar correcciones automáticas al terminar</label></div>
     </div>
-
     <div id="audit-results" style="display:none">
       <div id="audit-summary-bar"></div>
       <div class="toolbar">
@@ -214,56 +753,38 @@
         <button class="filter" data-sev="medium" onclick="filterTable('audit','medium',this)">Medio</button>
         <button class="filter" data-sev="low" onclick="filterTable('audit','low',this)">Bajo</button>
         <input type="text" placeholder="🔎 Buscar problema…" oninput="searchTable('audit-tbody',this.value)">
-        <button class="btn-primary small" id="btn-fix-all" onclick="fixAll('audit')" style="display:none">
-          ⚡ Corregir todo automáticamente
-        </button>
-        <button class="btn-secondary small" onclick="exportJSON('audit')">⬇ Exportar</button>
+        <button class="btn-primary small" id="btn-fix-all" onclick="fixAll('audit')" style="display:none">⚡ Corregir todo</button>
+        <button class="btn-secondary small" onclick="exportJSON('audit')">⬇ JSON</button>
       </div>
-      <table>
-        <thead><tr>
-          <th style="width:100px">Severidad</th>
-          <th>Qué ocurre</th>
-          <th>Descripción</th>
-          <th style="width:120px">Acción</th>
-        </tr></thead>
-        <tbody id="audit-tbody"></tbody>
-      </table>
+      <table><thead><tr><th style="width:100px">Severidad</th><th>Qué ocurre</th><th>Descripción</th><th style="width:130px">Acción</th></tr></thead>
+        <tbody id="audit-tbody"></tbody></table>
     </div>
     <div class="empty-panel" id="audit-empty">
-      <div class="empty-icon">🔍</div>
-      <h3>Análisis de seguridad no ejecutado</h3>
-      <p>Pulsa el botón para comprobar la configuración de seguridad de este equipo.</p>
+      <div class="empty-icon">🔍</div><h3>Análisis no ejecutado</h3>
+      <p>Pulsa el botón para comprobar la seguridad de este equipo.</p>
     </div>
   </section>
 
-  <!-- ═══ PANEL: MALWARE ═══ -->
+  <!-- ═══ MALWARE ═══ -->
   <section class="panel" id="panel-malware">
     <div class="page-header">
-      <h1>🦠 Detección de malware y amenazas</h1>
-      <p>Busca virus, backdoors, tareas maliciosas y comportamiento sospechoso en el sistema.</p>
+      <h1>🦠 Detección de malware</h1>
+      <p>Busca virus, backdoors, webshells y comportamiento sospechoso.</p>
     </div>
     <div class="config-bar">
-      <div class="field">
-        <label>Módulos de detección</label>
+      <div class="field"><label>Módulos</label>
         <div class="checkbox-row">
-          <label class="checkbox-label"><input type="checkbox" id="m-yara" checked> Análisis YARA (patrones de malware)</label>
-          <label class="checkbox-label"><input type="checkbox" id="m-hash" checked> Verificación de hashes (VirusTotal/MalwareBazaar)</label>
-          <label class="checkbox-label"><input type="checkbox" id="m-auditd" checked> Análisis de comportamiento (audit.log)</label>
-          <label class="checkbox-label"><input type="checkbox" id="m-cron" checked> Tareas programadas sospechosas</label>
-          <label class="checkbox-label"><input type="checkbox" id="m-webshell" checked> Webshells en directorios web</label>
+          <label class="checkbox-label"><input type="checkbox" id="m-yara" checked> YARA</label>
+          <label class="checkbox-label"><input type="checkbox" id="m-hash" checked> Hashes VT/MalwareBazaar</label>
+          <label class="checkbox-label"><input type="checkbox" id="m-auditd" checked> Comportamiento (auditd)</label>
+          <label class="checkbox-label"><input type="checkbox" id="m-cron" checked> Tareas programadas</label>
+          <label class="checkbox-label"><input type="checkbox" id="m-webshell" checked> Webshells</label>
         </div>
       </div>
-      <div class="field">
-        <label>Reglas YARA personalizadas (ruta, opcional)</label>
-        <input type="text" id="yara-rules" placeholder="/etc/yara/mis_reglas.yar">
-      </div>
-      <div class="field">
-        <label>Directorios web adicionales (para webshells)</label>
-        <input type="text" id="web-roots" placeholder="/var/www/html /opt/app/public">
-      </div>
+      <div class="field"><label>Reglas YARA externas</label><input type="text" id="yara-rules" placeholder="/etc/yara/reglas.yar"></div>
+      <div class="field"><label>Directorios web adicionales</label><input type="text" id="web-roots" placeholder="/var/www/html"></div>
       <button class="btn-primary" id="btn-malware" onclick="runMalware()">▶ Iniciar escaneo</button>
     </div>
-
     <div id="malware-results" style="display:none">
       <div id="malware-summary-bar"></div>
       <div class="toolbar">
@@ -272,34 +793,26 @@
         <button class="filter" data-sev="high" onclick="filterTable('malware','high',this)">Alto</button>
         <button class="filter" data-sev="medium" onclick="filterTable('malware','medium',this)">Medio</button>
         <input type="text" placeholder="🔎 Buscar…" oninput="searchTable('malware-tbody',this.value)">
-        <button class="btn-secondary small" onclick="exportJSON('malware')">⬇ Exportar</button>
+        <button class="btn-secondary small" onclick="exportJSON('malware')">⬇ JSON</button>
       </div>
-      <table>
-        <thead><tr>
-          <th>Severidad</th><th>Tipo</th><th>Descripción</th><th>Fichero</th><th>Acción</th>
-        </tr></thead>
-        <tbody id="malware-tbody"></tbody>
-      </table>
+      <table><thead><tr><th>Severidad</th><th>Tipo</th><th>Descripción</th><th>Fichero</th><th>Acción</th></tr></thead>
+        <tbody id="malware-tbody"></tbody></table>
     </div>
     <div class="empty-panel" id="malware-empty">
-      <div class="empty-icon">🦠</div>
-      <h3>Escaneo de malware no ejecutado</h3>
-      <p>Pulsa el botón para buscar amenazas en el sistema.</p>
+      <div class="empty-icon">🦠</div><h3>Escaneo no ejecutado</h3><p>Pulsa el botón para buscar amenazas.</p>
     </div>
   </section>
 
-  <!-- ═══ PANEL: CODE ═══ -->
+  <!-- ═══ CODE ═══ -->
   <section class="panel" id="panel-code">
     <div class="page-header">
-      <h1>📝 Análisis de código fuente</h1>
-      <p>Detecta vulnerabilidades, secretos hardcodeados y malas prácticas en tu código.</p>
+      <h1>📝 Análisis de código</h1>
+      <p>Detecta vulnerabilidades, secretos hardcodeados y malas prácticas.</p>
     </div>
     <div class="config-bar">
-      <div class="field">
-        <label>Directorio del proyecto a analizar</label>
-        <input type="text" id="code-path" placeholder="/var/www/html o /home/usuario/proyecto" style="min-width:320px">
-      </div>
-      <button class="btn-primary" id="btn-code" onclick="runCode()">▶ Analizar código</button>
+      <div class="field"><label>Directorio del proyecto</label>
+        <input type="text" id="code-path" placeholder="/var/www/html o /home/usuario/proyecto" style="min-width:320px"></div>
+      <button class="btn-primary" id="btn-code" onclick="runCode()">▶ Analizar</button>
     </div>
     <div id="code-results" style="display:none">
       <div class="toolbar">
@@ -308,140 +821,258 @@
         <button class="filter" data-sev="high" onclick="filterTable('code','high',this)">Alto</button>
         <button class="filter" data-sev="medium" onclick="filterTable('code','medium',this)">Medio</button>
         <input type="text" placeholder="🔎 Buscar…" oninput="searchTable('code-tbody',this.value)">
-        <button class="btn-secondary small" onclick="exportJSON('code')">⬇ Exportar</button>
+        <button class="btn-secondary small" onclick="exportJSON('code')">⬇ JSON</button>
       </div>
-      <table>
-        <thead><tr><th>Severidad</th><th>Fichero</th><th>Problema</th><th>Cómo solucionarlo</th></tr></thead>
-        <tbody id="code-tbody"></tbody>
-      </table>
+      <table><thead><tr><th>Severidad</th><th>Fichero</th><th>Problema</th><th>Solución</th></tr></thead>
+        <tbody id="code-tbody"></tbody></table>
     </div>
     <div class="empty-panel" id="code-empty">
-      <div class="empty-icon">📝</div>
-      <h3>Introduce la ruta de tu proyecto</h3>
-      <p>Se analizarán ficheros Python, Bash, JavaScript y se buscarán contraseñas y claves expuestas.</p>
+      <div class="empty-icon">📝</div><h3>Introduce la ruta del proyecto</h3>
+      <p>Se analizarán Python, Bash, JavaScript y se buscarán secretos expuestos.</p>
     </div>
   </section>
 
-  <!-- ═══ PANEL: REPORTS ═══ -->
-  <section class="panel" id="panel-reports">
+  <!-- ═══ HISTORIAL ═══ -->
+  <section class="panel" id="panel-history">
     <div class="page-header">
-      <h1>📊 Informes y exportación</h1>
-      <p>Genera informes para compartir con tu equipo o guardar como evidencia.</p>
+      <h1>📅 Historial de análisis</h1>
+      <p>Todos los análisis realizados, con comparación y evolución del score.</p>
     </div>
+    <div class="config-bar" style="gap:8px">
+      <div class="field"><label>Tipo</label>
+        <select id="hist-type" onchange="loadHistory()">
+          <option value="">Todos</option>
+          <option value="audit">Seguridad</option>
+          <option value="malware">Malware</option>
+          <option value="network">Red</option>
+          <option value="code">Código</option>
+        </select>
+      </div>
+      <button class="btn-secondary" onclick="loadHistory()">↻ Actualizar</button>
+    </div>
+    <div style="overflow-y:auto;flex:1">
+      <div class="empty-panel" id="history-empty">
+        <div class="empty-icon">📅</div><h3>Sin historial todavía</h3>
+        <p>Los análisis se guardan automáticamente. Ejecuta el primero para empezar.</p>
+      </div>
+      <table id="history-table" style="display:none">
+        <thead><tr>
+          <th>Fecha</th><th>Tipo</th><th>Objetivo</th>
+          <th style="width:80px">Score</th>
+          <th style="width:260px">Hallazgos</th>
+          <th>Duración</th><th>Origen</th><th>Acciones</th>
+        </tr></thead>
+        <tbody id="history-tbody"></tbody>
+      </table>
+    </div>
+    <!-- Detalle del scan seleccionado -->
+    <div id="history-detail" style="display:none;border-top:2px solid var(--border);margin-top:16px">
+      <div style="padding:12px 20px;display:flex;justify-content:space-between;align-items:center">
+        <h3 id="history-detail-title" style="font-size:.95rem"></h3>
+        <div id="history-comparison" style="font-size:.82rem;display:flex;gap:12px"></div>
+        <button onclick="closeHistoryDetail()" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:1.1rem">✕</button>
+      </div>
+      <div class="toolbar" style="padding:0 20px 8px">
+        <button class="filter active" onclick="filterTable('hist-detail','all',this)">Todos</button>
+        <button class="filter" data-sev="critical" onclick="filterTable('hist-detail','critical',this)">Crítico</button>
+        <button class="filter" data-sev="high" onclick="filterTable('hist-detail','high',this)">Alto</button>
+        <button class="filter" data-sev="medium" onclick="filterTable('hist-detail','medium',this)">Medio</button>
+      </div>
+      <table><thead><tr><th>Severidad</th><th>Categoría</th><th>Hallazgo</th><th>Estado</th></tr></thead>
+        <tbody id="hist-detail-tbody"></tbody></table>
+    </div>
+  </section>
+
+  <!-- ═══ REPORTS ═══ -->
+  <section class="panel" id="panel-reports">
+    <div class="page-header"><h1>📊 Informes y exportación</h1></div>
     <div class="reports-grid">
-      <div class="report-card">
-        <div class="report-icon">📄</div>
-        <h3>Informe HTML</h3>
-        <p>Informe completo con todos los hallazgos, coloreado por severidad. Ideal para imprimir o enviar por email.</p>
+      <div class="report-card"><div class="report-icon">📄</div><h3>Informe HTML</h3>
+        <p>Informe completo coloreado por severidad. Ideal para imprimir o enviar.</p>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           <button class="btn-primary small" onclick="downloadReport('html','audit')">⬇ Seguridad</button>
           <button class="btn-primary small" onclick="downloadReport('html','malware')">⬇ Malware</button>
         </div>
       </div>
-      <div class="report-card">
-        <div class="report-icon">🤖</div>
-        <h3>Playbook de remediación (Ansible)</h3>
-        <p>Script automatizado para aplicar todas las correcciones en múltiples equipos a la vez.</p>
+      <div class="report-card"><div class="report-icon">🤖</div><h3>Playbook Ansible</h3>
+        <p>Script automatizado para aplicar correcciones en múltiples equipos.</p>
         <button class="btn-primary small" onclick="downloadReport('ansible','audit')">⬇ Descargar</button>
       </div>
-      <div class="report-card">
-        <div class="report-icon">🗂</div>
-        <h3>JSON para SIEM / herramientas externas</h3>
-        <p>Datos en formato estructurado para importar en Splunk, ELK, Wazuh u otras plataformas.</p>
+      <div class="report-card"><div class="report-icon">🗂</div><h3>JSON para SIEM</h3>
+        <p>Datos estructurados para Splunk, ELK, Wazuh u otras plataformas.</p>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           <button class="btn-secondary small" onclick="exportJSON('audit')">⬇ Seguridad</button>
           <button class="btn-secondary small" onclick="exportJSON('malware')">⬇ Malware</button>
           <button class="btn-secondary small" onclick="exportJSON('code')">⬇ Código</button>
-          <button class="btn-secondary small" onclick="exportJSON('network')">⬇ Red</button>
         </div>
       </div>
-      <div class="report-card">
-        <div class="report-icon">📋</div>
-        <h3>Log de ejecución</h3>
-        <p>Registro detallado de todas las acciones y análisis de la sesión actual.</p>
+      <div class="report-card"><div class="report-icon">📋</div><h3>Log de sesión</h3>
         <button class="btn-secondary small" onclick="downloadLog()">⬇ Descargar log</button>
       </div>
     </div>
   </section>
 
-  <!-- ═══ PANEL: SETTINGS ═══ -->
+  <!-- ═══ SETTINGS ═══ -->
   <section class="panel" id="panel-settings">
-    <div class="page-header">
-      <h1>⚙️ Configuración</h1>
+    <div class="page-header"><h1>⚙️ Configuración</h1></div>
+    <!-- Tabs de config -->
+    <div style="display:flex;gap:2px;padding:0 24px;border-bottom:1px solid var(--border);margin-bottom:20px">
+      <button class="cfg-tab active" data-cfg="keys" onclick="showCfgTab('keys')">🔑 API Keys</button>
+      <button class="cfg-tab" data-cfg="notifications" onclick="showCfgTab('notifications')">🔔 Notificaciones</button>
+      <button class="cfg-tab" data-cfg="scheduler" onclick="showCfgTab('scheduler')">🕐 Scheduler</button>
+      <button class="cfg-tab" data-cfg="users" onclick="showCfgTab('users')">👥 Usuarios</button>
+      <button class="cfg-tab" data-cfg="suppressions" onclick="showCfgTab('suppressions')">🔕 Supresiones</button>
     </div>
-    <div class="settings-grid">
-      <div class="settings-card">
-        <h3>🔑 API Keys para inteligencia de amenazas</h3>
-        <p class="hint">Opcional. Con estas claves CyberHound puede consultar bases de datos de amenazas externas.</p>
-        <div class="field"><label>Shodan (escáner de dispositivos expuestos)</label>
-          <input type="password" id="key-shodan" placeholder="Obtener en shodan.io"></div>
-        <div class="field"><label>VirusTotal (análisis de ficheros sospechosos)</label>
-          <input type="password" id="key-vt" placeholder="Obtener en virustotal.com"></div>
-        <div class="field"><label>AbuseIPDB (reputación de IPs)</label>
-          <input type="password" id="key-abuse" placeholder="Obtener en abuseipdb.com"></div>
-        <div class="field"><label>GreyNoise (clasificación de tráfico)</label>
-          <input type="password" id="key-grey" placeholder="Obtener en greynoise.io"></div>
-        <div class="field"><label>HIBP (contraseñas comprometidas)</label>
-          <input type="password" id="key-hibp" placeholder="Obtener en haveibeenpwned.com"></div>
-        <div style="display:flex;gap:8px;margin-top:12px">
-          <button class="btn-primary" onclick="saveKeys()">💾 Guardar</button>
-          <button class="btn-secondary" onclick="loadKeys()">↻ Cargar actuales</button>
+
+    <!-- API Keys -->
+    <div class="cfg-panel active" id="cfg-keys">
+      <div class="settings-grid">
+        <div class="settings-card">
+          <h3>🔑 API Keys para inteligencia de amenazas</h3>
+          <p class="hint">Opcional. Consulta bases de datos externas de amenazas.</p>
+          <div class="field"><label>Shodan</label><input type="password" id="key-shodan" placeholder="shodan.io"></div>
+          <div class="field"><label>VirusTotal</label><input type="password" id="key-vt" placeholder="virustotal.com"></div>
+          <div class="field"><label>AbuseIPDB</label><input type="password" id="key-abuse" placeholder="abuseipdb.com"></div>
+          <div class="field"><label>GreyNoise</label><input type="password" id="key-grey" placeholder="greynoise.io"></div>
+          <div class="field"><label>HIBP</label><input type="password" id="key-hibp" placeholder="haveibeenpwned.com"></div>
+          <div style="display:flex;gap:8px;margin-top:12px">
+            <button class="btn-primary" onclick="saveKeys()">💾 Guardar</button>
+            <button class="btn-secondary" onclick="loadKeys()">↻ Cargar</button>
+          </div>
+          <div id="keys-msg" style="margin-top:8px;font-size:.82rem"></div>
         </div>
-        <div id="keys-msg" style="margin-top:8px;font-size:.85rem"></div>
-      </div>
-
-      <div class="settings-card">
-        <h3>🖥️ Configuración SSH por defecto</h3>
-        <p class="hint">Se usa cuando no se especifican credenciales en el escaneo de red.</p>
-        <div class="field"><label>Clave SSH privada</label>
-          <input type="text" id="cfg-ssh-key" placeholder="~/.ssh/id_ed25519"></div>
-        <div class="field"><label>Usuario por defecto</label>
-          <input type="text" id="cfg-ssh-user" value="root"></div>
-        <div class="field"><label>Puerto por defecto</label>
-          <input type="number" id="cfg-ssh-port" value="22"></div>
-        <button class="btn-primary" onclick="saveSshConfig()">💾 Guardar</button>
-      </div>
-
-      <div class="settings-card">
-        <h3>ℹ️ Acerca de CyberHound</h3>
-        <p><b>Versión:</b> 6.0.0</p>
-        <p><b>Logs:</b> <code>/var/log/cyberhound/</code></p>
-        <p><b>Config:</b> <code>~/.cyberhound/config.yaml</code></p>
-        <p style="margin-top:12px;font-size:.85rem;color:var(--text2)">
-          CyberHound Pro es una herramienta de auditoría de seguridad para PYMEs.
-          Los resultados son orientativos y no reemplazan una auditoría profesional.
-        </p>
+        <div class="settings-card">
+          <h3>🖥️ SSH por defecto</h3>
+          <div class="field"><label>Clave privada</label><input type="text" id="cfg-ssh-key" placeholder="~/.ssh/id_ed25519"></div>
+          <div class="field"><label>Usuario</label><input type="text" id="cfg-ssh-user" value="root"></div>
+          <div class="field"><label>Puerto</label><input type="number" id="cfg-ssh-port" value="22"></div>
+        </div>
       </div>
     </div>
+
+    <!-- Notificaciones -->
+    <div class="cfg-panel" id="cfg-notifications">
+      <div class="settings-grid">
+        <div class="settings-card">
+          <h3>📧 Email (SMTP)</h3>
+          <div class="field"><label class="checkbox-label"><input type="checkbox" id="notif-email-enabled" onchange="toggleNotifEmail()"> Activar notificaciones por email</label></div>
+          <div id="notif-email-fields">
+            <div class="field"><label>Servidor SMTP</label><input type="text" id="notif-smtp-host" placeholder="smtp.gmail.com"></div>
+            <div class="field-group">
+              <div class="field"><label>Puerto</label><input type="number" id="notif-smtp-port" value="587" style="width:80px"></div>
+              <div class="field"><label>Usuario</label><input type="text" id="notif-smtp-user" placeholder="tu@email.com"></div>
+            </div>
+            <div class="field"><label>Contraseña SMTP</label><input type="password" id="notif-smtp-pass" placeholder="contraseña o token de app"></div>
+            <div class="field"><label>De (from)</label><input type="text" id="notif-email-from" placeholder="cyberhound@tuempresa.com"></div>
+            <div class="field"><label>Para (to, separados por coma)</label><input type="text" id="notif-email-to" placeholder="admin@empresa.com, it@empresa.com"></div>
+          </div>
+        </div>
+        <div class="settings-card">
+          <h3>🔗 Webhook (Slack / Teams / Discord)</h3>
+          <div class="field"><label class="checkbox-label"><input type="checkbox" id="notif-webhook-enabled"> Activar webhook</label></div>
+          <div class="field"><label>URL del webhook</label><input type="text" id="notif-webhook-url" placeholder="https://hooks.slack.com/services/..."></div>
+          <div class="field"><label>Nivel mínimo de alerta</label>
+            <select id="notif-min-level">
+              <option value="info">Todo (info, warning, critical)</option>
+              <option value="warning" selected>Warning y critical</option>
+              <option value="critical">Solo crítico</option>
+            </select>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+            <button class="btn-primary" onclick="saveNotifications()">💾 Guardar</button>
+            <button class="btn-secondary" onclick="testNotifications()">🧪 Enviar prueba</button>
+          </div>
+          <div id="notif-msg" style="margin-top:8px;font-size:.82rem"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Scheduler -->
+    <div class="cfg-panel" id="cfg-scheduler">
+      <div style="max-width:700px">
+        <p style="color:var(--text2);font-size:.88rem;margin-bottom:16px">
+          Las tareas se ejecutan automáticamente en los horarios configurados.
+          Puedes ejecutarlas manualmente en cualquier momento.
+        </p>
+        <div id="scheduler-list" style="display:flex;flex-direction:column;gap:10px"></div>
+        <button class="btn-secondary" style="margin-top:12px" onclick="loadScheduler()">↻ Actualizar</button>
+      </div>
+    </div>
+
+    <!-- Usuarios -->
+    <div class="cfg-panel" id="cfg-users">
+      <div style="max-width:800px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+          <p style="color:var(--text2);font-size:.88rem">
+            <b>admin:</b> acceso total · <b>operator:</b> escanear y corregir · <b>viewer:</b> solo consulta
+          </p>
+          <button class="btn-primary small" onclick="showCreateUser()">+ Nuevo usuario</button>
+        </div>
+        <div id="create-user-form" style="display:none;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:16px;margin-bottom:16px">
+          <h4 style="margin-bottom:12px">Crear usuario</h4>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+            <div class="field"><label>Username</label><input type="text" id="new-username" placeholder="usuario123" style="min-width:140px"></div>
+            <div class="field"><label>Contraseña</label><input type="password" id="new-password" placeholder="mínimo 8 chars"></div>
+            <div class="field"><label>Rol</label>
+              <select id="new-role">
+                <option value="viewer">viewer</option>
+                <option value="operator">operator</option>
+                <option value="admin">admin</option>
+              </select>
+            </div>
+            <button class="btn-primary small" onclick="createUser()">Crear</button>
+            <button class="btn-secondary small" onclick="document.getElementById('create-user-form').style.display='none'">Cancelar</button>
+          </div>
+          <div id="user-create-msg" style="margin-top:8px;font-size:.82rem"></div>
+        </div>
+        <table id="users-table">
+          <thead><tr><th>Usuario</th><th>Rol</th><th>Último acceso</th><th>Estado</th><th>Acciones</th></tr></thead>
+          <tbody id="users-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Supresiones -->
+    <div class="cfg-panel" id="cfg-suppressions">
+      <div style="max-width:800px">
+        <p style="color:var(--text2);font-size:.88rem;margin-bottom:12px">
+          Los hallazgos suprimidos no aparecerán en futuros análisis. Usa <code>*</code> como comodín.
+          Ejemplo: <code>ww_/var/lib/kubelet*</code> suprime todos los world-writable de kubelet.
+        </p>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:16px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:14px">
+          <div class="field"><label>Patrón del finding ID</label><input type="text" id="supp-pattern" placeholder="ww_/var/lib/kubelet* o fw_inactive" style="min-width:240px"></div>
+          <div class="field"><label>Motivo</label><input type="text" id="supp-reason" placeholder="Falso positivo — Kubelet legítimo" style="min-width:200px"></div>
+          <div class="field"><label>Expira (opcional)</label><input type="date" id="supp-expires"></div>
+          <button class="btn-primary small" onclick="addSuppression()">+ Añadir</button>
+        </div>
+        <table id="suppressions-table">
+          <thead><tr><th>Patrón</th><th>Motivo</th><th>Creado por</th><th>Expira</th><th></th></tr></thead>
+          <tbody id="suppressions-tbody"></tbody>
+        </table>
+        <div class="empty-panel" id="suppressions-empty" style="padding:30px">
+          <p>Sin supresiones configuradas. Los hallazgos que sean falsos positivos aparecerán aquí.</p>
+        </div>
+      </div>
+    </div>
+
   </section>
 
 </main>
 
 <!-- DETAIL DRAWER -->
-<div id="drawer">
-  <div id="drawer-head">
-    <div>
-      <span id="drawer-sev-badge"></span>
-      <span id="drawer-title"></span>
-    </div>
-    <button onclick="closeDrawer()">✕</button>
-  </div>
-  <div id="drawer-body"></div>
-</div>
+<div id="drawer"><div id="drawer-head">
+  <div><span id="drawer-sev-badge"></span><span id="drawer-title"></span></div>
+  <button onclick="closeDrawer()">✕</button>
+</div><div id="drawer-body"></div></div>
 <div id="drawer-backdrop" onclick="closeDrawer()"></div>
 
-<!-- LOG OVERLAY -->
+<!-- LOG -->
 <div id="log-overlay">
-  <div id="log-header">
-    <span>📋 Registro de actividad</span>
-    <button onclick="toggleLog()">✕</button>
-  </div>
+  <div id="log-header"><span>📋 Registro de actividad</span><button onclick="toggleLog()">✕</button></div>
   <div id="log-body"></div>
 </div>
 
-<!-- TOAST -->
 <div id="toast"></div>
-
 <script src="/static/app.js"></script>
 </body>
 </html>

@@ -1017,3 +1017,311 @@ document.addEventListener('DOMContentLoaded', () => {
   // Actualizar dashboard cada 5 minutos
   setInterval(loadDashboard, 5 * 60 * 1000);
 });
+
+// ── Docker ────────────────────────────────────────────────────────────────────
+function quickDocker() { showPanel('docker'); runDocker(); }
+
+function runDocker() {
+  S.findings.docker = [];
+  document.getElementById('docker-results').style.display = 'none';
+  document.getElementById('docker-empty').style.display = '';
+  document.getElementById('docker-tbody').innerHTML = '';
+  document.getElementById('docker-summary').style.display = 'none';
+  btn('btn-docker', true, '⏳ Analizando contenedores…');
+  appendLog('section', '═══ DOCKER SECURITY SCAN ═══');
+
+  const scanCve = document.getElementById('docker-scan-cve')?.checked ?? true;
+  wsRun('docker', { scan_images_cve: scanCve }, {
+    onFinding(f) {
+      S.findings.docker.push(f);
+      const tbody = document.getElementById('docker-tbody');
+      const tr = document.createElement('tr');
+      tr.dataset.sev = f.severity;
+      tr.onclick = () => openDrawer(f);
+      const typeLabel = f.category.replace('docker/', '').replace('_', ' ');
+      tr.innerHTML = `
+        <td>${sevBadge(f.severity)}</td>
+        <td style="font-size:.8rem;color:var(--text2)">${esc(typeLabel)}</td>
+        <td>${esc(f.title)}</td>
+        <td style="font-size:.78rem;color:var(--text2)">${esc((f.remediation||'').substring(0,70))}</td>`;
+      tbody.appendChild(tr);
+    },
+    onDone() {
+      btn('btn-docker', false, '▶ Analizar Docker');
+      const results = document.getElementById('docker-results');
+      const empty   = document.getElementById('docker-empty');
+      if (S.findings.docker.length > 0) {
+        results.style.display = '';
+        empty.style.display = 'none';
+        renderSummary('docker-summary-bar', S.findings.docker);
+        // Chips por tipo de problema
+        renderDockerChips(S.findings.docker);
+      } else {
+        empty.style.display = '';
+        empty.querySelector('h3').textContent = '✅ Sin problemas detectados';
+        empty.querySelector('p').textContent  = 'Tus contenedores Docker tienen buena configuración de seguridad.';
+      }
+      updateDashboard();
+    },
+  });
+}
+
+function renderDockerChips(findings) {
+  const summary = document.getElementById('docker-summary');
+  const chips   = document.getElementById('docker-chips');
+  summary.style.display = '';
+  const cats = {};
+  findings.forEach(f => {
+    const k = f.category.replace('docker/','');
+    cats[k] = (cats[k]||0)+1;
+  });
+  chips.innerHTML = Object.entries(cats).map(([k,n]) =>
+    `<span class="host-chip" style="border-color:var(--yellow);color:var(--yellow)">
+       🐳 ${esc(k)}: ${n}
+     </span>`
+  ).join('');
+}
+
+// ── SIEM config ───────────────────────────────────────────────────────────────
+async function loadSIEM() {
+  const r = await fetch('/api/config/siem');
+  const d = await r.json();
+  document.getElementById('siem-wazuh-enabled').checked = d.wazuh_enabled;
+  document.getElementById('siem-wazuh-host').value      = d.wazuh_host || 'localhost';
+  document.getElementById('siem-wazuh-port').value      = d.wazuh_port || 1514;
+  document.getElementById('siem-wazuh-api').value       = d.wazuh_api_url || '';
+  document.getElementById('siem-elk-enabled').checked   = d.elk_enabled;
+  document.getElementById('siem-elk-url').value         = d.elk_url || 'http://localhost:9200';
+  document.getElementById('siem-elk-index').value       = d.elk_index || 'cyberhound-findings';
+  document.getElementById('siem-splunk-enabled').checked= d.splunk_enabled;
+  document.getElementById('siem-splunk-url').value      = d.splunk_hec_url || '';
+  document.getElementById('siem-splunk-index').value    = d.splunk_index || 'cyberhound';
+  document.getElementById('siem-min-severity').value    = d.min_severity || 'medium';
+}
+
+async function saveSIEM() {
+  const body = {
+    wazuh_enabled:    document.getElementById('siem-wazuh-enabled').checked,
+    wazuh_host:       document.getElementById('siem-wazuh-host').value,
+    wazuh_port:       parseInt(document.getElementById('siem-wazuh-port').value)||1514,
+    wazuh_api_url:    document.getElementById('siem-wazuh-api').value,
+    elk_enabled:      document.getElementById('siem-elk-enabled').checked,
+    elk_url:          document.getElementById('siem-elk-url').value,
+    elk_index:        document.getElementById('siem-elk-index').value,
+    elk_api_key:      document.getElementById('siem-elk-key').value,
+    splunk_enabled:   document.getElementById('siem-splunk-enabled').checked,
+    splunk_hec_url:   document.getElementById('siem-splunk-url').value,
+    splunk_hec_token: document.getElementById('siem-splunk-token').value,
+    splunk_index:     document.getElementById('siem-splunk-index').value,
+    min_severity:     document.getElementById('siem-min-severity').value,
+  };
+  const r = await fetch('/api/config/siem', {
+    method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body)
+  });
+  const d = await r.json();
+  const msg = document.getElementById('siem-msg');
+  msg.textContent  = d.ok ? '✓ Configuración SIEM guardada' : '✗ Error: ' + d.error;
+  msg.style.color  = d.ok ? 'var(--green)' : 'var(--red)';
+  toast(d.ok ? '✓ SIEM guardado' : '✗ Error: ' + d.error);
+}
+
+async function testSIEM() {
+  const msg = document.getElementById('siem-msg');
+  msg.textContent = '⏳ Probando conexión…';
+  msg.style.color = 'var(--text2)';
+  const r = await fetch('/api/config/siem/test', { method: 'POST' });
+  const d = await r.json();
+  const results = Object.entries(d).map(([k,ok]) =>
+    `${ok ? '✓' : '✗'} ${k}`
+  ).join(' · ');
+  msg.textContent = results || 'Sin SIEMs configurados';
+  msg.style.color = Object.values(d).every(v=>v) ? 'var(--green)' : 'var(--yellow)';
+}
+
+// ── Scoring breakdown en dashboard ────────────────────────────────────────────
+async function loadScoreBreakdown() {
+  try {
+    const r = await fetch('/api/score/detail');
+    if (!r.ok) return;
+    const d = await r.json();
+    const card = document.getElementById('score-breakdown-card');
+    const list = document.getElementById('score-breakdown-list');
+    const exp  = document.getElementById('score-exposure');
+    if (!card || !list) return;
+    card.style.display = '';
+
+    // Grade
+    const gradeEl = document.getElementById('score-grade');
+    if (gradeEl) {
+      const gradeColors = {A:'var(--green)',B:'var(--green)',C:'var(--yellow)',D:'var(--orange)',F:'var(--red)'};
+      gradeEl.innerHTML = `<span style="font-weight:700;color:${gradeColors[d.grade]||'var(--text2)'}">
+        Grado ${d.grade}</span> — ${esc(d.grade_label)}`;
+    }
+
+    // Top 5 penalizaciones
+    const top5 = (d.breakdown_top10 || []).slice(0,5);
+    list.innerHTML = top5.length
+      ? '<div style="margin-bottom:6px;color:var(--text2);font-size:.72rem;font-weight:600">TOP PENALIZACIONES</div>' +
+        top5.map(b => `
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid var(--border)">
+            <span style="font-size:.78rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px" title="${esc(b.finding_id)}">${esc(b.finding_id.substring(0,35))}</span>
+            <span style="font-size:.75rem;font-weight:600;color:${b.final_penalty>15?'var(--red)':b.final_penalty>8?'var(--orange)':'var(--yellow)'};flex-shrink:0;margin-left:8px">-${b.final_penalty.toFixed(1)}pts</span>
+          </div>`).join('')
+      : '<p style="color:var(--text2);font-size:.8rem">Sin hallazgos significativos</p>';
+
+    // Contexto de exposición
+    if (exp) {
+      const mult = d.exposure_multiplier || 1.0;
+      exp.innerHTML = mult > 1.1
+        ? `⚠ Factor exposición: <b style="color:var(--orange)">×${mult.toFixed(1)}</b> ${d.internet_facing ? '(expuesto a internet)' : ''}`
+        : `✓ Factor exposición normal (×${mult.toFixed(1)})`;
+    }
+  } catch(e) {
+    // Sin datos todavía — silencioso
+  }
+}
+
+// ── Gráfico de tendencia SVG ──────────────────────────────────────────────────
+function renderTrendChart(containerId, data) {
+  const el = document.getElementById(containerId);
+  if (!el || !data.length) return;
+
+  const W = el.offsetWidth || 600;
+  const H = 60;
+  const PAD = { l:30, r:10, t:8, b:18 };
+  const chartW = W - PAD.l - PAD.r;
+  const chartH = H - PAD.t - PAD.b;
+
+  const scores = data.map(d => d.score ?? d.avg_score ?? 0).filter(s => s != null);
+  if (!scores.length) return;
+
+  const minS = Math.max(0,  Math.min(...scores) - 5);
+  const maxS = Math.min(100, Math.max(...scores) + 5);
+  const range = maxS - minS || 1;
+
+  const toX = i => PAD.l + (i / (scores.length - 1 || 1)) * chartW;
+  const toY = s => PAD.t + chartH - ((s - minS) / range) * chartH;
+
+  // Línea del gráfico
+  const points = scores.map((s, i) => `${toX(i)},${toY(s)}`).join(' ');
+  // Área bajo la curva
+  const area = `${toX(0)},${toY(minS)} ${points} ${toX(scores.length-1)},${toY(minS)}`;
+
+  // Color basado en último score
+  const lastScore = scores[scores.length - 1];
+  const lineColor = lastScore >= 75 ? '#3fb950' : lastScore >= 50 ? '#d29922' : '#f85149';
+
+  el.innerHTML = `
+    <svg width="100%" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
+      <!-- Grid lines -->
+      ${[0,50,100].map(s => {
+        const y = toY(s < minS ? minS : s > maxS ? maxS : s);
+        return `<line x1="${PAD.l}" y1="${y}" x2="${W-PAD.r}" y2="${y}"
+                  stroke="var(--border)" stroke-width="1" stroke-dasharray="3,3"/>
+                <text x="${PAD.l-4}" y="${y+4}" fill="var(--text2)" font-size="9" text-anchor="end">${s}</text>`;
+      }).join('')}
+      <!-- Area -->
+      <polygon points="${area}" fill="${lineColor}" fill-opacity="0.12"/>
+      <!-- Line -->
+      <polyline points="${points}" fill="none" stroke="${lineColor}" stroke-width="2" stroke-linejoin="round"/>
+      <!-- Dots -->
+      ${scores.map((s, i) => `
+        <circle cx="${toX(i)}" cy="${toY(s)}" r="3" fill="${lineColor}"/>
+      `).join('')}
+      <!-- Último valor -->
+      <text x="${toX(scores.length-1)}" y="${toY(lastScore)-7}" fill="${lineColor}"
+            font-size="10" text-anchor="middle" font-weight="bold">${lastScore}</text>
+      <!-- Fechas (primera y última) -->
+      ${data.length > 0 ? `
+        <text x="${PAD.l}" y="${H}" fill="var(--text2)" font-size="8">${(data[0].day||data[0].started_at||'').substring(5,10)}</text>
+        <text x="${W-PAD.r}" y="${H}" fill="var(--text2)" font-size="8" text-anchor="end">${(data[data.length-1].day||data[data.length-1].started_at||'').substring(5,10)}</text>
+      ` : ''}
+    </svg>`;
+}
+
+// ── Integración en loadDashboard ──────────────────────────────────────────────
+const _origLoadDashboard = typeof loadDashboard === 'function' ? loadDashboard : null;
+
+async function loadDashboard() {
+  try {
+    const r = await fetch('/api/dashboard');
+    const d = await r.json();
+
+    // Score y grade
+    const lastAudit = d.last_scans?.audit;
+    if (lastAudit) {
+      const score = lastAudit.score ?? 0;
+      const scoreEl = document.getElementById('score-num');
+      const scoreCircle = document.getElementById('score-circle');
+      const scoreLabel  = document.getElementById('score-label');
+      const scoreHint   = document.getElementById('score-hint');
+      if (scoreEl) scoreEl.textContent = score;
+      const color = score>=80?'#3fb950':score>=60?'#d29922':'#f85149';
+      if (scoreCircle) scoreCircle.style.borderColor = color;
+      if (scoreLabel) { scoreLabel.style.color=color; scoreLabel.textContent=score>=80?'Bueno':score>=60?'Mejorable':'Crítico'; }
+      if (scoreHint) {
+        const dt = new Date(lastAudit.started_at).toLocaleDateString('es',{day:'2-digit',month:'2-digit'});
+        scoreHint.textContent = `Último audit: ${dt}`;
+      }
+    }
+
+    // Contadores
+    if (lastAudit) {
+      ['critical','high','medium','low'].forEach(s => {
+        const el = document.getElementById(`cnt-${s}`);
+        if (el) el.textContent = lastAudit[s] ?? 0;
+      });
+    }
+
+    // Assets
+    const devEl   = document.getElementById('dash-devices-count');
+    const unauthEl = document.getElementById('dash-unauth');
+    if (devEl) devEl.textContent = d.total_assets || 0;
+    if (unauthEl && d.unauthorized_assets > 0) {
+      unauthEl.textContent = `⚠ ${d.unauthorized_assets} dispositivo(s) no autorizado(s)`;
+    }
+
+    // Trend chart
+    const trend = await fetch('/api/score/trend?days=30').then(r=>r.json());
+    if (trend.length) {
+      document.getElementById('history-trend-wrap') && (document.getElementById('history-trend-wrap').style.display='');
+      renderTrendChart('trend-chart', trend);
+      renderTrendChart('history-trend-chart', trend);
+    }
+
+    // Hallazgos críticos
+    const critList = document.getElementById('dash-critical-list');
+    if (critList && d.critical_findings?.length) {
+      critList.innerHTML = d.critical_findings.slice(0,6).map(f => `
+        <div class="critical-item">
+          <span>${sevBadge(f.severity)}</span>
+          <div>
+            <div class="item-title">${esc(f.title)}</div>
+            <div class="item-fix">${esc((f.remediation||'').substring(0,80))}</div>
+          </div>
+        </div>`).join('');
+    }
+
+    // Score breakdown
+    await loadScoreBreakdown();
+  } catch(e) {
+    appendLog('warn', 'No se pudo cargar el dashboard: ' + e);
+  }
+}
+
+// ── Mostrar tab SIEM al activarlo ─────────────────────────────────────────────
+const _origShowCfgTab = showCfgTab;
+function showCfgTab(name) {
+  _origShowCfgTab(name);
+  if (name === 'siem') loadSIEM();
+}
+
+// ── Init ampliado ─────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  setStatus('idle', 'Listo');
+  appendLog('info', 'CyberHound Pro v6.1.0 iniciado.');
+  loadKeys();
+  loadDashboard();
+  // Polling del dashboard cada 5 minutos
+  setInterval(loadDashboard, 5 * 60 * 1000);
+});

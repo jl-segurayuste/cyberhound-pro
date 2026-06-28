@@ -153,7 +153,7 @@ async def check_kernel_params() -> list[Finding]:
 async def check_world_writable(max_findings: int = 200) -> list[Finding]:
     """
     Busca ficheros world-writable en directorios críticos.
-    Limita el resultado para no saturar la interfaz.
+    Usa un generator interno para no acumular todos los paths en memoria.
     """
     SCAN_DIRS = ["/etc", "/usr/bin", "/usr/sbin", "/bin", "/sbin", "/usr/local/bin"]
     SAFE_PREFIXES = ["/var/lib/kubelet/", "/var/lib/docker/", "/run/", "/proc/", "/sys/"]
@@ -183,8 +183,7 @@ async def check_world_writable(max_findings: int = 200) -> list[Finding]:
                 ))
                 if len(results) >= max_findings:
                     logger.warning(
-                        "world_writable: límite de %d alcanzado. "
-                        "Hay más ficheros inseguros. Aumenta max_ww_files en config.",
+                        "world_writable: límite %d alcanzado — hay más ficheros inseguros.",
                         max_findings,
                     )
                     return results
@@ -385,7 +384,7 @@ async def check_log_permissions() -> list[Finding]:
                 "Sin permisos para stat %s — posible restricción SELinux/AppArmor", log_file
             )
         except OSError as e:
-            logger.debug("check_log_permissions OSError en %s: %s", log_file, e)
+            logger.warning("Sin permisos para leer %s (SELinux/AppArmor): %s", log_file, e)
     return results
 
 
