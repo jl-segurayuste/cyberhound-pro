@@ -105,10 +105,19 @@ GET() {
 }
 
 POST() {
-  # Escribe el body JSON en un fichero temporal para evitar problemas de quoting
+  # Usa python3 para enviar JSON sin problemas de quoting bash
+  local path="$1"
+  local body_raw="${2:-{}}"
+  # python3 limpia backslashes y envía el JSON correctamente
   local tmpf; tmpf=$(mktemp /tmp/ch_post_XXXX.json)
-  # Eliminar backslashes residuales que bash pueda haber introducido
-  printf '%s' "${2:-{}}" | sed 's/\\"/"/g' > "$tmpf"
+  python3 -c "
+import sys, re
+raw = sys.argv[1]
+# Eliminar backslashes antes de comillas (artefacto del heredoc bash)
+clean = re.sub(r'\\\\"', '"', raw)
+clean = re.sub(r'\\"', '"', clean)
+sys.stdout.write(clean)
+" "$body_raw" > "$tmpf" 2>/dev/null || echo "$body_raw" | sed 's/\\\"/"/g' > "$tmpf"
   local out
   out=$(${CURL} -X POST \
     -H "Content-Type: application/json" \
@@ -282,11 +291,20 @@ fi
 # ── 8. Multi-tenant ───────────────────────────────────────────────────────────
 hdr "8. Multi-tenant"
 if [ "$LOGGED_IN" = "true" ]; then
-  R=$(POST "/api/tenants" '{"slug":"verify-tmp","name":"Verify Test","plan":"starter"}')
-  CODE="${R%%|*}"; BODY="${R#*|}"
+  # Generar JSON con python3 para evitar problemas de quoting bash
+  _TENANT_JSON=$(python3 -c "import json; print(json.dumps({'slug':'verify-tmp','name':'Verify Test','plan':'starter'}))")
+  _tmpf=$(mktemp /tmp/ch_tenant_XXXX.json)
+  echo "$_TENANT_JSON" > "$_tmpf"
+  R=$(${CURL} -X POST -H "Content-Type: application/json" --data-binary "@${_tmpf}" -w "\n%{http_code}" "${BASE}/api/tenants" 2>&1)
+  rm -f "$_tmpf"
+  CODE=$(printf '%s' "$R" | tail -1); BODY=$(printf '%s' "$R" | head -n -1)
   if [ "$CODE" = "201" ]; then
     ok "POST /api/tenants — creado"
-    POST "/api/tenants/verify-tmp" '{"active":false}' > /dev/null 2>&1
+    _DEL_JSON=$(python3 -c "import json; print(json.dumps({'active':False}))")
+    _tmpf2=$(mktemp /tmp/ch_del_XXXX.json)
+    echo "$_DEL_JSON" > "$_tmpf2"
+    ${CURL} -X POST -H "Content-Type: application/json" --data-binary "@${_tmpf2}" "${BASE}/api/tenants/verify-tmp" > /dev/null 2>&1
+    rm -f "$_tmpf2"
   elif echo "$BODY" | grep -qi "existe\|already"; then
     ok "POST /api/tenants — ya existe (OK)"
   else
