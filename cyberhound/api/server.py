@@ -459,6 +459,8 @@ class CyberHoundServer:
                 await self._run_api_security_scan(msg, ws_id, send, log, scan_id)
             elif task == "subdomain_enum":
                 await self._run_subdomain_enum_scan(msg, ws_id, send, log, scan_id)
+            elif task == "nuclei":
+                await self._run_nuclei_scan(msg, ws_id, send, log, scan_id)
             else:
                 await send({"type": "error", "text": f"Tarea desconocida: {task}"})
         except Exception as e:
@@ -651,6 +653,18 @@ class CyberHoundServer:
             return
         await log("section", f"Enumerando subdominios (CT logs): {', '.join(domains)}…")
         findings = await SubdomainEnumScanner.full_scan(domains=domains)
+        await self._emit_findings(findings, ws_id, send, scan_id)
+
+    async def _run_nuclei_scan(self, params, ws_id, send, log, scan_id):
+        from cyberhound.scanners.nuclei_scan import NucleiScanner
+        urls = params.get("urls") or []
+        if not urls:
+            await log("section", "No se indicaron URLs para escanear con Nuclei")
+            await self._emit_findings([], ws_id, send, scan_id)
+            return
+        severities = params.get("severities") or None
+        await log("section", f"Ejecutando Nuclei sobre: {', '.join(urls)}…")
+        findings = await NucleiScanner.full_scan(urls=urls, severities=severities)
         await self._emit_findings(findings, ws_id, send, scan_id)
 
     async def _run_malware_scan(self, params, ws_id, send, log, scan_id):

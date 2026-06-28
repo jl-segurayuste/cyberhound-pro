@@ -1804,6 +1804,48 @@ function runSubdomainScan() {
   }, 'Enumeración de subdominios', '🌐');
 }
 
+function runNucleiScan() {
+  S.findings.nuclei = [];
+  document.getElementById('nuclei-results').style.display = 'none';
+  document.getElementById('nuclei-empty').style.display = '';
+  document.getElementById('nuclei-tbody').innerHTML = '';
+
+  const raw = (document.getElementById('nuclei-urls').value || '').trim();
+  const urls = raw ? raw.split('\n').map(s => s.trim()).filter(Boolean) : [];
+  if (!urls.length) { toast('Introduce al menos una URL'); return; }
+  btn('btn-nuclei', true, '⏳ Escaneando…');
+
+  wsRunWithActivity('nuclei', { urls }, {
+    onFinding(f) {
+      S.findings.nuclei.push(f);
+      const tbody = document.getElementById('nuclei-tbody');
+      const tr = document.createElement('tr');
+      tr.dataset.sev = f.severity;
+      tr.onclick = () => openDrawer(f);
+      tr.innerHTML = `
+        <td>${sevBadge(f.severity)}</td>
+        <td style="font-size:.8rem">🌐 ${esc(f.source_host || '—')}</td>
+        <td><b>${esc(f.title)}</b></td>
+        <td style="font-size:.78rem;color:var(--text2)">${esc((f.evidence||'').substring(0,70))}</td>`;
+      tbody.appendChild(tr);
+    },
+    onDone() {
+      btn('btn-nuclei', false, '▶ Ejecutar Nuclei');
+      if (S.findings.nuclei.length) {
+        document.getElementById('nuclei-results').style.display = '';
+        document.getElementById('nuclei-empty').style.display = 'none';
+        renderSummary('nuclei-summary-bar', S.findings.nuclei);
+      } else {
+        const h3 = document.querySelector('#nuclei-empty h3');
+        const p  = document.querySelector('#nuclei-empty p');
+        if (h3) h3.textContent = 'Sin hallazgos de Nuclei';
+        if (p)  p.textContent  = 'No hubo coincidencias (o el binario nuclei no está instalado en el servidor).';
+      }
+    },
+    onError() { btn('btn-nuclei', false, '▶ Ejecutar Nuclei'); },
+  }, 'Nuclei', '☢️');
+}
+
 // ── 2FA ───────────────────────────────────────────────────────────────────────
 async function load2FAStatus() {
   try {
