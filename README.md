@@ -386,7 +386,7 @@ auth:
   token_ttl_hours: 8
 
 server:
-  host: "0.0.0.0"
+  host: "127.0.0.1"   # seguro por defecto (solo localhost); usa 0.0.0.0 para exponer en la red
   port: 8443
   tls_cert: null    # null = auto-firmado
   tls_key: null
