@@ -323,6 +323,7 @@ class CyberHoundServer:
         # ── Escaneos ──────────────────────────────────────────────────────────
         app.router.add_post("/api/fix/local",    self.api_fix_local)
         app.router.add_post("/api/fix/remote",   self.api_fix_remote)
+        app.router.add_post("/api/findings/explain", self.api_explain_finding)
         app.router.add_get ("/api/rollback",      self.api_rollback_list)
         app.router.add_post("/api/rollback/local", self.api_rollback_local)
         app.router.add_get ("/metrics",           self.api_metrics)
@@ -962,6 +963,26 @@ class CyberHoundServer:
     async def api_metrics(self, request: web.Request) -> web.Response:
         """Métricas en formato Prometheus (texto). Ruta pública (PUBLIC_ROUTES)."""
         return web.Response(text=METRICS.render(), content_type="text/plain")
+
+    # ── Explicación de hallazgos (LLM local) ───────────────────────────────────
+
+    async def api_explain_finding(self, request: web.Request) -> web.Response:
+        """Explica un hallazgo en lenguaje llano con el LLM local (best-effort)."""
+        try:
+            body = await _read_json(request)
+            finding = self._find_cached(body.get("finding_id"))
+            if not finding:
+                return web.json_response({"error": "Finding no encontrado"}, status=404)
+            from cyberhound.core.llm import explain_finding
+            explanation = await explain_finding(finding.to_dict())
+            if explanation is None:
+                return web.json_response(
+                    {"explanation": None, "detail": "El asistente LLM no está disponible ahora."}
+                )
+            return web.json_response({"explanation": explanation})
+        except Exception as e:  # noqa: BLE001
+            logger.error("api_explain_finding: %s", e, exc_info=True)
+            return web.json_response({"error": str(e)}, status=500)
 
     # ── Histórico ─────────────────────────────────────────────────────────────
 

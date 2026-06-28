@@ -696,8 +696,10 @@ function _renderDrawer(f, host) {
     ${f.auto_fix && hostLabel && !f.fixed_at ? `<button class="d-fix-btn remote" onclick="applyFixRemote('${esc(f.id||'')}','${esc(hostLabel)}',this)">Corregir en ${esc(hostLabel)}</button>` : ''}
     ${!f.auto_fix ? `<div style="margin-top:10px;padding:10px;background:var(--bg3);border-radius:6px;font-size:.82rem;color:var(--text2)">ℹ️ Esta corrección requiere revisión manual.</div>` : ''}
     <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn-secondary small" onclick="explainFinding('${esc(f.id||f.finding_id||'')}')">Explicar con IA</button>
       <button class="btn-secondary small" onclick="suppressFinding('${esc(f.id||f.finding_id||'')}')">Suprimir (falso positivo)</button>
-    </div>`;
+    </div>
+    <div id="ai-explanation" style="margin-top:10px"></div>`;
   document.getElementById('drawer').classList.add('open');
   document.getElementById('drawer-backdrop').classList.add('show');
 }
@@ -718,6 +720,27 @@ async function suppressFinding(findingId) {
   const d = await r.json();
   if (d.ok) { toast('✓ Finding suprimido'); closeDrawer(); }
   else toast('Error: ' + d.error, 'error');
+}
+
+// ── Explicación en lenguaje llano con IA (LLM local) ──────────────────────
+async function explainFinding(findingId) {
+  const box = document.getElementById('ai-explanation');
+  if (box) box.innerHTML = '<div style="padding:10px;color:var(--text2);font-size:.85rem">Generando explicación…</div>';
+  try {
+    const r = await fetch('/api/findings/explain', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({finding_id: findingId}),
+    });
+    const d = await r.json();
+    if (!box) return;
+    if (d.explanation) {
+      box.innerHTML = `<div style="padding:12px;background:rgba(88,166,255,.08);border-radius:8px;font-size:.9rem;line-height:1.5"><strong>En lenguaje llano</strong><br>${esc(d.explanation)}</div>`;
+    } else {
+      box.innerHTML = `<div style="padding:10px;color:var(--text2);font-size:.85rem">${esc(d.detail || d.error || 'No disponible')}</div>`;
+    }
+  } catch (e) {
+    if (box) box.innerHTML = `<div style="padding:10px;color:var(--red);font-size:.85rem">Error: ${esc(String(e))}</div>`;
+  }
 }
 
 // ── Filtros y búsqueda ────────────────────────────────────────────────────
