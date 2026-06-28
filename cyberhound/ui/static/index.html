@@ -36,6 +36,7 @@
     <button class="nav-tab" data-panel="malware"   onclick="showPanel('malware')">🦠 Malware</button>
     <button class="nav-tab" data-panel="docker"    onclick="showPanel('docker')">🐳 Docker</button>
     <button class="nav-tab" data-panel="code"      onclick="showPanel('code')">📝 Código</button>
+    <button class="nav-tab" data-panel="services"  onclick="showPanel('services')">⚙️ Servicios</button>
     <button class="nav-tab" data-panel="history"   onclick="showPanel('history')">📅 Historial</button>
     <button class="nav-tab" data-panel="reports"   onclick="showPanel('reports')">📊 Informes</button>
     <button class="nav-tab" data-panel="settings"  onclick="showPanel('settings')">⚙️ Config</button>
@@ -311,6 +312,48 @@
     </div>
   </section>
 
+
+  <!-- ═══ SERVICIOS ═══ -->
+  <section class="panel" id="panel-services">
+    <div class="page-header"><h1>⚙️ Auditoría de servicios</h1>
+      <p>Analiza la configuración de seguridad de nginx, apache, mysql, postgresql, redis y mongodb.</p>
+    </div>
+    <div class="config-bar">
+      <div class="field">
+        <label>Servicios a auditar</label>
+        <div class="checkbox-row">
+          <label class="checkbox-label"><input type="checkbox" class="svc-check" value="nginx" checked> Nginx</label>
+          <label class="checkbox-label"><input type="checkbox" class="svc-check" value="apache" checked> Apache</label>
+          <label class="checkbox-label"><input type="checkbox" class="svc-check" value="mysql" checked> MySQL / MariaDB</label>
+          <label class="checkbox-label"><input type="checkbox" class="svc-check" value="postgresql" checked> PostgreSQL</label>
+          <label class="checkbox-label"><input type="checkbox" class="svc-check" value="redis" checked> Redis</label>
+          <label class="checkbox-label"><input type="checkbox" class="svc-check" value="mongodb" checked> MongoDB</label>
+        </div>
+      </div>
+      <button class="btn-primary" id="btn-services" onclick="runServicesAudit()">▶ Auditar servicios</button>
+    </div>
+    <div id="services-results" style="display:none">
+      <div id="services-summary-bar"></div>
+      <div class="toolbar">
+        <button class="filter active" onclick="filterTable('services','all',this)">Todos</button>
+        <button class="filter" data-sev="critical" onclick="filterTable('services','critical',this)">Crítico</button>
+        <button class="filter" data-sev="high" onclick="filterTable('services','high',this)">Alto</button>
+        <button class="filter" data-sev="medium" onclick="filterTable('services','medium',this)">Medio</button>
+        <input type="text" placeholder="🔎 Buscar…" oninput="searchTable('services-tbody',this.value)">
+        <button class="btn-secondary small" onclick="exportJSON('services')">⬇ JSON</button>
+      </div>
+      <table>
+        <thead><tr><th>Severidad</th><th>Servicio</th><th>Problema</th><th>Solución</th></tr></thead>
+        <tbody id="services-tbody"></tbody>
+      </table>
+    </div>
+    <div class="empty-panel" id="services-empty">
+      <div class="empty-icon">⚙️</div>
+      <h3>Auditoría de servicios no ejecutada</h3>
+      <p>Solo se analizarán los servicios que estén instalados y activos.</p>
+    </div>
+  </section>
+
   <!-- ═══ HISTORIAL ═══ -->
   <section class="panel" id="panel-history">
     <div class="page-header"><h1>📅 Historial de análisis</h1>
@@ -336,6 +379,27 @@
       <div id="history-trend-chart" style="height:60px"></div>
     </div>
 
+    <!-- Gráfico interactivo de tendencia -->
+    <div id="history-trend-wrap" style="display:none;margin-bottom:16px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <span style="font-size:.85rem;font-weight:600;color:var(--text2)">📈 Evolución del score de seguridad</span>
+        <select id="hist-trend-type" onchange="loadHistory()" style="font-size:.78rem;padding:3px 6px">
+          <option value="audit">Seguridad</option>
+          <option value="malware">Malware</option>
+          <option value="network">Red</option>
+        </select>
+      </div>
+      <div id="history-trend-chart" style="height:80px"></div>
+    </div>
+
+    <!-- Filtro de agentes (visible solo en modo manager) -->
+    <div id="history-agent-filter" style="display:none;padding:0 0 10px">
+      <label style="font-size:.82rem;color:var(--text2)">Agente: </label>
+      <select id="hist-agent" onchange="loadHistory()" style="font-size:.82rem">
+        <option value="">Todos</option>
+      </select>
+    </div>
+
     <div style="overflow-y:auto;flex:1">
       <div class="empty-panel" id="history-empty">
         <div class="empty-icon">📅</div><h3>Sin historial todavía</h3>
@@ -345,7 +409,7 @@
         <thead><tr>
           <th>Fecha</th><th>Tipo</th><th>Objetivo</th>
           <th style="width:80px">Score</th>
-          <th style="width:260px">Hallazgos</th>
+          <th style="width:280px">Hallazgos</th>
           <th>Duración</th><th>Origen</th><th>Acciones</th>
         </tr></thead>
         <tbody id="history-tbody"></tbody>
@@ -410,6 +474,9 @@
       <button class="cfg-tab"        data-cfg="scheduler"     onclick="showCfgTab('scheduler')">🕐 Scheduler</button>
       <button class="cfg-tab"        data-cfg="users"         onclick="showCfgTab('users')">👥 Usuarios</button>
       <button class="cfg-tab"        data-cfg="suppressions"  onclick="showCfgTab('suppressions')">🔕 Supresiones</button>
+      <button class="cfg-tab"        data-cfg="2fa"           onclick="showCfgTab('2fa')">🔐 2FA</button>
+      <button class="cfg-tab"        data-cfg="yara"          onclick="showCfgTab('yara')">🛡 YARA</button>
+      <button class="cfg-tab"        data-cfg="agents"        onclick="showCfgTab('agents')">🖧 Agentes</button>
     </div>
 
     <!-- API Keys -->
@@ -590,6 +657,102 @@
       </div>
     </div>
 
+    <!-- 2FA -->
+    <div class="cfg-panel" id="cfg-2fa">
+      <div style="max-width:500px">
+        <h3 style="margin-bottom:8px">🔐 Autenticación de dos factores (2FA)</h3>
+        <p class="hint">Añade una capa extra de seguridad. Compatible con Google Authenticator, Authy y cualquier app TOTP.</p>
+        <div id="2fa-status-box" style="padding:12px;background:var(--bg3);border-radius:8px;margin-bottom:16px">
+          <div id="2fa-status-text" style="font-weight:600">Cargando estado…</div>
+        </div>
+        <div id="2fa-setup-area" style="display:none">
+          <p style="color:var(--text2);font-size:.85rem;margin-bottom:12px">
+            Escanea el código QR con tu app de autenticación:
+          </p>
+          <div id="2fa-qr" style="background:white;padding:12px;border-radius:8px;display:inline-block;margin-bottom:12px"></div>
+          <div class="field" style="margin-bottom:12px">
+            <label>Secreto manual (si no puedes escanear el QR)</label>
+            <input type="text" id="2fa-secret-display" readonly style="font-family:monospace;letter-spacing:.1em">
+          </div>
+          <div style="background:var(--bg3);padding:12px;border-radius:8px;margin-bottom:12px">
+            <div style="font-size:.78rem;font-weight:600;color:var(--yellow);margin-bottom:6px">⚠ Códigos de recuperación (guárdalos ahora)</div>
+            <div id="2fa-recovery-codes" style="font-family:monospace;font-size:.8rem;line-height:1.8"></div>
+          </div>
+          <div class="field" style="margin-bottom:12px">
+            <label>Introduce el código de tu app para activar</label>
+            <div style="display:flex;gap:8px">
+              <input type="text" id="2fa-verify-code" placeholder="123456" maxlength="6" style="width:120px;font-size:1.2rem;text-align:center;letter-spacing:.2em">
+              <button class="btn-primary" onclick="activate2FA()">✓ Activar 2FA</button>
+            </div>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap" id="2fa-actions">
+          <button class="btn-primary" onclick="setup2FA()">⚙️ Configurar 2FA</button>
+          <button class="btn-danger" onclick="disable2FA()" id="2fa-disable-btn" style="display:none">Desactivar 2FA</button>
+        </div>
+        <div id="2fa-msg" style="margin-top:8px;font-size:.82rem"></div>
+      </div>
+    </div>
+
+    <!-- Agentes remotos -->
+    <div class="cfg-panel" id="cfg-agents">
+      <div style="max-width:700px">
+        <h3>🖧 Modo agente — despliegue multi-servidor</h3>
+        <p class="hint">Despliega CyberHound en múltiples servidores y agrega los resultados aquí.</p>
+        <div style="background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:16px">
+          <div style="font-size:.82rem;font-weight:600;margin-bottom:10px">Modo actual: <span id="agent-mode-badge">cargando…</span></div>
+          <div class="field"><label>Modo de operación</label>
+            <select id="agent-mode">
+              <option value="standalone">Standalone (este servidor)</option>
+              <option value="manager">Manager (recibe datos de agentes)</option>
+              <option value="agent">Agente (envía datos a un manager)</option>
+            </select>
+          </div>
+          <div id="agent-manager-fields" style="display:none">
+            <div class="field"><label>URL del manager</label>
+              <input type="text" id="agent-manager-url" placeholder="https://cyberhound-manager:8443"></div>
+            <div class="field"><label>Clave API del agente</label>
+              <input type="password" id="agent-key" placeholder="Clave compartida con el manager"></div>
+            <div class="field"><label>Nombre de este agente</label>
+              <input type="text" id="agent-name" placeholder="servidor-web-01 (vacío = hostname)"></div>
+          </div>
+          <button class="btn-primary" onclick="saveAgentConfig()" style="margin-top:10px">💾 Guardar</button>
+          <div id="agent-cfg-msg" style="font-size:.82rem;margin-top:6px"></div>
+        </div>
+        <div id="agents-list-section">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+            <h4 style="font-size:.9rem">Agentes conectados</h4>
+            <button class="btn-secondary small" onclick="loadAgents()">↻ Actualizar</button>
+          </div>
+          <div id="agents-list">
+            <p style="color:var(--text2);font-size:.82rem">Sin agentes registrados todavía.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- YARA -->
+    <div class="cfg-panel" id="cfg-yara">
+      <div style="max-width:600px">
+        <h3 style="margin-bottom:8px">🛡 Reglas YARA</h3>
+        <p class="hint">Actualiza las reglas de detección de malware desde repositorios públicos.</p>
+        <div class="field" style="margin-bottom:12px">
+          <label>Fuentes de reglas</label>
+          <div class="checkbox-row">
+            <label class="checkbox-label"><input type="checkbox" id="yara-src-default" checked> Yara-Rules (ransomware, webshells, backdoors)</label>
+            <label class="checkbox-label"><input type="checkbox" id="yara-src-community"> Community (coinminers)</label>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;margin-bottom:16px">
+          <button class="btn-primary" onclick="updateYaraRules()">⬇ Actualizar reglas</button>
+          <button class="btn-secondary" onclick="loadYaraRules()">↻ Ver reglas instaladas</button>
+        </div>
+        <div id="yara-update-msg" style="font-size:.82rem;margin-bottom:12px"></div>
+        <table id="yara-rules-table" style="display:none">
+          <thead><tr><th>Fichero</th><th>Tamaño</th><th>Modificado</th></tr></thead>
+          <tbody id="yara-rules-tbody"></tbody>
+        </table>
+      </div>
+    </div>
   </section>
 
 </main>

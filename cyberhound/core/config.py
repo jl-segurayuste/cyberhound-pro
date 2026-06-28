@@ -112,6 +112,20 @@ class NotificationSettings:
 
 
 @dataclass
+class AgentSettings:
+    mode:               str        = "standalone"   # standalone | agent | manager
+    manager_url:        str        = ""
+    agent_key:          str        = ""
+    agent_name:         str        = ""
+    registered_agents:  list       = None
+
+    def __post_init__(self):
+        if self.registered_agents is None:
+            self.registered_agents = []
+
+
+
+@dataclass
 class CyberHoundConfig:
     api_keys:      APIKeys              = field(default_factory=APIKeys)
     auth:          AuthSettings         = field(default_factory=AuthSettings)
@@ -120,6 +134,7 @@ class CyberHoundConfig:
     scheduler:     SchedulerSettings    = field(default_factory=SchedulerSettings)
     notifications: NotificationSettings = field(default_factory=NotificationSettings)
     siem:          SIEMSettings         = field(default_factory=SIEMSettings)
+    agent:         AgentSettings        = field(default_factory=AgentSettings)
     db_path:       str = field(default_factory=lambda: str(DEFAULT_DB_PATH))
 
     @classmethod
@@ -237,6 +252,16 @@ class CyberHoundConfig:
             min_severity=sr.get("min_severity", "medium"),
         )
 
+        # Agent settings
+        ag = raw.get("agent", {})
+        import os as _os
+        cfg.agent = AgentSettings(
+            mode=ag.get("mode", "standalone"),
+            manager_url=ag.get("manager_url", ""),
+            agent_key=ag.get("agent_key", _os.environ.get("CH_AGENT_KEY", "")),
+            agent_name=ag.get("agent_name", ""),
+        )
+
         return cfg
 
     def save(self, path: Path = DEFAULT_CONFIG_PATH) -> None:
@@ -260,6 +285,12 @@ class CyberHoundConfig:
                 if k != "smtp_password"  # no guardar contraseña SMTP en YAML
             },
             "db_path": self.db_path,
+            "agent": {
+                "mode": self.agent.mode,
+                "manager_url": self.agent.manager_url,
+                "agent_name": self.agent.agent_name,
+                # agent_key desde env var CH_AGENT_KEY, no en YAML
+            },
             "siem": {
                 k: v for k, v in self.siem.__dict__.items()
                 if k not in ("wazuh_api_pass", "elk_pass", "splunk_hec_token")

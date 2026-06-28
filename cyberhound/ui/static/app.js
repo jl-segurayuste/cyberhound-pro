@@ -1483,3 +1483,394 @@ async function checkForNewDevices() {
 
 // Monitoreo periódico cada 15 minutos
 setInterval(checkForNewDevices, 15 * 60 * 1000);
+
+// ══════════════════════════════════════════════════════════════════════════════
+// SERVICIOS, 2FA Y YARA
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ── Auditoría de servicios ────────────────────────────────────────────────────
+S.findings.services = [];
+
+function runServicesAudit() {
+  S.findings.services = [];
+  document.getElementById('services-results').style.display = 'none';
+  document.getElementById('services-empty').style.display = '';
+  document.getElementById('services-tbody').innerHTML = '';
+  btn('btn-services', true, '⏳ Auditando…');
+
+  const services = [...document.querySelectorAll('.svc-check:checked')].map(c => c.value);
+  if (!services.length) { toast('Selecciona al menos un servicio'); return; }
+
+  wsRunWithActivity('services', { services }, {
+    onFinding(f) {
+      S.findings.services.push(f);
+      const tbody = document.getElementById('services-tbody');
+      const tr = document.createElement('tr');
+      tr.dataset.sev = f.severity;
+      tr.onclick = () => openDrawer(f);
+      const svcIcons = { nginx:'🌐', apache:'🌐', mysql:'🗄', postgresql:'🐘', redis:'⚡', mongodb:'🍃' };
+      const svc = (f.category||'').replace('services/', '');
+      tr.innerHTML = `
+        <td>${sevBadge(f.severity)}</td>
+        <td style="font-size:.8rem">${svcIcons[svc]||'⚙️'} ${esc(svc)}</td>
+        <td><b>${esc(f.title)}</b></td>
+        <td style="font-size:.78rem;color:var(--text2)">${esc((f.remediation||'').substring(0,70))}</td>`;
+      tbody.appendChild(tr);
+    },
+    onDone() {
+      btn('btn-services', false, '▶ Auditar servicios');
+      if (S.findings.services.length) {
+        document.getElementById('services-results').style.display = '';
+        document.getElementById('services-empty').style.display = 'none';
+        renderSummary('services-summary-bar', S.findings.services);
+      } else {
+        const h3 = document.querySelector('#services-empty h3');
+        const p  = document.querySelector('#services-empty p');
+        if (h3) h3.textContent = '✅ Servicios con buena configuración';
+        if (p)  p.textContent  = 'No se detectaron problemas en los servicios analizados.';
+      }
+    },
+    onError() { btn('btn-services', false, '▶ Auditar servicios'); },
+  }, 'Auditoría de servicios', '⚙️');
+}
+
+// ── 2FA ───────────────────────────────────────────────────────────────────────
+async function load2FAStatus() {
+  try {
+    const r = await fetch('/api/auth/2fa/status');
+    if (!r.ok) return;
+    const d = await r.json();
+    const statusBox  = document.getElementById('2fa-status-box');
+    const disableBtn = document.getElementById('2fa-disable-btn');
+    if (d.enabled) {
+      if (statusBox) statusBox.innerHTML = `<div style="color:var(--green);font-weight:600">✓ 2FA activado para <b>${esc(d.user)}</b></div>`;
+      if (disableBtn) disableBtn.style.display = '';
+    } else {
+      if (statusBox) statusBox.innerHTML = `<div style="color:var(--text2)">⚠ 2FA no activado — tu cuenta solo está protegida por contraseña</div>`;
+      if (disableBtn) disableBtn.style.display = 'none';
+    }
+  } catch(e) { /* silencioso */ }
+}
+
+async function setup2FA() {
+  const r = await fetch('/api/auth/2fa/setup', { method: 'POST' });
+  if (!r.ok) { toast('Error iniciando 2FA'); return; }
+  const d = await r.json();
+
+  // Mostrar QR
+  const qrEl = document.getElementById('2fa-qr');
+  if (qrEl) qrEl.innerHTML = d.qr_svg || `<div style="font-size:.78rem;word-break:break-all;padding:8px;max-width:200px">${esc(d.uri)}</div>`;
+
+  // Mostrar secreto
+  const secretEl = document.getElementById('2fa-secret-display');
+  if (secretEl) { secretEl.value = d.secret; secretEl.style.display = ''; }
+
+  // Mostrar códigos de recuperación
+  const codesEl = document.getElementById('2fa-recovery-codes');
+  if (codesEl && d.recovery_codes) {
+    codesEl.innerHTML = d.recovery_codes.map(c => `<div>${esc(c)}</div>`).join('');
+  }
+
+  document.getElementById('2fa-setup-area').style.display = '';
+  document.getElementById('2fa-verify-code')?.focus();
+}
+
+async function activate2FA() {
+  const code = document.getElementById('2fa-verify-code')?.value.trim();
+  if (!code || code.length !== 6) { toast('Introduce el código de 6 dígitos'); return; }
+
+  const r = await fetch('/api/auth/2fa/activate', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ code }),
+  });
+  const d = await r.json();
+  const msg = document.getElementById('2fa-msg');
+  if (d.ok) {
+    if (msg) { msg.textContent = '✓ 2FA activado correctamente'; msg.style.color = 'var(--green)'; }
+    document.getElementById('2fa-setup-area').style.display = 'none';
+    toast('✓ 2FA activado');
+    await load2FAStatus();
+  } else {
+    if (msg) { msg.textContent = '✗ Código incorrecto — inténtalo de nuevo'; msg.style.color = 'var(--red)'; }
+    toast('Código incorrecto');
+  }
+}
+
+async function disable2FA() {
+  if (!confirm('¿Seguro que quieres desactivar el 2FA? Tu cuenta quedará menos protegida.')) return;
+  const r = await fetch('/api/auth/2fa/disable', { method: 'POST' });
+  const d = await r.json();
+  if (d.ok) {
+    toast('2FA desactivado');
+    await load2FAStatus();
+  }
+}
+
+// ── YARA ──────────────────────────────────────────────────────────────────────
+async function updateYaraRules() {
+  const sources = [];
+  if (document.getElementById('yara-src-default')?.checked) sources.push('default');
+  if (document.getElementById('yara-src-community')?.checked) sources.push('community');
+  if (!sources.length) { toast('Selecciona al menos una fuente'); return; }
+
+  const msg = document.getElementById('yara-update-msg');
+  if (msg) { msg.textContent = '⏳ Descargando reglas…'; msg.style.color = 'var(--text2)'; }
+
+  const r = await fetch('/api/yara/update', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ sources }),
+  });
+  const d = await r.json();
+
+  if (msg) {
+    const updated = (d.updated||[]).length;
+    const errors  = (d.errors||[]).length;
+    msg.textContent = `✓ ${updated} regla(s) actualizada(s)` + (errors ? ` · ✗ ${errors} error(es)` : '');
+    msg.style.color = errors > 0 ? 'var(--yellow)' : 'var(--green)';
+  }
+  await loadYaraRules();
+}
+
+async function loadYaraRules() {
+  const r = await fetch('/api/yara/rules');
+  if (!r.ok) return;
+  const rules = await r.json();
+  const table = document.getElementById('yara-rules-table');
+  const tbody = document.getElementById('yara-rules-tbody');
+  if (!table || !tbody) return;
+  if (!rules.length) { table.style.display = 'none'; return; }
+  table.style.display = '';
+  tbody.innerHTML = rules.map(rule => `
+    <tr>
+      <td style="font-family:monospace;font-size:.8rem">${esc(rule.name)}</td>
+      <td style="color:var(--text2)">${rule.size_kb} KB</td>
+      <td style="color:var(--text2)">${new Date(rule.modified * 1000).toLocaleDateString('es')}</td>
+    </tr>`).join('');
+}
+
+// ── Integrar carga de 2FA y YARA al activar tabs ──────────────────────────────
+// (showCfgTab ya llama a loadSIEM, loadUsers, etc. de forma centralizada)
+// Extendemos para los nuevos tabs
+const _showCfgTabWithNew = showCfgTab;
+showCfgTab = function(name) {
+  _showCfgTabWithNew(name);
+  if (name === '2fa')  load2FAStatus();
+  if (name === 'yara') loadYaraRules();
+};
+
+// ══════════════════════════════════════════════════════════════════════════════
+// HISTORIAL MEJORADO + AGENTES
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ── Historial con tendencia interactiva ──────────────────────────────────────
+async function loadHistory() {
+  const type    = document.getElementById('hist-type')?.value || '';
+  const limit   = 50;
+  const params  = new URLSearchParams({ limit });
+  if (type) params.set('type', type);
+
+  try {
+    const [histResp, trendResp] = await Promise.all([
+      fetch(`/api/history?${params}`),
+      fetch(`/api/score/trend?type=${type || 'audit'}&days=60`),
+    ]);
+
+    if (!histResp.ok) return;
+    const history = await histResp.json();
+    const trend   = trendResp.ok ? await trendResp.json() : [];
+
+    // Renderizar gráfico de tendencia
+    const trendWrap = document.getElementById('history-trend-wrap');
+    if (trend.length >= 2) {
+      if (trendWrap) trendWrap.style.display = '';
+      renderTrendChart('history-trend-chart', trend);
+    }
+
+    // Renderizar tabla
+    const table  = document.getElementById('history-table');
+    const empty  = document.getElementById('history-empty');
+    const tbody  = document.getElementById('history-tbody');
+
+    if (!history.length) {
+      if (table) table.style.display = 'none';
+      if (empty) empty.style.display = '';
+      return;
+    }
+
+    if (table) table.style.display = '';
+    if (empty) empty.style.display = 'none';
+    if (!tbody) return;
+
+    const typeLabels = {
+      audit:'🔍 Seguridad', malware:'🦠 Malware', network:'📡 Red',
+      docker:'🐳 Docker', code:'📝 Código', services:'⚙️ Servicios',
+    };
+
+    tbody.innerHTML = history.map(scan => {
+      const dt = new Date(scan.started_at);
+      const dateStr = dt.toLocaleDateString('es', {day:'2-digit',month:'2-digit',year:'2-digit'});
+      const timeStr = dt.toLocaleTimeString('es', {hour:'2-digit',minute:'2-digit'});
+      const dur = scan.duration_s ? `${Math.round(scan.duration_s)}s` : '—';
+      const score = scan.score != null
+        ? `<span style="font-weight:700;color:${scan.score>=80?'var(--green)':scan.score>=50?'var(--yellow)':'var(--red)'}">${scan.score}</span>`
+        : '—';
+      const bars = `
+        <div style="display:flex;gap:3px;align-items:center;font-size:.72rem">
+          ${scan.critical > 0 ? `<span style="color:var(--critical)">🔴${scan.critical}</span>` : ''}
+          ${scan.high     > 0 ? `<span style="color:var(--high)">🟠${scan.high}</span>` : ''}
+          ${scan.medium   > 0 ? `<span style="color:var(--medium)">🟡${scan.medium}</span>` : ''}
+          ${scan.low      > 0 ? `<span style="color:var(--text2)">🔵${scan.low}</span>` : ''}
+          ${!scan.critical && !scan.high && !scan.medium && !scan.low
+            ? '<span style="color:var(--green)">✓</span>' : ''}
+        </div>`;
+      const origBadge = scan.triggered_by === 'scheduler'
+        ? '<span style="font-size:.7rem;background:var(--bg3);padding:1px 5px;border-radius:3px">⏰ Auto</span>'
+        : scan.triggered_by === 'agent'
+        ? `<span style="font-size:.7rem;background:var(--bg3);padding:1px 5px;border-radius:3px">🖧 ${esc(scan.target||'agente')}</span>`
+        : '<span style="font-size:.7rem;color:var(--text2)">Manual</span>';
+      const target = scan.target && scan.target !== 'localhost'
+        ? `<span style="font-size:.75rem;color:var(--text2)">${esc(scan.target)}</span>` : '';
+
+      return `<tr onclick="openHistoryDetail(${scan.id})" style="cursor:pointer">
+        <td><div style="font-size:.82rem">${dateStr} <span style="color:var(--text2)">${timeStr}</span></div></td>
+        <td style="font-size:.82rem">${typeLabels[scan.scan_type] || esc(scan.scan_type)}</td>
+        <td>${target || '<span style="color:var(--text2);font-size:.78rem">localhost</span>'}</td>
+        <td style="text-align:center">${score}</td>
+        <td>${bars}</td>
+        <td style="color:var(--text2);font-size:.78rem">${dur}</td>
+        <td>${origBadge}</td>
+        <td>
+          <button class="btn-secondary small" onclick="event.stopPropagation();openHistoryDetail(${scan.id})">Ver</button>
+          <button class="btn-secondary small" onclick="event.stopPropagation();compareHistory(${scan.id})">Comparar</button>
+        </td>
+      </tr>`;
+    }).join('');
+
+  } catch(e) {
+    appendLog('warn', 'Error cargando historial: ' + e.message);
+  }
+}
+
+async function openHistoryDetail(scanId) {
+  const [findings, comparison] = await Promise.all([
+    fetch(`/api/history/${scanId}`).then(r => r.json()),
+    fetch(`/api/history/${scanId}/compare`).then(r => r.json()),
+  ]);
+
+  const detail = document.getElementById('history-detail');
+  const title  = document.getElementById('history-detail-title');
+  const comp   = document.getElementById('history-comparison');
+  const tbody  = document.getElementById('hist-detail-tbody');
+  if (!detail || !tbody) return;
+
+  detail.style.display = '';
+  if (title) title.textContent = `${findings.length} hallazgos en scan #${scanId}`;
+
+  // Mostrar comparación
+  if (comp && !comparison.first_scan) {
+    const newCount  = comparison.new?.length  || 0;
+    const resolved  = comparison.resolved?.length || 0;
+    const unchanged = comparison.unchanged || 0;
+    comp.innerHTML = [
+      newCount  > 0 ? `<span style="color:var(--red)">+${newCount} nuevos</span>`         : '',
+      resolved  > 0 ? `<span style="color:var(--green)">-${resolved} resueltos</span>`    : '',
+      unchanged > 0 ? `<span style="color:var(--text2)">${unchanged} sin cambio</span>`   : '',
+    ].filter(Boolean).join(' · ');
+  } else if (comp) {
+    comp.textContent = comparison.first_scan ? '(primer scan de este tipo)' : '';
+  }
+
+  // Marcar findings nuevos vs resueltos vs sin cambio
+  const newIds = new Set((comparison.new || []).map(f => f.id));
+  tbody.innerHTML = findings.map(f => {
+    const isNew = newIds.has(f.finding_id);
+    const isFixed = !!f.fixed_at;
+    const badge = isFixed
+      ? '<span style="font-size:.7rem;color:var(--green)">✓ Corregido</span>'
+      : isNew
+      ? '<span style="font-size:.7rem;color:var(--red)">🆕 Nuevo</span>'
+      : '';
+    return `<tr>
+      <td>${sevBadge(f.severity)}</td>
+      <td style="font-size:.78rem;color:var(--text2)">${esc(f.category||'')}</td>
+      <td style="font-size:.82rem">${esc(f.title)}</td>
+      <td>${badge}</td>
+    </tr>`;
+  }).join('');
+
+  detail.scrollIntoView({ behavior: 'smooth' });
+}
+
+function compareHistory(scanId) {
+  // Redirige a openHistoryDetail que ya incluye la comparación
+  openHistoryDetail(scanId);
+}
+
+function closeHistoryDetail() {
+  const el = document.getElementById('history-detail');
+  if (el) el.style.display = 'none';
+}
+
+// ── Agentes ───────────────────────────────────────────────────────────────────
+async function loadAgents() {
+  try {
+    const r = await fetch('/api/agent/list');
+    if (!r.ok) return;
+    const agents = await r.json();
+    const container = document.getElementById('agents-list');
+    if (!container) return;
+
+    if (!agents.length) {
+      container.innerHTML = '<p style="color:var(--text2);font-size:.82rem">Sin agentes conectados todavía.</p>';
+      return;
+    }
+
+    container.innerHTML = `
+      <table>
+        <thead><tr><th>Agente</th><th>Hostname</th><th>Último scan</th><th>Score</th><th>Última vez visto</th></tr></thead>
+        <tbody>${agents.map(a => `
+          <tr>
+            <td style="font-weight:600">${esc(a.name||'')}</td>
+            <td style="color:var(--text2)">${esc(a.hostname||'')}</td>
+            <td style="font-size:.78rem">${esc(a.last_scan||'—')}</td>
+            <td>${a.score != null ? `<span style="color:${a.score>=80?'var(--green)':a.score>=50?'var(--yellow)':'var(--red)'}">${a.score}</span>` : '—'}</td>
+            <td style="font-size:.78rem;color:var(--text2)">${a.last_seen ? new Date(a.last_seen).toLocaleString('es') : '—'}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>`;
+  } catch(e) { /* silencioso */ }
+}
+
+// Mostrar agentes en la pestaña y en el filtro del historial
+async function loadAgentFilterOptions() {
+  try {
+    const r = await fetch('/api/agent/list');
+    if (!r.ok) return;
+    const agents = await r.json();
+    const sel = document.getElementById('hist-agent');
+    if (!sel || !agents.length) return;
+    document.getElementById('history-agent-filter')?.style && (
+      document.getElementById('history-agent-filter').style.display = ''
+    );
+    agents.forEach(a => {
+      const opt = document.createElement('option');
+      opt.value = a.name;
+      opt.textContent = a.name;
+      sel.appendChild(opt);
+    });
+  } catch(e) { /* silencioso */ }
+}
+
+// Extender showCfgTab para agentes
+const _showCfgTabAgents = showCfgTab;
+showCfgTab = function(name) {
+  _showCfgTabAgents(name);
+  if (name === 'agents') { loadAgents(); }
+};
+
+// Integrar loadHistory cuando se activa el panel
+const _origShowPanel = showPanel;
+showPanel = function(name) {
+  _origShowPanel(name);
+  if (name === 'history') { loadHistory(); loadAgentFilterOptions(); }
+};
