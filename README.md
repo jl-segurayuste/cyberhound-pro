@@ -6,7 +6,7 @@
 
 [![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://python.org)
 [![Tests](https://img.shields.io/badge/tests-505%20passed-green.svg)](#tests)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
 
 ---
 
@@ -493,6 +493,6 @@ pytest tests/ --cov=cyberhound --cov-report=term-missing
 
 ## Licencia
 
-MIT License — ver [LICENSE](LICENSE)
+AGPL-3.0 License — ver [LICENSE](LICENSE). Copyright © 2026 José Luis Segura Yuste.
 
 *Desarrollado para hacer la ciberseguridad accesible a las PYMEs*
