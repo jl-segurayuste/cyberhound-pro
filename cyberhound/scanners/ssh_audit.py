@@ -301,8 +301,9 @@ print(json.dumps(findings))
                     logger.info("Fix remoto aplicado en %s: %s", host, cmd)
                     return True, ""
                 else:
-                    logger.error("Fix remoto falló en %s: %s", host, r.stderr)
-                    return False, r.stderr[:300]
+                    stderr = str(r.stderr) if r.stderr else ""
+                    logger.error("Fix remoto falló en %s: %s", host, stderr)
+                    return False, stderr[:300]
         except Exception as e:
             logger.error("Error aplicando fix remoto en %s: %s", host, e)
             return False, str(e)

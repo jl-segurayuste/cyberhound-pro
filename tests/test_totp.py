@@ -156,6 +156,7 @@ class TestQRGeneration:
         sys.modules['segno'] = None
         try:
             from importlib import reload
+
             import cyberhound.core.totp as totp_mod
             svg = totp_mod.generate_qr_svg(uri)
             assert '<svg' in svg

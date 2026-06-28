@@ -3,11 +3,12 @@ import pytest
 
 from cyberhound.core.models import Finding
 from cyberhound.scanners.compliance import (
-    CATEGORY_TO_CONTROLS, FRAMEWORK_NAMES,
-    analyze_compliance, compliance_to_dict,
+    CATEGORY_TO_CONTROLS,
+    FRAMEWORK_NAMES,
+    analyze_compliance,
+    compliance_to_dict,
 )
-from cyberhound.scanners.pdf_report import generate_pdf, _generate_html_fallback
-
+from cyberhound.scanners.pdf_report import _generate_html_fallback, generate_pdf
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 

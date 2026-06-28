@@ -4,12 +4,16 @@ import hashlib
 import hmac
 import json
 import tempfile
+from datetime import UTC
 from pathlib import Path
 
 import pytest
 
 from cyberhound.core.licensing import (
-    LICENSE_VERIFY_KEY, LicenseManager, TIER_LIMITS, License,
+    LICENSE_VERIFY_KEY,
+    TIER_LIMITS,
+    License,
+    LicenseManager,
 )
 
 
@@ -18,12 +22,12 @@ def make_license_key(tier="starter", licensee="Test Corp",
     """Genera una clave de licencia válida para tests."""
     from datetime import datetime, timedelta, timezone
     if expired:
-        valid_until = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+        valid_until = (datetime.now(UTC) - timedelta(days=1)).isoformat()
     payload = {
         "tier": tier,
         "licensee": licensee,
         "valid_until": valid_until,
-        "issued_at": datetime.now(timezone.utc).isoformat(),
+        "issued_at": datetime.now(UTC).isoformat(),
         "license_id": "test-123",
     }
     payload_str = json.dumps(payload, sort_keys=True)
@@ -133,7 +137,7 @@ class TestLicense:
 
     def test_days_remaining_future(self):
         from datetime import datetime, timedelta, timezone
-        future = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
+        future = (datetime.now(UTC) + timedelta(days=30)).isoformat()
         lic = License(valid_until=future)
         assert lic.days_remaining >= 29
 

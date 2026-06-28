@@ -10,7 +10,6 @@ import pytest
 
 from cyberhound.core.models import Finding
 
-
 # ── Intel (Threat Intelligence) ───────────────────────────────────────────────
 
 class TestIntelScanner:
@@ -102,8 +101,9 @@ class TestCodeAuditor:
 
     def test_class_has_full_analysis(self):
         """CodeAuditor tiene el método full_analysis."""
-        from cyberhound.scanners.code import CodeAuditor
         import asyncio
+
+        from cyberhound.scanners.code import CodeAuditor
         assert hasattr(CodeAuditor, "full_analysis")
         assert asyncio.iscoroutinefunction(CodeAuditor.full_analysis)
 
@@ -171,7 +171,7 @@ class TestAgentReporter:
 
     def test_agent_reporter_creation(self):
         """AgentReporter se instancia con AgentConfig."""
-        from cyberhound.core.agent import AgentReporter, AgentConfig
+        from cyberhound.core.agent import AgentConfig, AgentReporter
         cfg = AgentConfig(
             manager_url="https://cyberhound.local:8443",
             agent_key="key",
@@ -183,7 +183,7 @@ class TestAgentReporter:
     @pytest.mark.asyncio
     async def test_send_report_handles_connection_error(self):
         """Error de conexión devuelve False sin colgar el test."""
-        from cyberhound.core.agent import AgentReporter, AgentConfig
+        from cyberhound.core.agent import AgentConfig, AgentReporter
         cfg = AgentConfig(
             manager_url="https://192.0.2.1:9999",
             agent_key="key",

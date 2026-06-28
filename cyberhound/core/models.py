@@ -51,7 +51,7 @@ class Finding:
 
     @classmethod
     def from_dict(cls, d: dict) -> Finding:
-        valid = {f.name for f in cls.__dataclass_fields__.values()}  # type: ignore[attr-defined]
+        valid = {f.name for f in cls.__dataclass_fields__.values()}
         return cls(**{k: v for k, v in d.items() if k in valid})
 
     @property

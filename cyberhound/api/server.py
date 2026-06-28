@@ -84,7 +84,7 @@ async def _update_yara_rules(sources: list[str]) -> dict:
     yara_dir = Path.home() / ".cyberhound" / "yara"
     yara_dir.mkdir(parents=True, exist_ok=True)
 
-    results = {"updated": [], "errors": [], "skipped": []}
+    results: dict[str, list] = {"updated": [], "errors": [], "skipped": []}
     urls: list[tuple[str, str]] = []
     for src in sources:
         urls.extend(YARA_SOURCES.get(src, []))

@@ -214,7 +214,7 @@ async def check_pam_faillock() -> list[Finding]:
 
 
 async def check_password_policy() -> list[Finding]:
-    results = []
+    results: list[Finding] = []
     content = await read_file_async("/etc/login.defs")
     if not content:
         return results
@@ -360,7 +360,7 @@ async def check_cron_restrictions() -> list[Finding]:
 
 
 async def check_log_permissions() -> list[Finding]:
-    results = []
+    results: list[Finding] = []
     log_dir = Path("/var/log")
     if not log_dir.exists():
         return results

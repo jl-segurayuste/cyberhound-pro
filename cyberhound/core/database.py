@@ -220,6 +220,8 @@ class Database:
             ) as cur:
                 scan_id = cur.lastrowid
             await db.commit()
+        if scan_id is None:
+            raise RuntimeError("No se pudo obtener el ID del scan insertado")
         return scan_id
 
     async def complete_scan(

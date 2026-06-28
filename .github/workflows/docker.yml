@@ -22,10 +22,12 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-      - name: Instalar ruff
-        run: pip install ruff
+      - name: Instalar ruff y mypy
+        run: pip install ruff mypy
       - name: Ruff check
         run: ruff check cyberhound/
+      - name: Mypy type-check (informativo)
+        run: mypy cyberhound/ || true
 
   # ── Tests ───────────────────────────────────────────────────────────────────
   test:
