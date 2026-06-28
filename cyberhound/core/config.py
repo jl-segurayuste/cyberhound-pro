@@ -52,7 +52,10 @@ class ScanSettings:
 
 @dataclass
 class ServerSettings:
-    host:     str  = "0.0.0.0"
+    # Seguro por defecto: solo loopback. Para exponer el panel en la red, fija
+    # explícitamente `host: 0.0.0.0` (o `--host`). Coherente con el propio scoring
+    # de CyberHound, que penaliza los servicios que escuchan en 0.0.0.0.
+    host:     str  = "127.0.0.1"
     port:     int  = 8443
     tls_cert: str | None = None
     tls_key:  str | None = None
@@ -188,7 +191,7 @@ class CyberHoundConfig:
         # Server
         svr = raw.get("server", {})
         cfg.server = ServerSettings(
-            host=svr.get("host", "0.0.0.0"),
+            host=svr.get("host", "127.0.0.1"),
             port=int(svr.get("port", 8443)),
             tls_cert=svr.get("tls_cert"),
             tls_key=svr.get("tls_key"),
