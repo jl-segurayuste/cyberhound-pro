@@ -38,6 +38,7 @@
     <button class="nav-tab" data-panel="code"      onclick="showPanel('code')">📝 Código</button>
     <button class="nav-tab" data-panel="services"  onclick="showPanel('services')">⚙️ Servicios</button>
     <button class="nav-tab" data-panel="tls"       onclick="showPanel('tls')">🔒 TLS/SSL</button>
+    <button class="nav-tab" data-panel="webhdr"    onclick="showPanel('webhdr')">🌐 Cabeceras Web</button>
     <button class="nav-tab" data-panel="intel"    onclick="showPanel('intel')">🌐 Intel</button>
     <button class="nav-tab" data-panel="history"   onclick="showPanel('history')">📅 Historial</button>
     <button class="nav-tab" data-panel="monitor"   onclick="showPanel('monitor')">👁 Monitor</button>
@@ -428,6 +429,41 @@
       <div class="empty-icon">🔒</div>
       <h3>Escaneo TLS no ejecutado</h3>
       <p>Verifica los certificados de tus servicios HTTPS y detecta configuraciones inseguras.</p>
+    </div>
+  </section>
+
+
+  <!-- ═══ CABECERAS WEB ═══ -->
+  <section class="panel" id="panel-webhdr">
+    <div class="page-header"><h1>🌐 Cabeceras de seguridad web</h1>
+      <p>Analiza HSTS, CSP, X-Frame-Options, cookies inseguras y fuga de información.</p>
+    </div>
+    <div class="config-bar">
+      <div class="field">
+        <label>URLs a analizar (una por línea)</label>
+        <textarea id="webhdr-urls" rows="3" placeholder="https://midominio.com&#10;https://blog.midominio.com"></textarea>
+      </div>
+      <button class="btn-primary" id="btn-webhdr" onclick="runWebHeadersScan()">▶ Analizar cabeceras</button>
+    </div>
+    <div id="webhdr-results" style="display:none">
+      <div id="webhdr-summary-bar"></div>
+      <div class="toolbar">
+        <button class="filter active" onclick="filterTable('webhdr','all',this)">Todos</button>
+        <button class="filter" data-sev="high" onclick="filterTable('webhdr','high',this)">Alto</button>
+        <button class="filter" data-sev="medium" onclick="filterTable('webhdr','medium',this)">Medio</button>
+        <button class="filter" data-sev="low" onclick="filterTable('webhdr','low',this)">Bajo</button>
+        <input type="text" placeholder="🔎 Buscar…" oninput="searchTable('webhdr-tbody',this.value)">
+        <button class="btn-secondary small" onclick="exportJSON('webhdr')">⬇ JSON</button>
+      </div>
+      <table>
+        <thead><tr><th>Severidad</th><th>Sitio</th><th>Problema</th><th>Solución</th></tr></thead>
+        <tbody id="webhdr-tbody"></tbody>
+      </table>
+    </div>
+    <div class="empty-panel" id="webhdr-empty">
+      <div class="empty-icon">🌐</div>
+      <h3>Análisis de cabeceras no ejecutado</h3>
+      <p>Introduce las URLs de tus sitios para auditar sus cabeceras de seguridad HTTP.</p>
     </div>
   </section>
 
