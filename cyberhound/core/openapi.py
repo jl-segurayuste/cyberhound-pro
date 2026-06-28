@@ -410,7 +410,7 @@ SWAGGER_UI_HTML = """<!DOCTYPE html>
 <html><head>
 <title>CyberHound Pro API Docs</title>
 <meta charset="utf-8">
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/5.11.0/swagger-ui.css">
+<link rel="stylesheet" href="/static/vendor/swagger-ui/swagger-ui.css">
 <style>
   body { margin: 0; background: #0d1117; }
   .swagger-ui .topbar { background: #161b22; border-bottom: 1px solid #30363d; }
@@ -420,7 +420,7 @@ SWAGGER_UI_HTML = """<!DOCTYPE html>
 </style>
 </head><body>
 <div id="swagger-ui"></div>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/5.11.0/swagger-ui-bundle.js"></script>
+<script src="/static/vendor/swagger-ui/swagger-ui-bundle.js"></script>
 <script>
 SwaggerUIBundle({
   url: "/api/openapi.json",
