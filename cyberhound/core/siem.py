@@ -16,8 +16,7 @@ import socket
 import struct
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 import aiohttp
 
@@ -64,7 +63,7 @@ class SIEMConfig:
 def _finding_to_event(f: Finding, scan_type: str = "audit", hostname: str = "") -> dict:
     """Convierte un Finding al formato de evento SIEM estándar."""
     return {
-        "timestamp":   datetime.now(timezone.utc).isoformat(),
+        "timestamp":   datetime.now(UTC).isoformat(),
         "hostname":    hostname or socket.gethostname(),
         "source":      "cyberhound_pro",
         "scan_type":   scan_type,
@@ -110,7 +109,7 @@ class SIEMIntegration:
 
         import asyncio
         results = await asyncio.gather(*tasks, return_exceptions=True)
-        for name, result in zip(["wazuh", "elk", "splunk"], results):
+        for name, result in zip(["wazuh", "elk", "splunk"], results, strict=False):
             if isinstance(result, Exception):
                 logger.warning("SIEM %s: error enviando finding %s: %s", name, f.id, result)
 
@@ -118,14 +117,13 @@ class SIEMIntegration:
         self, findings: list[Finding], scan_type: str, score: int
     ) -> None:
         """Envía un resumen del scan completo al SIEM."""
-        from cyberhound.core.models import Finding
         counts = {"critical": 0, "high": 0, "medium": 0, "low": 0}
         for f in findings:
             if f.severity in counts:
                 counts[f.severity] += 1
 
         summary_event = {
-            "timestamp":   datetime.now(timezone.utc).isoformat(),
+            "timestamp":   datetime.now(UTC).isoformat(),
             "hostname":    self._hostname,
             "source":      "cyberhound_pro",
             "event_type":  "scan_summary",
@@ -266,7 +264,7 @@ class SIEMIntegration:
     async def test(self) -> dict[str, bool]:
         """Prueba la conectividad con todos los SIEMs configurados."""
         test_event = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "hostname": self._hostname,
             "source": "cyberhound_pro",
             "event_type": "connectivity_test",

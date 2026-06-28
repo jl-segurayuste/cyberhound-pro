@@ -24,13 +24,11 @@ Activación:
 """
 from __future__ import annotations
 
-import hashlib
 import re
 import secrets
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional
 
 from cyberhound.core.logging import get_logger
 
@@ -46,7 +44,7 @@ class Tenant:
     admin_email: str = ""
     plan:        str = "starter"  # community | starter | professional | enterprise
     active:      bool = True
-    created_at:  str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    created_at:  str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     api_key:     str = field(default_factory=lambda: secrets.token_urlsafe(32))
     settings:    dict = field(default_factory=dict)
 
@@ -89,7 +87,7 @@ class TenantStore:
 
     STORE_PATH = Path.home() / ".cyberhound" / "tenants.json"
 
-    def __init__(self, path: Optional[Path] = None):
+    def __init__(self, path: Path | None = None):
         self._path = path or self.STORE_PATH
         self._tenants: dict[str, Tenant] = {}
         self._load()
@@ -132,10 +130,10 @@ class TenantStore:
         logger.info("Tenant creado: %s (%s)", slug, name)
         return tenant
 
-    def get(self, slug: str) -> Optional[Tenant]:
+    def get(self, slug: str) -> Tenant | None:
         return self._tenants.get(slug)
 
-    def get_by_api_key(self, key: str) -> Optional[Tenant]:
+    def get_by_api_key(self, key: str) -> Tenant | None:
         for tenant in self._tenants.values():
             if secrets.compare_digest(tenant.api_key, key):
                 return tenant
@@ -144,7 +142,7 @@ class TenantStore:
     def list(self) -> list[Tenant]:
         return [t for t in self._tenants.values() if t.active]
 
-    def update(self, slug: str, **kwargs) -> Optional[Tenant]:
+    def update(self, slug: str, **kwargs) -> Tenant | None:
         tenant = self._tenants.get(slug)
         if not tenant:
             return None
@@ -164,7 +162,7 @@ class TenantStore:
         logger.info("Tenant desactivado: %s", slug)
         return True
 
-    def rotate_api_key(self, slug: str) -> Optional[str]:
+    def rotate_api_key(self, slug: str) -> str | None:
         tenant = self._tenants.get(slug)
         if not tenant:
             return None

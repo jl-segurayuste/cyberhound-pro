@@ -19,8 +19,7 @@ from __future__ import annotations
 import fnmatch
 import json
 import time
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 from cyberhound.core.logging import get_logger
 from cyberhound.core.models import Finding
@@ -117,7 +116,7 @@ DB_VERSION = 3
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 class DatabasePG:
@@ -133,10 +132,10 @@ class DatabasePG:
     async def init(self) -> None:
         try:
             import asyncpg
-        except ImportError:
+        except ImportError as e:
             raise RuntimeError(
                 "asyncpg no instalado. Instala con: pip install asyncpg"
-            )
+            ) from e
 
         import asyncpg
         self._pool = await asyncpg.create_pool(
@@ -180,7 +179,7 @@ class DatabasePG:
             scan_type, target, _now(), triggered_by,
         )
 
-    async def complete_scan(self, scan_id: int, findings: list[Finding], score: Optional[int] = None) -> None:
+    async def complete_scan(self, scan_id: int, findings: list[Finding], score: int | None = None) -> None:
         counts = {"critical":0,"high":0,"medium":0,"low":0}
         for f in findings:
             if f.severity in counts: counts[f.severity] += 1
@@ -221,7 +220,7 @@ class DatabasePG:
             _now(), scan_id,
         )
 
-    async def get_scan_history(self, scan_type: Optional[str] = None, limit: int = 50) -> list[dict]:
+    async def get_scan_history(self, scan_type: str | None = None, limit: int = 50) -> list[dict]:
         if scan_type:
             return await self._fetch(
                 "SELECT * FROM scans WHERE scan_type=$1 ORDER BY started_at DESC LIMIT $2",
@@ -282,7 +281,7 @@ class DatabasePG:
             int(authorized), notes, ip,
         )
 
-    async def add_suppression(self, pattern: str, reason: str, created_by: str, expires_at: Optional[str] = None) -> None:
+    async def add_suppression(self, pattern: str, reason: str, created_by: str, expires_at: str | None = None) -> None:
         await self._exec(
             "INSERT INTO suppressions (finding_id_pattern,reason,created_by,created_at,expires_at) "
             "VALUES ($1,$2,$3,$4,$5) ON CONFLICT (finding_id_pattern) DO UPDATE SET reason=$2",
@@ -311,7 +310,7 @@ class DatabasePG:
                 result.append(f)
         return result
 
-    async def get_user(self, username: str) -> Optional[dict]:
+    async def get_user(self, username: str) -> dict | None:
         rows = await self._fetch(
             "SELECT * FROM users WHERE username=$1 AND active=1", username
         )
@@ -350,7 +349,7 @@ class DatabasePG:
             user.username, user.password_hash, user.role, user.created_at, user.active,
         )
 
-    async def add_notification(self, message: str, level: str = "info", scan_id: Optional[int] = None) -> None:
+    async def add_notification(self, message: str, level: str = "info", scan_id: int | None = None) -> None:
         await self._exec(
             "INSERT INTO notifications (scan_id,level,message,created_at) VALUES ($1,$2,$3,$4)",
             scan_id, level, message, _now(),
@@ -435,7 +434,8 @@ def create_database(db_url: str = "", db_path: str = ""):
         return DatabasePG(db_url)
     else:
         from pathlib import Path
-        from cyberhound.core.database import Database, DEFAULT_DB_PATH
+
+        from cyberhound.core.database import DEFAULT_DB_PATH, Database
         path = Path(db_path) if db_path else DEFAULT_DB_PATH
         logger.info("Usando SQLite: %s", path)
         return Database(path)

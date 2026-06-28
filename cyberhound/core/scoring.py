@@ -17,10 +17,9 @@ Este módulo implementa un scoring contextual que considera:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional
 
-from cyberhound.core.models import Finding
 from cyberhound.core.logging import get_logger
+from cyberhound.core.models import Finding
 
 logger = get_logger("scoring")
 
@@ -113,7 +112,7 @@ class ScoringContext:
         self.exposure_multiplier = min(mult, 2.0)  # cap a 2x
 
     @classmethod
-    def from_findings(cls, findings: list[Finding]) -> "ScoringContext":
+    def from_findings(cls, findings: list[Finding]) -> ScoringContext:
         """Infiere el contexto a partir de los propios hallazgos."""
         open_ports = 0
         internet_facing = False
@@ -142,8 +141,8 @@ class ScoringContext:
 
 def compute_score(
     findings: list[Finding],
-    context: Optional[ScoringContext] = None,
-) -> "ScoreResult":
+    context: ScoringContext | None = None,
+) -> ScoreResult:
     """
     Calcula el score de seguridad con ponderación contextual.
 

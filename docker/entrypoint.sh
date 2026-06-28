@@ -78,5 +78,7 @@ echo "🐾 CyberHound Pro v6.0.0"
 echo "   Interfaz web: http://0.0.0.0:${CH_PORT:-8443}"
 echo ""
 
-# Ejecutar CyberHound
-exec python -m cyberhound --config "$CONFIG_FILE" "$@"
+# Ejecutar CyberHound — el subcomando debe ir ANTES de --config
+SUBCMD="${1:-web}"
+shift || true
+exec python -m cyberhound "$SUBCMD" --config "$CONFIG_FILE" "$@"

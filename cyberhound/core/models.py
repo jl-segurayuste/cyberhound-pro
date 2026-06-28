@@ -4,14 +4,13 @@ Separados de la lógica para poder importarlos en cualquier módulo sin dependen
 """
 from __future__ import annotations
 
-import json
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
-from enum import Enum
-from typing import Any, Optional
+from enum import StrEnum
+from typing import Any
 
 
-class Severity(str, Enum):
+class Severity(StrEnum):
     CRITICAL = "critical"
     HIGH     = "high"
     MEDIUM   = "medium"
@@ -51,7 +50,7 @@ class Finding:
         return {k: v for k, v in self.__dict__.items()}
 
     @classmethod
-    def from_dict(cls, d: dict) -> "Finding":
+    def from_dict(cls, d: dict) -> Finding:
         valid = {f.name for f in cls.__dataclass_fields__.values()}  # type: ignore[attr-defined]
         return cls(**{k: v for k, v in d.items() if k in valid})
 

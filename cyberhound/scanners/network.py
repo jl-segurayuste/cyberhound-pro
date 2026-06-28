@@ -14,11 +14,9 @@ No requiere agentes en los hosts remotos para la fase de descubrimiento.
 from __future__ import annotations
 
 import asyncio
-import json
 import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
-from typing import Optional
 
 from cyberhound.core.executor import command_exists, run_command
 from cyberhound.core.logging import get_logger
@@ -116,8 +114,8 @@ class NetworkScanner:
 
     async def discover_hosts(
         self,
-        networks: Optional[list[str]] = None,
-        exclude_ips: Optional[list[str]] = None,
+        networks: list[str] | None = None,
+        exclude_ips: list[str] | None = None,
     ) -> list[str]:
         """Devuelve lista de IPs activas en la red."""
         target_networks = networks or await self._detect_local_networks()
@@ -272,7 +270,7 @@ class NetworkScanner:
             else:
                 device.scan_status = "error"
                 logger.error("nmap error en %s: %s", ip, proc.stderr[:300])
-        except asyncio.TimeoutError:
+        except TimeoutError:
             device.scan_status = "timeout"
             logger.warning("nmap timeout en %s", ip)
         except Exception as e:
@@ -358,8 +356,8 @@ class NetworkScanner:
 
     async def scan_network(
         self,
-        networks: Optional[list[str]] = None,
-        exclude_ips: Optional[list[str]] = None,
+        networks: list[str] | None = None,
+        exclude_ips: list[str] | None = None,
         deep: bool = True,
         vuln_scan: bool = False,
         concurrency: int = 10,

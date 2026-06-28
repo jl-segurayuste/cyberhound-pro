@@ -15,9 +15,7 @@ o retorna el HTML directamente como fallback.
 """
 from __future__ import annotations
 
-import io
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 from cyberhound.core.logging import get_logger
 from cyberhound.core.models import Finding
@@ -47,7 +45,7 @@ def generate_pdf(
     findings: list[Finding],
     target: str = "localhost",
     scan_type: str = "audit",
-    score: Optional[int] = None,
+    score: int | None = None,
     licensee: str = "CyberHound Pro",
     include_compliance: bool = True,
 ) -> bytes:
@@ -94,7 +92,7 @@ def _generate_with_fpdf2(
         if f.severity in counts:
             counts[f.severity] += 1
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     grade = "A" if (score or 0) >= 90 else "B" if (score or 0) >= 75 else "C" if (score or 0) >= 60 else "D" if (score or 0) >= 40 else "F"
 
     pdf = FPDF()
@@ -259,7 +257,7 @@ def _generate_with_fpdf2(
     # ── SECCIÓN DE COMPLIANCE ─────────────────────────────────────────────────
     if include_compliance and findings:
         try:
-            from cyberhound.scanners.compliance import analyze_compliance, FRAMEWORK_NAMES
+            from cyberhound.scanners.compliance import FRAMEWORK_NAMES, analyze_compliance
             compliance = analyze_compliance(findings, frameworks=["ens", "iso27001", "cis"])
 
             pdf.add_page()
@@ -324,7 +322,7 @@ def _generate_html_fallback(
     findings, target, scan_type, score, licensee, include_compliance=True,
 ):
     """Genera HTML que el navegador puede imprimir como PDF."""
-    now = datetime.now(timezone.utc).strftime("%d/%m/%Y %H:%M UTC")
+    now = datetime.now(UTC).strftime("%d/%m/%Y %H:%M UTC")
     counts = {"critical": 0, "high": 0, "medium": 0, "low": 0}
     for f in findings:
         if f.severity in counts:
@@ -353,7 +351,7 @@ def _generate_html_fallback(
     compliance_html = ""
     if include_compliance and findings:
         try:
-            from cyberhound.scanners.compliance import analyze_compliance, FRAMEWORK_NAMES
+            from cyberhound.scanners.compliance import FRAMEWORK_NAMES, analyze_compliance
             compliance = analyze_compliance(findings, frameworks=["ens", "iso27001", "cis"])
             rows_c = ""
             for fw, res in compliance.items():

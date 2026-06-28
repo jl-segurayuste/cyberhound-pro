@@ -38,8 +38,6 @@ import json
 import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Optional
 
 from cyberhound.core.logging import get_logger
 from cyberhound.core.models import Finding
@@ -141,7 +139,7 @@ def detect_format(content: str | bytes, filename: str = "") -> str:
 def parse_nessus(content: str | bytes, source_file: str = "scan.nessus") -> ImportResult:
     """
     Parsea un fichero .nessus (XML de Tenable Nessus / Tenable.io).
-    
+
     Estructura del .nessus:
       NessusClientData_v2
         Report
@@ -159,7 +157,6 @@ def parse_nessus(content: str | bytes, source_file: str = "scan.nessus") -> Impo
             content = content.decode("utf-8", errors="replace")
 
         root = ET.fromstring(content)
-        ns = ""
 
         # Buscar Report o Policy para metadata
         report = root.find(".//Report")
@@ -189,7 +186,7 @@ def parse_nessus(content: str | bytes, source_file: str = "scan.nessus") -> Impo
                 cvss_score   = _get_text(item, "cvss_base_score")
                 cvss3_score  = _get_text(item, "cvss3_base_score")
                 cves         = [c.text for c in item.findall("cve") if c.text]
-                risk_factor  = _get_text(item, "risk_factor")
+                _get_text(item, "risk_factor")
 
                 # Recalcular severidad con CVSS si está disponible
                 for cvss_str in [cvss3_score, cvss_score]:
@@ -305,7 +302,7 @@ def parse_xccdf(content: str | bytes, source_file: str = "results.xml") -> Impor
         tag = root.tag
         if "{" in tag:
             ns_uri = tag[1:tag.index("}")]
-            for prefix, uri in XCCDF_NS.items():
+            for _prefix, uri in XCCDF_NS.items():
                 if uri == ns_uri:
                     ns_prefix = f"{{{uri}}}"
                     break
@@ -545,42 +542,43 @@ def parse_csv(content: str | bytes, source_file: str = "scan.csv") -> ImportResu
             "none": "info", "minimal": "low",
         }
 
-        for i, row in enumerate(reader):
-            def get(col):
-                key = col_map.get(col)
-                return row.get(key, "").strip() if key else ""
+        def get(row, col):
+            key = col_map.get(col)
+            return row.get(key, "").strip() if key else ""
 
-            title = get("title")
+        for i, row in enumerate(reader):
+
+            title = get(row, "title")
             if not title:
                 skipped += 1
                 continue
 
-            severity_raw = get("severity").lower()
+            severity_raw = get(row, "severity").lower()
             severity = sev_normalizer.get(severity_raw, "medium")
 
             # Intentar CVSS si severity no reconocido
             if severity == "medium" and not severity_raw:
-                cvss_str = get("cvss")
+                cvss_str = get(row, "cvss")
                 try:
                     severity = cvss_to_severity(float(cvss_str))
                 except (ValueError, TypeError):
                     pass
 
-            host     = get("host")
-            category = get("category") or "vulnerability/imported"
-            if category and not "/" in category:
+            host     = get(row, "host")
+            category = get(row, "category") or "vulnerability/imported"
+            if category and "/" not in category:
                 category = f"vulnerability/{category.lower()[:30]}"
 
             evidence_parts = []
             if host:
                 evidence_parts.append(f"host={host}")
-            cve = get("cve")
+            cve = get(row, "cve")
             if cve:
                 evidence_parts.append(f"cve={cve[:50]}")
-            cvss = get("cvss")
+            cvss = get(row, "cvss")
             if cvss:
                 evidence_parts.append(f"cvss={cvss}")
-            ev_out = get("evidence")
+            ev_out = get(row, "evidence")
             if ev_out:
                 evidence_parts.append(ev_out[:100])
 
@@ -589,8 +587,8 @@ def parse_csv(content: str | bytes, source_file: str = "scan.csv") -> ImportResu
                 category=category,
                 severity=severity,
                 title=title[:200],
-                description=get("description")[:500],
-                remediation=get("remediation")[:500],
+                description=get(row, "description")[:500],
+                remediation=get(row, "remediation")[:500],
                 evidence=" ".join(evidence_parts),
                 source_host=host,
                 auto_fix=False,
@@ -612,7 +610,7 @@ def parse_csv(content: str | bytes, source_file: str = "scan.csv") -> ImportResu
 def import_audit_file(
     content: str | bytes,
     filename: str = "",
-    fmt: Optional[str] = None,
+    fmt: str | None = None,
 ) -> ImportResult:
     """
     Importa un fichero de auditoría de cualquier formato soportado.

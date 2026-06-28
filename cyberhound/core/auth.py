@@ -13,11 +13,8 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
-import os
 import secrets
-import time
 from datetime import datetime, timedelta
-from typing import Optional
 
 import jwt  # PyJWT
 from aiohttp import web
@@ -43,9 +40,9 @@ class AuthConfig:
     def __init__(
         self,
         mode: str = "jwt",
-        secret: Optional[str] = None,
+        secret: str | None = None,
         username: str = "admin",
-        password_hash: Optional[str] = None,
+        password_hash: str | None = None,
         token_ttl_hours: int = 8,
         localhost_only: bool = False,
     ) -> None:
@@ -83,7 +80,7 @@ class AuthConfig:
         }
         return jwt.encode(payload, self.secret, algorithm="HS256")
 
-    def verify_jwt(self, token: str) -> Optional[dict]:
+    def verify_jwt(self, token: str) -> dict | None:
         try:
             return jwt.decode(token, self.secret, algorithms=["HS256"])
         except jwt.ExpiredSignatureError:
@@ -102,14 +99,14 @@ def _is_localhost(request: web.Request) -> bool:
     return False
 
 
-def _extract_token(request: web.Request) -> Optional[str]:
+def _extract_token(request: web.Request) -> str | None:
     auth_header = request.headers.get(AUTH_HEADER, "")
     if auth_header.startswith("Bearer "):
         return auth_header[7:]
     return request.cookies.get(AUTH_COOKIE)
 
 
-def _extract_basic(request: web.Request) -> Optional[tuple[str, str]]:
+def _extract_basic(request: web.Request) -> tuple[str, str] | None:
     auth_header = request.headers.get(AUTH_HEADER, "")
     if not auth_header.startswith("Basic "):
         return None
@@ -232,7 +229,7 @@ def setup_auth_routes(app: web.Application, cfg: AuthConfig) -> None:
         try:
             data = await request.post()
         except Exception:
-            raise web.HTTPBadRequest()
+            raise web.HTTPBadRequest() from None
 
         # ── Verificar CSRF aquí (no en middleware) ─────────────────────────
         # El middleware exenta /login para que podamos leer el body antes

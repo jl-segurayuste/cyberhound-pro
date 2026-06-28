@@ -6,10 +6,9 @@ Los errores de herramientas faltantes se reportan como info, no como excepciones
 from __future__ import annotations
 
 import json
-import re
 from pathlib import Path
 
-from cyberhound.core.executor import command_exists, read_file_async, run_command
+from cyberhound.core.executor import command_exists, run_command
 from cyberhound.core.logging import get_logger
 from cyberhound.core.models import Finding
 

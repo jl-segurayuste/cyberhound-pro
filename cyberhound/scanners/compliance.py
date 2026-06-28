@@ -15,10 +15,8 @@ cumplimiento global por marco.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional
 
 from cyberhound.core.models import Finding
-
 
 # ── Mapeo finding_category → controles ───────────────────────────────────────
 
@@ -210,7 +208,7 @@ class ComplianceResult:
 
 def analyze_compliance(
     findings: list[Finding],
-    frameworks: Optional[list[str]] = None,
+    frameworks: list[str] | None = None,
 ) -> dict[str, ComplianceResult]:
     """
     Analiza el cumplimiento normativo a partir de los hallazgos.

@@ -14,10 +14,8 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-import shutil
 import tempfile
 from pathlib import Path
-from typing import Optional
 
 from cyberhound.core.executor import command_exists, run_command
 from cyberhound.core.logging import get_logger

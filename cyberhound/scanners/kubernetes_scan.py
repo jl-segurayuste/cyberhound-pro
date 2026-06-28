@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Optional
 
 from cyberhound.core.executor import command_exists, run_command
 from cyberhound.core.logging import get_logger
@@ -46,7 +45,7 @@ DANGEROUS_HOSTPATHS = [
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-async def _kubectl(args: list[str], timeout: int = 30) -> Optional[dict | list]:
+async def _kubectl(args: list[str], timeout: int = 30) -> dict | list | None:
     """Ejecuta kubectl y parsea la salida JSON. Devuelve None si falla."""
     proc = await run_command(
         ["kubectl"] + args + ["-o", "json"], timeout=timeout, check=False
@@ -163,7 +162,7 @@ async def check_rbac_wildcards() -> list[Finding]:
         for rule in rules:
             verbs     = rule.get("verbs", [])
             resources = rule.get("resources", [])
-            api_groups = rule.get("apiGroups", [])
+            rule.get("apiGroups", [])
             if "*" in verbs and "*" in resources:
                 findings.append(_f(
                     f"k8s_rbac_wildcard_{name.replace('-','_')[:40]}",
@@ -309,7 +308,7 @@ async def check_env_secrets() -> list[Finding]:
         ns   = meta.get("namespace", "")
         spec = pod.get("spec", {})
         for container in spec.get("containers", []):
-            cname = container.get("name", "")
+            container.get("name", "")
             for env in container.get("env", []):
                 key   = env.get("name", "").lower()
                 value = env.get("value", "")
@@ -468,7 +467,7 @@ class KubernetesScanner:
             return_exceptions=True,
         )
         findings: list[Finding] = []
-        for check_fn, result in zip(cls.CHECKS, results):
+        for check_fn, result in zip(cls.CHECKS, results, strict=False):
             if isinstance(result, list):
                 findings.extend(result)
                 logger.info("  k8s/%s: %d hallazgos", check_fn.__name__, len(result))

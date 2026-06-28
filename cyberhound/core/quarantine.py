@@ -19,11 +19,8 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
-import shutil
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional
 
 from cyberhound.core.logging import get_logger
 
@@ -86,7 +83,7 @@ def quarantine_file(
     QUARANTINE_DIR.mkdir(parents=True, exist_ok=True)
 
     # Nombre único en cuarentena
-    ts        = datetime.now(timezone.utc)
+    ts        = datetime.now(UTC)
     safe_name = f"{ts.strftime('%Y%m%d_%H%M%S')}_{src.name}.quar"
     dst       = QUARANTINE_DIR / safe_name
 
@@ -133,7 +130,7 @@ def quarantine_file(
         return False, f"Error: {e}"
 
 
-def restore_file(quarantine_name: str, restore_path: Optional[str] = None) -> tuple[bool, str]:
+def restore_file(quarantine_name: str, restore_path: str | None = None) -> tuple[bool, str]:
     """
     Restaura un fichero desde cuarentena a su ubicación original.
 
@@ -167,7 +164,7 @@ def restore_file(quarantine_name: str, restore_path: Optional[str] = None) -> tu
 
         # Actualizar metadatos
         item["restored"] = True
-        item["restored_at"] = datetime.now(timezone.utc).isoformat()
+        item["restored_at"] = datetime.now(UTC).isoformat()
         item["restored_to"]  = str(dst)
         _save_meta(meta)
 
@@ -193,7 +190,7 @@ def delete_quarantined(quarantine_name: str) -> tuple[bool, str]:
         if src.exists():
             src.unlink()
         item["deleted"] = True
-        item["deleted_at"] = datetime.now(timezone.utc).isoformat()
+        item["deleted_at"] = datetime.now(UTC).isoformat()
         _save_meta(meta)
         logger.info("Fichero eliminado de cuarentena: %s", quarantine_name)
         return True, "Fichero eliminado permanentemente"

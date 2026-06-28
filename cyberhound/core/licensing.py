@@ -19,11 +19,9 @@ from __future__ import annotations
 
 import hashlib
 import json
-import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional
 
 from cyberhound.core.logging import get_logger
 
@@ -76,8 +74,8 @@ TIER_LIMITS: dict[str, LicenseLimits] = {
 class License:
     tier:        str              = "community"
     licensee:    str              = "Community User"
-    valid_until: Optional[str]   = None    # ISO date, None = perpetua
-    issued_at:   str             = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    valid_until: str | None   = None    # ISO date, None = perpetua
+    issued_at:   str             = field(default_factory=lambda: datetime.now(UTC).isoformat())
     license_id:  str             = ""
     features:    list[str]       = field(default_factory=list)
     limits:      LicenseLimits   = field(default_factory=LicenseLimits)
@@ -87,18 +85,18 @@ class License:
         if not self.valid_until:
             return False
         try:
-            exp = datetime.fromisoformat(self.valid_until).replace(tzinfo=timezone.utc)
-            return datetime.now(timezone.utc) > exp
+            exp = datetime.fromisoformat(self.valid_until).replace(tzinfo=UTC)
+            return datetime.now(UTC) > exp
         except (ValueError, TypeError):
             return True
 
     @property
-    def days_remaining(self) -> Optional[int]:
+    def days_remaining(self) -> int | None:
         if not self.valid_until:
             return None
         try:
-            exp = datetime.fromisoformat(self.valid_until).replace(tzinfo=timezone.utc)
-            delta = exp - datetime.now(timezone.utc)
+            exp = datetime.fromisoformat(self.valid_until).replace(tzinfo=UTC)
+            delta = exp - datetime.now(UTC)
             return max(0, delta.days)
         except (ValueError, TypeError):
             return 0
@@ -130,7 +128,7 @@ class License:
 
 class LicenseManager:
     def __init__(self) -> None:
-        self._license: Optional[License] = None
+        self._license: License | None = None
 
     def load(self, path: Path = LICENSE_PATH) -> License:
         """Carga y valida la licencia. Devuelve community si no hay licencia."""
@@ -141,7 +139,7 @@ class LicenseManager:
         try:
             raw = json.loads(path.read_text())
             # Verificar firma HMAC
-            token    = raw.get("token", "")
+            raw.get("token", "")
             payload  = raw.get("payload", {})
             sig      = raw.get("signature", "")
             expected = self._sign(json.dumps(payload, sort_keys=True))
@@ -207,8 +205,8 @@ class LicenseManager:
         valid_until = payload.get("valid_until")
         if valid_until:
             try:
-                exp = datetime.fromisoformat(valid_until).replace(tzinfo=timezone.utc)
-                if datetime.now(timezone.utc) > exp:
+                exp = datetime.fromisoformat(valid_until).replace(tzinfo=UTC)
+                if datetime.now(UTC) > exp:
                     return False, "Esta licencia ha expirado"
             except ValueError:
                 return False, "Fecha de expiración inválida"

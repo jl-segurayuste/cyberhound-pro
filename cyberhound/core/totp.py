@@ -18,12 +18,10 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import os
 import secrets
 import struct
 import time
 from base64 import b32decode, b32encode
-from typing import Optional
 from urllib.parse import quote
 
 from cyberhound.core.logging import get_logger
@@ -55,7 +53,7 @@ def _hotp(secret: str, counter: int) -> int:
     return code % (10 ** TOTP_DIGITS)
 
 
-def generate_totp(secret: str, timestamp: Optional[float] = None) -> str:
+def generate_totp(secret: str, timestamp: float | None = None) -> str:
     """Genera el TOTP actual para el secreto dado."""
     ts = timestamp or time.time()
     counter = int(ts) // TOTP_PERIOD
@@ -63,7 +61,7 @@ def generate_totp(secret: str, timestamp: Optional[float] = None) -> str:
     return str(code).zfill(TOTP_DIGITS)
 
 
-def verify_totp(secret: str, code: str, timestamp: Optional[float] = None) -> bool:
+def verify_totp(secret: str, code: str, timestamp: float | None = None) -> bool:
     """
     Verifica un código TOTP con tolerancia de ±TOTP_WINDOW intervalos.
     Devuelve True si el código es válido.
@@ -152,7 +150,7 @@ def hash_recovery_code(code: str) -> str:
     return hashlib.sha256(normalized.encode()).hexdigest()
 
 
-def verify_recovery_code(code: str, hashed_codes: list[str]) -> Optional[str]:
+def verify_recovery_code(code: str, hashed_codes: list[str]) -> str | None:
     """
     Verifica si un código de recuperación es válido.
     Devuelve el hash del código usado (para marcarlo como consumido) o None.

@@ -1,0 +1,160 @@
+flowchart TD
+    START([Inicio user_management.yml]) --> DEDUCE
+
+    subgraph MAIN_CONTROL["FASE CONTROL — localhost (una sola vez)"]
+        DEDUCE["Deducciones automáticas\nCAM · Entorno · Grupos funcional/sudo\nWIN number · GECOS funcional y PAM"]
+
+        DEDUCE --> COPY_SCRIPTS["Copiar scripts PowerShell\nal servidor AD"]
+        COPY_SCRIPTS --> VALIDATE_IN
+
+        subgraph VALIDATE_IN["validates/validate_inputs.yml"]
+            VI1["Validar UIDs funcional y PAM\nValidar nomenclaturas\nValidar CAM coincidente\ntarget_hosts OBLIGATORIO"]
+        end
+
+        VALIDATE_IN --> VALIDATE_AD
+
+        subgraph VALIDATE_AD["validates/validate_ad_user.yml"]
+            VA1["Verificar usuario funcional en AD"]
+            VA1 --> VA2{Existe?}
+            VA2 -->|No| VA3[OK]
+            VA2 -->|Sí UID ok| VA4[AVISO — continuar]
+            VA2 -->|Sí UID distinto| VA5["Propone siguiente\nGet-NextAvailableUsername\nMarcar error"]
+
+            VA3 & VA4 & VA5 --> VB1["Verificar usuario PAM en AD"]
+            VB1 --> VB2{Existe?}
+            VB2 -->|No| VB3[OK]
+            VB2 -->|Sí UID ok| VB4[AVISO — continuar]
+            VB2 -->|Sí UID distinto| VB5["Propone siguiente\nGet-NextPAMUsername\nMarcar error"]
+
+            VB3 & VB4 & VB5 --> VC1{Algún error?}
+            VC1 -->|Sí| VC2["Mostrar TODOS los errores\nFAIL"]
+            VC1 -->|No| VC3[OK]
+        end
+
+        VC3 --> ASSIGN_GID
+
+        subgraph ASSIGN_GID["gid_management/assign_gid.yml"]
+            AG1["Obtener CSV — fetch_csv.yml"]
+            AG1 --> AG2{Grupos existen\nen AD con GID?}
+            AG2 -->|Sí — mismo CSV| AG3["Reutilizar GID\ngid_already_reserved=true"]
+            AG2 -->|Sí — otro CSV| AG4["ERROR inconsistencia\nCSV/AD — FAIL"]
+            AG2 -->|Sí — no en CSV| AG5["Reutilizar GID de AD\npush pendiente"]
+            AG2 -->|No| AG6["Calcular GID\ncalculate_gid.yml\nValidar validate_gid.yml"]
+            AG3 & AG5 & AG6 --> AG7["GIDs asignados"]
+        end
+
+        AG7 --> FLUJO_EST
+
+        subgraph FLUJO_EST["funcional_estandar_control.yml"]
+            FE1["Crear grupo funcional y sudo\nSIEMPRE — idempotente"]
+            FE1 --> FE2["Verificar y crear grupo WIN\nSIEMPRE — idempotente"]
+            FE2 --> FE3{Usuario\nexiste?}
+            FE3 -->|No| FE4["Generar contraseña\nCrear usuario DESHABILITADO"]
+            FE3 -->|Sí UID ok| FE5
+            FE4 --> FE5["Añadir funcional al grupo funcional\nAñadir funcional al grupo WIN\nSIEMPRE — idempotente"]
+        end
+
+        FE5 --> PAM_CHECK{PAM ya existe\nUID correcto?}
+        PAM_CHECK -->|Sí| SKIP_PAM["Saltar creación PAM"]
+        PAM_CHECK -->|No| FLUJO_PAM
+
+        subgraph FLUJO_PAM["funcional_pam_control.yml"]
+            FP1["Crear usuario PAM\nCuenta HABILITADA\nContraseña desde vault"]
+            FP1 --> FP2["Añadir PAM al grupo sudo del funcional"]
+            FP2 --> FP3["Añadir PAM al grupo funcional del estándar"]
+        end
+
+        SKIP_PAM & FP3 --> UPDATE_CSV
+
+        subgraph UPDATE_CSV["gid_management/update_csv.yml"]
+            UC1{gid_already_reserved?}
+            UC1 -->|Sí| UC2["No tocar CSV"]
+            UC1 -->|No| UC3["Insertar grupos en CSV\ngit commit + push\ngit_push.yml\nEliminar repo clonado"]
+        end
+
+        UPDATE_CSV --> SUMMARY_C["summary_control.yml\nUsuarios · Grupos · Membresías\nNota: GDH se deduce por servidor"]
+        SUMMARY_C --> WRITE_TMP["Escribir fichero temporal /tmp\ncon variables para fase Linux"]
+    end
+
+    WRITE_TMP --> PLAY2
+
+    subgraph PLAY2["FASE LINUX — Ansible itera automáticamente por cada host de target_hosts"]
+
+        subgraph SERVER["Ejecución en inventory_hostname (lvmbsg01, lvmbsg02...)"]
+
+            S1["Cargar variables desde /tmp\nmain_linux.yml"] --> DETECT
+
+            subgraph DETECT["detect_network.yml — en nodo de control"]
+                D1["nslookup inventory_hostname"]
+                D1 --> D2{rc=0 y\nresponde?}
+                D2 -->|Sí + bdeexp01.bde.es| D3["server_network = interna"]
+                D2 -->|Sí + sin dominio interno| D4["server_network = externa"]
+                D2 -->|No resuelve rc!=0| D5["Fallback nomenclatura\nhostname → interna/externa"]
+            end
+
+            DETECT --> GDH_READ
+
+            subgraph GDH_READ["Leer GDH — ejecutado EN el servidor por SSH"]
+                G1["grep simple_allow_groups\n/etc/sssd/sssd.conf"]
+                G1 --> G2{Encontrado?}
+                G2 -->|Sí| G3["server_gdh_group = gdh0001"]
+                G2 -->|No| G4["AVISO: sin GDH\ncontinuar sin asignar"]
+            end
+
+            GDH_READ --> GDH_CHECK{server_gdh_group\ndefinido?}
+            GDH_CHECK -->|No| LOCAL
+            GDH_CHECK -->|Sí| ASSIGN_GDH
+
+            subgraph ASSIGN_GDH["assign_gdh_server.yml — delegado al servidor AD"]
+                AG_1["Verificar GDH en AD\nTest-ADGroupExists"]
+                AG_1 --> AG_2{Existe en AD?}
+                AG_2 -->|No| AG_3["AVISO en resumen\nno se asigna"]
+                AG_2 -->|Sí| AG_4["Añadir PAM al GDH en AD\nAdd-ADUserToGroups"]
+                AG_4 --> AG_5{server_network\n== externa?}
+                AG_5 -->|Sí| AG_6["Verificar GDH local\nsi existe → Añadir PAM\nappend=true"]
+                AG_5 -->|No| AG_7["Red interna\nSSSD gestiona acceso\nno se crea localmente"]
+            end
+
+            AG_3 & AG_6 & AG_7 --> LOCAL
+
+            subgraph LOCAL["Operaciones locales — ejecutadas EN el servidor por SSH\ncondicionadas por create_local=true"]
+                L0{user_type == funcional\nuser_subtype == estandar?}
+                L0 -->|Sí| L1["Crear grupos funcional y sudo\ncreate_group_local.yml\nSIEMPRE — idempotente"]
+                L0 -->|No| L_SKIP["Saltar creación local"]
+                L1 --> L2["Crear usuario funcional local\nsin contraseña\nsolo si no existe"]
+                L2 --> L3{server_network\n== externa?}
+                L3 -->|Sí| L4["Crear usuario PAM local\ncontraseña vault · chage -d 0\nAñadir PAM a grupo sudo local"]
+                L3 -->|No| L5["PAM no se crea localmente\nautenticación vía SSSD+AD"]
+            end
+
+            L_SKIP & L4 & L5 --> SUMMARY_SRV["summary_linux.yml\nResumen por servidor:\nUsuarios · Grupos · GDH · Red"]
+        end
+    end
+
+    PLAY2 --> PLAY3
+
+    subgraph PLAY3["RESUMEN FINAL — localhost"]
+        PR1["Leer fichero resumen de /tmp"]
+        PR1 --> PR2["Imprimir resumen completo\nControl + Linux por servidor"]
+        PR2 --> PR3["Copiar al servidor maestro\nignore_errors: true"]
+    end
+
+    PR3 --> END([Fin])
+
+    style VC2 fill:#ff6b6b,color:#fff
+    style AG4 fill:#ff6b6b,color:#fff
+    style AG_3 fill:#ffa500,color:#fff
+    style G4 fill:#ffa500,color:#fff
+    style D5 fill:#ffa500,color:#fff
+    style VA5 fill:#ffa500,color:#fff
+    style VB5 fill:#ffa500,color:#fff
+    style VA4 fill:#90EE90
+    style VB4 fill:#90EE90
+    style SKIP_PAM fill:#90EE90
+    style AG3 fill:#90EE90
+    style UC2 fill:#90EE90
+    style FE1 fill:#4a9eda,color:#fff
+    style FE2 fill:#4a9eda,color:#fff
+    style FE5 fill:#4a9eda,color:#fff
+    style L1 fill:#4a9eda,color:#fff
+    style L2 fill:#4a9eda,color:#fff

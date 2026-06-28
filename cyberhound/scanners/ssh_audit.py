@@ -12,9 +12,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Optional
+from dataclasses import dataclass
 
 try:
     import asyncssh
@@ -22,7 +20,6 @@ try:
 except ImportError:
     ASYNCSSH_AVAILABLE = False
 
-from cyberhound.core.executor import run_command
 from cyberhound.core.logging import get_logger
 from cyberhound.core.models import Finding, HostResult
 
@@ -42,12 +39,12 @@ class SSHCredentials:
     username:   str = "root"
     port:       int = 22
     # Autenticación por clave (recomendada)
-    key_path:   Optional[str] = None
-    passphrase: Optional[str] = None   # passphrase de la clave, NO la contraseña del sistema
+    key_path:   str | None = None
+    passphrase: str | None = None   # passphrase de la clave, NO la contraseña del sistema
     # Autenticación por contraseña (solo si no hay alternativa)
-    password:   Optional[str] = None   # Se maneja en memoria, nunca en disco ni logs
+    password:   str | None = None   # Se maneja en memoria, nunca en disco ni logs
     # Opciones de conexión
-    known_hosts: Optional[str] = None  # None = no verificar (aceptar al primero, TOFU)
+    known_hosts: str | None = None  # None = no verificar (aceptar al primero, TOFU)
     connect_timeout: int = 15
 
     def to_asyncssh_opts(self) -> dict:
@@ -72,7 +69,7 @@ class SSHCredentials:
 class RemoteAuditor:
     """
     Ejecuta el audit de CyberHound en hosts remotos via asyncssh.
-    
+
     Flujo:
     1. Conectar al host
     2. Verificar Python3

@@ -19,8 +19,6 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-from datetime import datetime, timezone
-from typing import Optional
 
 from cyberhound.core.executor import command_exists, run_command
 from cyberhound.core.logging import get_logger
@@ -258,7 +256,7 @@ class RuntimeScanner:
 
     @staticmethod
     async def full_scan(
-        containers: Optional[list[str]] = None,
+        containers: list[str] | None = None,
     ) -> list[Finding]:
         if not command_exists("docker"):
             return []
@@ -291,7 +289,7 @@ class RuntimeScanner:
                 return_exceptions=True,
             )
             cname = container["name"]
-            for check_fn, result in zip(checks, results):
+            for check_fn, result in zip(checks, results, strict=False):
                 if isinstance(result, list):
                     all_findings.extend(result)
                     if result:

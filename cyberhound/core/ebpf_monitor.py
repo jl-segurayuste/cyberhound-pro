@@ -17,9 +17,9 @@ from __future__ import annotations
 
 import asyncio
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from cyberhound.core.executor import command_exists, run_command
 from cyberhound.core.logging import get_logger
@@ -62,7 +62,7 @@ class EBPFMonitor:
     Usa eBPF si está disponible, auditd como fallback.
     """
 
-    def __init__(self, server: "CyberHoundServer") -> None:
+    def __init__(self, server: CyberHoundServer) -> None:
         self.server  = server
         self._running = False
         self._tasks: list[asyncio.Task] = []
@@ -124,7 +124,7 @@ tracepoint:syscalls:sys_enter_execve
                 if text.startswith("EXEC "):
                     cmd = text[5:]
                     await self._check_suspicious_command(cmd, source="ebpf")
-        except asyncio.TimeoutError:
+        except TimeoutError:
             pass
         except Exception as e:
             logger.error("bpftrace monitor error: %s", e)
@@ -155,7 +155,7 @@ tracepoint:syscalls:sys_enter_execve
                     break
                 text = line.decode(errors="ignore").strip()
                 await self._process_audit_line(text)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             pass
         except Exception as e:
             logger.error("auditd monitor error: %s", e)
@@ -231,7 +231,7 @@ tracepoint:syscalls:sys_enter_execve
                             "monitor/integrity", "high",
                             f"Fichero crítico modificado: {cf}",
                             f"Se detectó una modificación en {cf} a las "
-                            f"{datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}.",
+                            f"{datetime.now(UTC).strftime('%H:%M:%S UTC')}.",
                             f"Revisar cambios con: diff {cf} y ausearch -f {cf}",
                         )
                     import hashlib

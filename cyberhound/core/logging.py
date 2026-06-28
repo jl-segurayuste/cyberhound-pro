@@ -8,13 +8,9 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import sys
-import traceback
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
-
 
 LOG_DIR = Path("/var/log/cyberhound")
 STRUCTURED_FORMAT = "%(asctime)s %(levelname)s %(name)s %(message)s"
@@ -57,7 +53,7 @@ class ColorFormatter(logging.Formatter):
 
 def setup_logging(
     level: str = "INFO",
-    log_dir: Optional[Path] = None,
+    log_dir: Path | None = None,
     structured: bool = False,
 ) -> logging.Logger:
     """

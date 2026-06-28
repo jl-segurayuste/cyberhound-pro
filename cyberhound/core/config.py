@@ -9,7 +9,6 @@ import os
 import secrets
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
 
 import yaml
 
@@ -23,20 +22,20 @@ DEFAULT_DB_PATH     = Path.home() / ".cyberhound" / "cyberhound.db"
 
 @dataclass
 class APIKeys:
-    shodan:     Optional[str] = None
-    virustotal: Optional[str] = None
-    abuseipdb:  Optional[str] = None
-    greynoise:  Optional[str] = None
-    otx:        Optional[str] = None
-    hibp:       Optional[str] = None
+    shodan:     str | None = None
+    virustotal: str | None = None
+    abuseipdb:  str | None = None
+    greynoise:  str | None = None
+    otx:        str | None = None
+    hibp:       str | None = None
 
 
 @dataclass
 class AuthSettings:
     mode:            str  = "jwt"
     username:        str  = "admin"
-    password_hash:   Optional[str] = None
-    secret:          Optional[str] = None
+    password_hash:   str | None = None
+    secret:          str | None = None
     token_ttl_hours: int  = 8
     localhost_only:  bool = False
 
@@ -45,7 +44,7 @@ class AuthSettings:
 class ScanSettings:
     ssh_default_user: str  = "root"
     ssh_default_port: int  = 22
-    ssh_key_path:     Optional[str] = None
+    ssh_key_path:     str | None = None
     nmap_timeout:     int  = 120
     ssh_concurrency:  int  = 5
     max_ww_files:     int  = 200
@@ -56,8 +55,8 @@ class ScanSettings:
 class ServerSettings:
     host:     str  = "0.0.0.0"
     port:     int  = 8443
-    tls_cert: Optional[str] = None
-    tls_key:  Optional[str] = None
+    tls_cert: str | None = None
+    tls_key:  str | None = None
     log_dir:  str  = "/var/log/cyberhound"
 
 
@@ -138,7 +137,7 @@ class CyberHoundConfig:
     db_path:       str = field(default_factory=lambda: str(DEFAULT_DB_PATH))
 
     @classmethod
-    def load(cls, path: Path = DEFAULT_CONFIG_PATH) -> "CyberHoundConfig":
+    def load(cls, path: Path = DEFAULT_CONFIG_PATH) -> CyberHoundConfig:
         cfg = cls()
         raw: dict = {}
         if path.exists():
@@ -346,13 +345,13 @@ class CyberHoundConfig:
                 )
 
         # Scheduler
-        for field, val in [
+        for field_name, val in [
             ("audit_hour", self.scheduler.audit_hour),
             ("malware_hour", self.scheduler.malware_hour),
             ("network_hour", self.scheduler.network_hour),
         ]:
             if not 0 <= val <= 23:
-                errors.append(f"scheduler.{field} fuera de rango: {val} (0-23)")
+                errors.append(f"scheduler.{field_name} fuera de rango: {val} (0-23)")
         if not 0 <= self.scheduler.malware_day <= 6:
             errors.append(f"scheduler.malware_day fuera de rango: {self.scheduler.malware_day} (0-6)")
 
