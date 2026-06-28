@@ -293,6 +293,28 @@ function _appendAuditRow(f) {
   document.getElementById('audit-empty') && (document.getElementById('audit-empty').style.display = 'none');
 }
 
+// Renderiza una fila de hallazgo de malware en la tabla del panel (5 columnas:
+// Severidad · Tipo · Descripción · Fichero · Acción).
+function _appendMalwareRow(f) {
+  const tbody = document.getElementById('malware-tbody');
+  if (!tbody) return;
+  const tr = document.createElement('tr');
+  tr.dataset.sev = f.severity;
+  tr.onclick = () => openDrawer(f);
+  tr.innerHTML = `
+    <td>${_sevBadge(f.severity)}</td>
+    <td style="font-size:.78rem;color:var(--text2)">${esc(f.category||'')}</td>
+    <td><b>${esc(f.title)}</b></td>
+    <td style="font-family:monospace;font-size:.72rem">${esc(f.file_path||'')}</td>
+    <td>${f.auto_fix
+      ? `<button class="fix-btn" id="fix-${esc(f.id)}" onclick="event.stopPropagation();applyFix('${esc(f.id)}',this)">Corregir</button>`
+      : `<span style="font-size:.75rem;color:var(--text2)">Manual</span>`
+    }</td>`;
+  tbody.appendChild(tr);
+  document.getElementById('malware-results')?.style && (document.getElementById('malware-results').style.display = '');
+  document.getElementById('malware-empty') && (document.getElementById('malware-empty').style.display = 'none');
+}
+
 // ── Malware ───────────────────────────────────────────────────────────────
 function quickMalware() { showPanel('malware'); runMalware(); }
 
@@ -548,7 +570,7 @@ function closeHistoryDetail() {
 
 // ── Fix local / remoto ────────────────────────────────────────────────────
 async function applyFix(findingId, btnEl) {
-  if (btnEl) { btnEl.disabled = true; btnEl.textContent = ''; }
+  if (btnEl) { btnEl.disabled = true; btnEl.textContent = '…'; }
   try {
     const r = await fetch('/api/fix/local', {
       method: 'POST', headers: {'Content-Type':'application/json'},
@@ -581,7 +603,7 @@ async function fixAll(scope) {
 }
 
 async function applyFixRemote(findingId, host, btnEl) {
-  if (btnEl) { btnEl.disabled = true; btnEl.textContent = ''; }
+  if (btnEl) { btnEl.disabled = true; btnEl.textContent = '…'; }
   try {
     const r = await fetch('/api/fix/remote', {
       method: 'POST', headers: {'Content-Type':'application/json'},
@@ -719,7 +741,7 @@ async function toggleScheduler(name, enabled, btnEl) {
 }
 
 async function runSchedulerNow(name, btnEl) {
-  if (btnEl) { btnEl.disabled = true; btnEl.textContent = ''; }
+  if (btnEl) { btnEl.disabled = true; btnEl.textContent = '…'; }
   const r = await fetch(`/api/scheduler/${encodeURIComponent(name)}/run`, {method: 'POST'});
   const d = await r.json();
   if (d.ok) { toast('✓ Tarea ejecutada'); loadScheduler(); }
@@ -746,7 +768,7 @@ async function loadUsers() {
             <option value="operator" ${u.role==='operator'?'selected':''}>operator</option>
             <option value="viewer" ${u.role==='viewer'?'selected':''}>viewer</option>
           </select>
-          <button class="btn-secondary small" onclick="deleteUser('${esc(u.username)}')"></button>
+          <button class="btn-secondary small" onclick="deleteUser('${esc(u.username)}')">Borrar</button>
         </td>
       </tr>`).join('');
   } catch(e) { console.error('loadUsers:', e); }
@@ -1372,13 +1394,13 @@ function runAudit() {
   wsRunWithActivity('audit', {}, {
     onFinding(f) {
       S.findings.audit.push(f);
-      appendAuditRow(f);
+      _appendAuditRow(f);
     },
     onDone(msg) {
       btn('btn-audit', false, '▶ Iniciar análisis completo');
       document.getElementById('audit-results').style.display = '';
       document.getElementById('audit-empty').style.display = 'none';
-      renderSummary('audit-summary-bar', S.findings.audit);
+      _renderSummary('audit-summary-bar', S.findings.audit);
       const fixable = S.findings.audit.filter(f => f.auto_fix);
       if (fixable.length) {
         const el = document.getElementById('btn-fix-all');
@@ -1412,13 +1434,13 @@ function runMalware() {
   }, {
     onFinding(f) {
       S.findings.malware.push(f);
-      appendMalwareRow(f);
+      _appendMalwareRow(f);
     },
     onDone() {
       btn('btn-malware', false, '▶ Iniciar escaneo');
       document.getElementById('malware-results').style.display = '';
       document.getElementById('malware-empty').style.display = 'none';
-      renderSummary('malware-summary-bar', S.findings.malware);
+      _renderSummary('malware-summary-bar', S.findings.malware);
       loadDashboard();
     },
   }, 'Malware scan', '');
@@ -1466,7 +1488,7 @@ function runDocker() {
       if (S.findings.docker.length > 0) {
         results.style.display = '';
         empty.style.display = 'none';
-        renderSummary('docker-summary-bar', S.findings.docker);
+        _renderSummary('docker-summary-bar', S.findings.docker);
         renderDockerChips(S.findings.docker);
       } else {
         empty.style.display = '';
@@ -1540,7 +1562,7 @@ function runServicesAudit() {
       if (S.findings.services.length) {
         document.getElementById('services-results').style.display = '';
         document.getElementById('services-empty').style.display = 'none';
-        renderSummary('services-summary-bar', S.findings.services);
+        _renderSummary('services-summary-bar', S.findings.services);
       } else {
         const h3 = document.querySelector('#services-empty h3');
         const p  = document.querySelector('#services-empty p');
@@ -1582,7 +1604,7 @@ function runTLSScan() {
       if (S.findings.tls.length) {
         document.getElementById('tls-results').style.display = '';
         document.getElementById('tls-empty').style.display = 'none';
-        renderSummary('tls-summary-bar', S.findings.tls);
+        _renderSummary('tls-summary-bar', S.findings.tls);
       } else {
         const h3 = document.querySelector('#tls-empty h3');
         const p  = document.querySelector('#tls-empty p');
@@ -1624,7 +1646,7 @@ function runWebHeadersScan() {
       if (S.findings.webhdr.length) {
         document.getElementById('webhdr-results').style.display = '';
         document.getElementById('webhdr-empty').style.display = 'none';
-        renderSummary('webhdr-summary-bar', S.findings.webhdr);
+        _renderSummary('webhdr-summary-bar', S.findings.webhdr);
       } else {
         const h3 = document.querySelector('#webhdr-empty h3');
         const p  = document.querySelector('#webhdr-empty p');
@@ -1666,7 +1688,7 @@ function runWebExposureScan() {
       if (S.findings.webexp.length) {
         document.getElementById('webexp-results').style.display = '';
         document.getElementById('webexp-empty').style.display = 'none';
-        renderSummary('webexp-summary-bar', S.findings.webexp);
+        _renderSummary('webexp-summary-bar', S.findings.webexp);
       } else {
         const h3 = document.querySelector('#webexp-empty h3');
         const p  = document.querySelector('#webexp-empty p');
@@ -1708,7 +1730,7 @@ function runAPISecurityScan() {
       if (S.findings.apisec.length) {
         document.getElementById('apisec-results').style.display = '';
         document.getElementById('apisec-empty').style.display = 'none';
-        renderSummary('apisec-summary-bar', S.findings.apisec);
+        _renderSummary('apisec-summary-bar', S.findings.apisec);
       } else {
         const h3 = document.querySelector('#apisec-empty h3');
         const p  = document.querySelector('#apisec-empty p');
@@ -1750,7 +1772,7 @@ function runDNSScan() {
       if (S.findings.dnssec.length) {
         document.getElementById('dnssec-results').style.display = '';
         document.getElementById('dnssec-empty').style.display = 'none';
-        renderSummary('dnssec-summary-bar', S.findings.dnssec);
+        _renderSummary('dnssec-summary-bar', S.findings.dnssec);
       } else {
         const h3 = document.querySelector('#dnssec-empty h3');
         const p  = document.querySelector('#dnssec-empty p');
@@ -1792,7 +1814,7 @@ function runSubdomainScan() {
       if (S.findings.subenum.length) {
         document.getElementById('subenum-results').style.display = '';
         document.getElementById('subenum-empty').style.display = 'none';
-        renderSummary('subenum-summary-bar', S.findings.subenum);
+        _renderSummary('subenum-summary-bar', S.findings.subenum);
       } else {
         const h3 = document.querySelector('#subenum-empty h3');
         const p  = document.querySelector('#subenum-empty p');
@@ -1834,7 +1856,7 @@ function runNucleiScan() {
       if (S.findings.nuclei.length) {
         document.getElementById('nuclei-results').style.display = '';
         document.getElementById('nuclei-empty').style.display = 'none';
-        renderSummary('nuclei-summary-bar', S.findings.nuclei);
+        _renderSummary('nuclei-summary-bar', S.findings.nuclei);
       } else {
         const h3 = document.querySelector('#nuclei-empty h3');
         const p  = document.querySelector('#nuclei-empty p');
@@ -2232,7 +2254,7 @@ async function runLDAPScan() {
     } else {
       if (results) results.style.display = '';
       if (empty)   empty.style.display   = 'none';
-      renderSummary('ldap-summary-bar', d.findings);
+      _renderSummary('ldap-summary-bar', d.findings);
       tbody.innerHTML = d.findings.map(f => `
         <tr onclick="openDrawer(${JSON.stringify(f).replace(/"/g,'&quot;')})">
           <td>${sevBadge(f.severity)}</td>
@@ -2670,7 +2692,7 @@ async function runDockerImageScan() {
     }
 
     if (results) results.style.display = '';
-    renderSummary('img-scan-summary-bar', d.findings);
+    _renderSummary('img-scan-summary-bar', d.findings);
 
     if (tbody) {
       tbody.innerHTML = d.findings.map(f => `
@@ -2801,7 +2823,7 @@ async function runRuntimeScan() {
     }
 
     if (results) results.style.display = '';
-    renderSummary('rt-summary-bar', d.findings);
+    _renderSummary('rt-summary-bar', d.findings);
     if (tbody) {
       tbody.innerHTML = d.findings.map(f => `
         <tr onclick="openDrawer(${JSON.stringify(f).replace(/"/g,'&quot;')})">
