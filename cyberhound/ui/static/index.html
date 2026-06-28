@@ -226,14 +226,18 @@
 
   <!-- ═══ DOCKER ═══ -->
   <section class="panel" id="panel-docker">
-    <div class="page-header"><h1>🐳 Seguridad de contenedores Docker</h1>
-      <p>Analiza la configuración de seguridad de tus contenedores e imágenes.</p>
+    <div class="page-header"><h1>🐳 Seguridad de contenedores</h1>
+      <p>Analiza la configuración de seguridad de Docker y Kubernetes.</p>
     </div>
     <div class="config-bar">
       <div class="field">
-        <label class="checkbox-label"><input type="checkbox" id="docker-scan-cve" checked> Analizar CVEs en imágenes (requiere Trivy, más lento)</label>
+        <label>Módulos de análisis</label>
+        <div class="checkbox-row">
+          <label class="checkbox-label"><input type="checkbox" id="docker-scan-cve" checked> CVEs en imágenes (requiere Trivy)</label>
+          <label class="checkbox-label"><input type="checkbox" id="docker-scan-k8s" checked> Kubernetes (si está instalado)</label>
+        </div>
       </div>
-      <button class="btn-primary" id="btn-docker" onclick="runDocker()">▶ Analizar Docker</button>
+      <button class="btn-primary" id="btn-docker" onclick="runDocker()">▶ Analizar Docker / K8s</button>
     </div>
 
     <!-- Resumen visual -->
@@ -252,14 +256,14 @@
         <button class="btn-secondary small" onclick="exportJSON('docker')">⬇ JSON</button>
       </div>
       <table>
-        <thead><tr><th>Severidad</th><th>Tipo de problema</th><th>Descripción</th><th>Cómo solucionarlo</th></tr></thead>
+        <thead><tr><th>Severidad</th><th>Tipo</th><th>Descripción</th><th>Cómo solucionarlo</th></tr></thead>
         <tbody id="docker-tbody"></tbody>
       </table>
     </div>
     <div class="empty-panel" id="docker-empty">
       <div class="empty-icon">🐳</div>
-      <h3>Análisis Docker no ejecutado</h3>
-      <p>Comprueba si tienes Docker instalado y activo antes de ejecutar el análisis.</p>
+      <h3>Análisis no ejecutado</h3>
+      <p>Comprueba la seguridad de tus contenedores Docker y pods de Kubernetes.</p>
       <button class="btn-primary" onclick="runDocker()">▶ Analizar ahora</button>
     </div>
   </section>

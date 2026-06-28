@@ -413,6 +413,10 @@ class InputValidator:
             sanitized["ssh_audit"] = bool(msg.get("ssh_audit", True))
             sanitized["vuln_scan"] = bool(msg.get("vuln_scan", False))
 
+        if task == "docker":
+            sanitized["scan_images_cve"] = bool(msg.get("scan_images_cve", True))
+            sanitized["scan_k8s"]        = bool(msg.get("scan_k8s", True))
+
         elif task == "intel":
             sanitized["target"] = InputValidator.ip_or_hostname(
                 msg.get("target", ""), "target"

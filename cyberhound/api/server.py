@@ -363,9 +363,13 @@ class CyberHoundServer:
 
     async def _run_docker_scan(self, params, ws_id, send, log, scan_id):
         from cyberhound.scanners.docker_scan import DockerScanner
-        await log("section", "Iniciando análisis de contenedores Docker…")
+        await log("section", "Iniciando análisis de contenedores Docker + Kubernetes…")
         scan_images = params.get("scan_images_cve", True)
-        findings = await DockerScanner.full_scan(scan_images_cve=scan_images)
+        scan_k8s    = params.get("scan_k8s", True)
+        findings = await DockerScanner.full_scan(
+            scan_images_cve=scan_images,
+            scan_k8s=scan_k8s,
+        )
         await self._emit_findings(findings, ws_id, send, scan_id)
 
     async def _run_malware_scan(self, params, ws_id, send, log, scan_id):

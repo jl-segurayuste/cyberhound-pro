@@ -1028,40 +1028,63 @@ function runDocker() {
   document.getElementById('docker-tbody').innerHTML = '';
   document.getElementById('docker-summary').style.display = 'none';
   btn('btn-docker', true, '⏳ Analizando contenedores…');
-  appendLog('section', '═══ DOCKER SECURITY SCAN ═══');
+  appendLog('section', '═══ DOCKER / KUBERNETES SECURITY SCAN ═══');
 
   const scanCve = document.getElementById('docker-scan-cve')?.checked ?? true;
-  wsRun('docker', { scan_images_cve: scanCve }, {
+  const scanK8s = document.getElementById('docker-scan-k8s')?.checked ?? true;
+
+  wsRun('docker', { scan_images_cve: scanCve, scan_k8s: scanK8s }, {
     onFinding(f) {
-      S.findings.docker.push(f);
+      // El servidor envía el finding como dict — 'id' es el campo correcto
+      const finding = { ...f, id: f.id || f.finding_id };
+      S.findings.docker.push(finding);
       const tbody = document.getElementById('docker-tbody');
       const tr = document.createElement('tr');
-      tr.dataset.sev = f.severity;
-      tr.onclick = () => openDrawer(f);
-      const typeLabel = f.category.replace('docker/', '').replace('_', ' ');
+      tr.dataset.sev = finding.severity;
+      tr.onclick = () => openDrawer(finding);
+
+      // Icono y label por tipo
+      const catIcons = {
+        'docker/privilege': '🔐', 'docker/escape': '🚨', 'docker/secrets': '🔑',
+        'docker/mounts': '📁', 'docker/cve': '🐛', 'docker/updates': '🔄',
+        'kubernetes/rbac': '🔐', 'kubernetes/network': '🌐',
+        'kubernetes/pod_security': '🛡', 'kubernetes/secrets': '🔑',
+      };
+      const icon = catIcons[finding.category] || '🐳';
+      const label = (finding.category || '').replace(/^(docker|kubernetes)\//, '').replace(/_/g, ' ');
+
       tr.innerHTML = `
-        <td>${sevBadge(f.severity)}</td>
-        <td style="font-size:.8rem;color:var(--text2)">${esc(typeLabel)}</td>
-        <td>${esc(f.title)}</td>
-        <td style="font-size:.78rem;color:var(--text2)">${esc((f.remediation||'').substring(0,70))}</td>`;
+        <td>${sevBadge(finding.severity)}</td>
+        <td style="font-size:.8rem;color:var(--text2)">${icon} ${esc(label)}</td>
+        <td><b>${esc(finding.title)}</b></td>
+        <td style="font-size:.78rem;color:var(--text2)">${esc((finding.remediation||'').substring(0,70))}</td>`;
       tbody.appendChild(tr);
     },
-    onDone() {
-      btn('btn-docker', false, '▶ Analizar Docker');
+    onDone(msg) {
+      btn('btn-docker', false, '▶ Analizar Docker/K8s');
       const results = document.getElementById('docker-results');
       const empty   = document.getElementById('docker-empty');
+
       if (S.findings.docker.length > 0) {
         results.style.display = '';
-        empty.style.display = 'none';
+        empty.style.display   = 'none';
         renderSummary('docker-summary-bar', S.findings.docker);
-        // Chips por tipo de problema
         renderDockerChips(S.findings.docker);
+        appendLog('ok', `✓ Docker/K8s scan: ${S.findings.docker.length} hallazgos. Score: ${msg.score ?? '—'}/100`);
       } else {
         empty.style.display = '';
-        empty.querySelector('h3').textContent = '✅ Sin problemas detectados';
-        empty.querySelector('p').textContent  = 'Tus contenedores Docker tienen buena configuración de seguridad.';
+        const h3 = empty.querySelector('h3');
+        const p  = empty.querySelector('p');
+        if (h3) h3.textContent = '✅ Sin problemas de seguridad detectados';
+        if (p)  p.textContent  = 'Tus contenedores y pods tienen buena configuración.';
+        appendLog('ok', '✓ Docker/K8s scan completado: sin hallazgos');
       }
-      updateDashboard();
+      // Refrescar el dashboard con los nuevos datos
+      loadDashboard();
+    },
+    onError(e) {
+      btn('btn-docker', false, '▶ Analizar Docker/K8s');
+      appendLog('error', '✗ Error en Docker scan: ' + e.text);
     },
   });
 }
