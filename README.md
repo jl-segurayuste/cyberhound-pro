@@ -154,6 +154,7 @@ cyberhound/
 │   ├── code.py              # bandit + shellcheck + eslint
 │   ├── secrets.py           # gitleaks → trufflehog → semgrep → regex
 │   ├── intel.py             # Shodan, VT, AbuseIPDB, GreyNoise, OTX, HIBP
+│   ├── nuclei_scan.py       # motor Nuclei (ProjectDiscovery) → Finding normalizado
 │   └── reports.py           # HTML + Ansible playbook
 │
 ├── api/
