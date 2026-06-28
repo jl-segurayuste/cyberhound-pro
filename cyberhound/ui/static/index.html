@@ -37,6 +37,7 @@
     <button class="nav-tab" data-panel="docker"    onclick="showPanel('docker')">🐳 Docker</button>
     <button class="nav-tab" data-panel="code"      onclick="showPanel('code')">📝 Código</button>
     <button class="nav-tab" data-panel="services"  onclick="showPanel('services')">⚙️ Servicios</button>
+    <button class="nav-tab" data-panel="intel"    onclick="showPanel('intel')">🌐 Intel</button>
     <button class="nav-tab" data-panel="history"   onclick="showPanel('history')">📅 Historial</button>
     <button class="nav-tab" data-panel="monitor"   onclick="showPanel('monitor')">👁 Monitor</button>
     <button class="nav-tab" data-panel="reports"   onclick="showPanel('reports')">📊 Informes</button>
@@ -496,6 +497,77 @@
         </table>
       </div>
       <div id="rt-empty" style="color:var(--text2);font-size:.85rem;margin-top:8px"></div>
+    </div>
+  </section>
+
+
+  <!-- ═══ INTELIGENCIA DE AMENAZAS ═══ -->
+  <section class="panel" id="panel-intel">
+    <div class="page-header">
+      <h1>🌐 Inteligencia de amenazas</h1>
+      <p>Consulta IPs, dominios y hashes en fuentes externas: Shodan, VirusTotal, AbuseIPDB, GreyNoise.</p>
+    </div>
+
+    <!-- Estado de API keys -->
+    <div id="intel-api-status" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px"></div>
+
+    <!-- Búsqueda manual -->
+    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:16px;margin-bottom:16px">
+      <h3 style="font-size:.9rem;margin:0 0 12px">🔍 Búsqueda manual</h3>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+        <div class="field" style="flex:1;min-width:200px">
+          <label>IP o dominio</label>
+          <input type="text" id="intel-target" placeholder="8.8.8.8 o evil.com"
+            onkeydown="if(event.key==='Enter') runIntelLookup()">
+        </div>
+        <div class="field">
+          <label>Módulos</label>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;padding-top:4px">
+            <label class="checkbox-label" style="font-size:.8rem"><input type="checkbox" class="intel-mod" value="shodan" checked> Shodan</label>
+            <label class="checkbox-label" style="font-size:.8rem"><input type="checkbox" class="intel-mod" value="vt" checked> VirusTotal</label>
+            <label class="checkbox-label" style="font-size:.8rem"><input type="checkbox" class="intel-mod" value="abuseipdb" checked> AbuseIPDB</label>
+            <label class="checkbox-label" style="font-size:.8rem"><input type="checkbox" class="intel-mod" value="greynoise"> GreyNoise</label>
+          </div>
+        </div>
+        <button class="btn-primary" id="btn-intel-lookup" onclick="runIntelLookup()">🔍 Consultar</button>
+      </div>
+    </div>
+
+    <!-- Scan masivo desde último network scan -->
+    <div style="display:flex;gap:10px;margin-bottom:16px">
+      <button class="btn-secondary" id="btn-intel-scan" onclick="runIntelScan()">
+        🌐 Analizar IPs del último scan de red
+      </button>
+      <button class="btn-secondary small" onclick="loadIntelHistory()">📅 Ver historial</button>
+    </div>
+
+    <!-- Resultados -->
+    <div id="intel-results" style="display:none">
+      <!-- Resumen de riesgo -->
+      <div id="intel-risk-banner" style="padding:12px 16px;border-radius:8px;margin-bottom:12px;font-weight:600"></div>
+
+      <!-- Métricas -->
+      <div id="intel-summary-cards" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px"></div>
+
+      <!-- Tabla de hallazgos -->
+      <table>
+        <thead style="position:sticky;top:0;z-index:2;background:var(--bg2)">
+          <tr>
+            <th>Severidad</th><th>Módulo</th><th>Target</th>
+            <th>Hallazgo</th><th>Evidencia</th>
+          </tr>
+        </thead>
+        <tbody id="intel-tbody"></tbody>
+      </table>
+    </div>
+
+    <!-- Empty state -->
+    <div id="intel-empty" style="color:var(--text2);font-size:.85rem;margin-top:16px"></div>
+
+    <!-- Historial -->
+    <div id="intel-history" style="display:none;margin-top:20px">
+      <h3 style="font-size:.9rem;margin-bottom:10px">📅 Scans de intel recientes</h3>
+      <div id="intel-history-list"></div>
     </div>
   </section>
 
