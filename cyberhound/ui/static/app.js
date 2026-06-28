@@ -580,7 +580,18 @@ async function applyFix(findingId, btnEl) {
     if (d.ok) {
       appendLog('ok', `✓ Corregido: ${findingId}`);
       toast('✓ Corrección aplicada');
-      if (btnEl) { btnEl.textContent = '✓ Listo'; btnEl.style.background = 'var(--green)'; }
+      if (btnEl) {
+        if (d.reversible) {
+          // El fix se registró en el journal: ofrecer deshacer.
+          btnEl.disabled = false;
+          btnEl.textContent = '↶ Deshacer';
+          btnEl.style.background = 'var(--amber, #b45309)';
+          btnEl.onclick = (ev) => { ev.stopPropagation(); rollbackFix(findingId, btnEl); };
+        } else {
+          btnEl.textContent = '✓ Listo';
+          btnEl.style.background = 'var(--green)';
+        }
+      }
     } else {
       toast('Error: ' + d.error, 'error');
       if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'Corregir'; }
@@ -588,6 +599,34 @@ async function applyFix(findingId, btnEl) {
   } catch(e) {
     toast('Error: ' + e, 'error');
     if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'Corregir'; }
+  }
+}
+
+// Revierte el último fix aplicado a un finding (usa el journal de rollback).
+async function rollbackFix(findingId, btnEl) {
+  if (btnEl) { btnEl.disabled = true; btnEl.textContent = '…'; }
+  try {
+    const r = await fetch('/api/rollback/local', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({finding_id: findingId}),
+    });
+    const d = await r.json();
+    if (d.ok) {
+      appendLog('ok', `↶ Revertido: ${findingId}`);
+      toast('↶ Corrección revertida');
+      if (btnEl) {
+        btnEl.disabled = false;
+        btnEl.textContent = 'Corregir';
+        btnEl.style.background = '';
+        btnEl.onclick = (ev) => { ev.stopPropagation(); applyFix(findingId, btnEl); };
+      }
+    } else {
+      toast('Error al revertir: ' + (d.message || d.error || ''), 'error');
+      if (btnEl) { btnEl.disabled = false; btnEl.textContent = '↶ Deshacer'; }
+    }
+  } catch(e) {
+    toast('Error: ' + e, 'error');
+    if (btnEl) { btnEl.disabled = false; btnEl.textContent = '↶ Deshacer'; }
   }
 }
 

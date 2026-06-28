@@ -135,6 +135,12 @@ class SecurityAuditLogger:
             finding_id, user, host, dry_run,
         )
 
+    def fix_rolled_back(self, finding_id: str, user: str, host: str, ok: bool) -> None:
+        self._logger.warning(
+            "FIX_ROLLED_BACK finding=%s user=%s host=%s ok=%s",
+            finding_id, user, host, ok,
+        )
+
     def auth_failure(self, remote_addr: str, reason: str) -> None:
         self._logger.error("AUTH_FAILURE remote=%s reason=%s", remote_addr, reason)
 
