@@ -38,10 +38,12 @@
     <button class="nav-tab" data-panel="code"      onclick="showPanel('code')">📝 Código</button>
     <button class="nav-tab" data-panel="services"  onclick="showPanel('services')">⚙️ Servicios</button>
     <button class="nav-tab" data-panel="history"   onclick="showPanel('history')">📅 Historial</button>
+    <button class="nav-tab" data-panel="monitor"   onclick="showPanel('monitor')">👁 Monitor</button>
     <button class="nav-tab" data-panel="reports"   onclick="showPanel('reports')">📊 Informes</button>
     <button class="nav-tab" data-panel="settings"  onclick="showPanel('settings')">⚙️ Config</button>
   </nav>
   <button id="log-toggle" onclick="toggleLog()">📋 Log</button>
+  <a href="/api/docs" target="_blank" class="btn-secondary" style="font-size:.72rem;padding:4px 10px;text-decoration:none" title="Documentación API">📖 API</a>
   <a href="/logout" class="logout-btn">Salir</a>
 </header>
 
@@ -354,6 +356,111 @@
     </div>
   </section>
 
+
+  <!-- ═══ MONITOR EN TIEMPO REAL ═══ -->
+  <section class="panel" id="panel-monitor">
+    <div class="page-header">
+      <h1>👁 Monitor en tiempo real</h1>
+      <p>Detección de actividad maliciosa en tiempo real: comandos sospechosos, modificaciones de ficheros críticos.</p>
+    </div>
+
+    <!-- Estado del monitor -->
+    <div id="monitor-status-card" style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:16px;display:flex;gap:12px;align-items:center">
+      <div id="monitor-status-dot" style="width:12px;height:12px;border-radius:50%;background:var(--text2);flex-shrink:0"></div>
+      <div>
+        <div id="monitor-status-text" style="font-weight:600">Cargando estado del monitor…</div>
+        <div id="monitor-status-detail" style="font-size:.8rem;color:var(--text2)">eBPF (bpftrace) o auditd</div>
+      </div>
+      <button class="btn-secondary small" onclick="loadMonitorStatus()" style="margin-left:auto">↻ Actualizar</button>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      <!-- Feed de eventos en tiempo real -->
+      <div>
+        <div style="font-size:.85rem;font-weight:600;color:var(--text2);margin-bottom:10px">
+          📡 Eventos recientes (últimos 50 del historial)
+        </div>
+        <div id="monitor-events" style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;height:400px;overflow-y:auto;padding:8px;font-family:monospace;font-size:.75rem">
+          <div style="color:var(--text2);padding:8px">Sin eventos recientes. El monitor registra en tiempo real mientras está activo.</div>
+        </div>
+        <button class="btn-secondary small" style="margin-top:8px" onclick="loadMonitorHistory()">↻ Cargar últimos eventos</button>
+      </div>
+
+      <!-- Ficheros críticos monitoreados -->
+      <div>
+        <div style="font-size:.85rem;font-weight:600;color:var(--text2);margin-bottom:10px">
+          🛡 Ficheros críticos monitoreados
+        </div>
+        <div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:12px">
+          <div style="font-size:.78rem;color:var(--text2);margin-bottom:8px">Cualquier modificación genera una alerta inmediata:</div>
+          <div style="font-family:monospace;font-size:.78rem;line-height:2">
+            /etc/passwd · /etc/shadow · /etc/sudoers<br>
+            /etc/crontab · /etc/ssh/sshd_config<br>
+            /etc/hosts · /root/.ssh/authorized_keys<br>
+            /etc/ld.so.preload<br>
+          </div>
+        </div>
+        <div style="margin-top:12px;font-size:.85rem;font-weight:600;color:var(--text2);margin-bottom:10px">
+          ⚡ Patrones de comandos detectados
+        </div>
+        <div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:12px;font-size:.78rem;color:var(--text2);line-height:1.8">
+          Descarga + ejecución en pipe · Netcat listener<br>
+          Reverse shells (bash, python) · chmod SUID<br>
+          Desactivación de firewall · Cambio passwd root<br>
+          Base64 decode + exec · Kill de logs<br>
+        </div>
+      </div>
+    </div>
+
+    <!-- Docker image deep scan -->
+    <div style="margin-top:24px;border-top:1px solid var(--border);padding-top:16px">
+      <h3 style="font-size:.95rem;margin-bottom:8px">🔍 Análisis profundo de imágenes Docker</h3>
+      <p style="font-size:.82rem;color:var(--text2);margin-bottom:12px">
+        Escanea el filesystem de las capas de las imágenes Docker buscando secretos, claves privadas y malas prácticas.
+      </p>
+      <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px">
+        <div class="field">
+          <label>Imágenes (vacío = todas las locales, máx 5)</label>
+          <input type="text" id="img-scan-images" placeholder="nginx:latest,myapp:1.0" style="min-width:280px">
+        </div>
+        <div class="field">
+          <label class="checkbox-label"><input type="checkbox" id="img-scan-deep" checked> Análisis completo de ficheros</label>
+        </div>
+        <button class="btn-primary" id="btn-img-scan" onclick="runDockerImageScan()">🔍 Analizar imágenes</button>
+      </div>
+      <div id="img-scan-results" style="display:none">
+        <div id="img-scan-summary-bar"></div>
+        <table style="margin-top:10px">
+          <thead><tr><th>Severidad</th><th>Tipo</th><th>Hallazgo</th><th>Remediación</th></tr></thead>
+          <tbody id="img-scan-tbody"></tbody>
+        </table>
+      </div>
+      <div id="img-scan-empty" style="color:var(--text2);font-size:.85rem;margin-top:8px"></div>
+    </div>
+    <!-- Runtime scan integrado en Monitor -->
+    <div style="margin-top:24px;border-top:1px solid var(--border);padding-top:16px">
+      <h3 style="font-size:.95rem;margin-bottom:8px">🔄 Análisis de contenedores en runtime</h3>
+      <p style="font-size:.82rem;color:var(--text2);margin-bottom:12px">
+        Analiza el comportamiento actual de los contenedores en ejecución: procesos, conexiones, cambios en filesystem y uso de recursos.
+      </p>
+      <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px">
+        <div class="field">
+          <label>Contenedores (vacío = todos los activos)</label>
+          <input type="text" id="rt-containers" placeholder="myapp,nginx (nombres o IDs)" style="min-width:280px">
+        </div>
+        <button class="btn-primary" id="btn-rt-scan" onclick="runRuntimeScan()">🔄 Analizar runtime</button>
+      </div>
+      <div id="rt-results" style="display:none">
+        <div id="rt-summary-bar"></div>
+        <table style="margin-top:10px">
+          <thead><tr><th>Severidad</th><th>Tipo</th><th>Hallazgo</th><th>Evidencia</th></tr></thead>
+          <tbody id="rt-tbody"></tbody>
+        </table>
+      </div>
+      <div id="rt-empty" style="color:var(--text2);font-size:.85rem;margin-top:8px"></div>
+    </div>
+  </section>
+
   <!-- ═══ HISTORIAL ═══ -->
   <section class="panel" id="panel-history">
     <div class="page-header"><h1>📅 Historial de análisis</h1>
@@ -445,6 +552,15 @@
           <button class="btn-primary small" onclick="downloadReport('html','docker')">⬇ Docker</button>
         </div>
       </div>
+      <div class="report-card"><div class="report-icon">📑</div><h3>Informe PDF</h3>
+        <p>Informe profesional en PDF con portada, score, distribución y remediaciones.</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn-primary small" onclick="downloadPDF('audit')">⬇ PDF Seguridad</button>
+          <button class="btn-primary small" onclick="downloadPDF('malware')">⬇ PDF Malware</button>
+          <button class="btn-primary small" onclick="downloadReport('html','malware')">⬇ Malware</button>
+          <button class="btn-primary small" onclick="downloadReport('html','docker')">⬇ Docker</button>
+        </div>
+      </div>
       <div class="report-card"><div class="report-icon">🤖</div><h3>Playbook Ansible</h3>
         <p>Script automatizado para aplicar correcciones en múltiples equipos.</p>
         <button class="btn-primary small" onclick="downloadReport('ansible','audit')">⬇ Descargar</button>
@@ -456,6 +572,19 @@
           <button class="btn-secondary small" onclick="exportJSON('malware')">⬇ Malware</button>
           <button class="btn-secondary small" onclick="exportJSON('docker')">⬇ Docker</button>
           <button class="btn-secondary small" onclick="exportJSON('code')">⬇ Código</button>
+        </div>
+      </div>
+      <div class="report-card"><div class="report-icon">⚖️</div><h3>Informe de Compliance</h3>
+        <p>Análisis de cumplimiento normativo: ENS, ISO 27001, PCI-DSS, CIS Controls.</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+          <label class="checkbox-label" style="font-size:.8rem"><input type="checkbox" class="fw-check" value="ens" checked> ENS</label>
+          <label class="checkbox-label" style="font-size:.8rem"><input type="checkbox" class="fw-check" value="iso27001" checked> ISO 27001</label>
+          <label class="checkbox-label" style="font-size:.8rem"><input type="checkbox" class="fw-check" value="pci-dss"> PCI-DSS</label>
+          <label class="checkbox-label" style="font-size:.8rem"><input type="checkbox" class="fw-check" value="cis" checked> CIS</label>
+        </div>
+        <button class="btn-primary small" onclick="loadCompliance()">⚖️ Ver compliance</button>
+        <div id="compliance-result" style="margin-top:12px;display:none">
+          <div id="compliance-cards" style="display:flex;gap:10px;flex-wrap:wrap"></div>
         </div>
       </div>
       <div class="report-card"><div class="report-icon">📋</div><h3>Log de sesión</h3>
@@ -477,6 +606,11 @@
       <button class="cfg-tab"        data-cfg="2fa"           onclick="showCfgTab('2fa')">🔐 2FA</button>
       <button class="cfg-tab"        data-cfg="yara"          onclick="showCfgTab('yara')">🛡 YARA</button>
       <button class="cfg-tab"        data-cfg="agents"        onclick="showCfgTab('agents')">🖧 Agentes</button>
+      <button class="cfg-tab"        data-cfg="license"       onclick="showCfgTab('license')">🏆 Licencia</button>
+      <button class="cfg-tab"        data-cfg="ldap"          onclick="showCfgTab('ldap')">🗂 LDAP/AD</button>
+      <button class="cfg-tab"        data-cfg="quarantine"    onclick="showCfgTab('quarantine')">🔒 Cuarentena</button>
+      <button class="cfg-tab"        data-cfg="sbom"          onclick="showCfgTab('sbom')">📦 SBOM</button>
+      <button class="cfg-tab"        data-cfg="ansible"       onclick="showCfgTab('ansible')">⚙️ Ansible</button>
     </div>
 
     <!-- API Keys -->
@@ -730,6 +864,159 @@
         </div>
       </div>
     </div>
+    <!-- Cuarentena -->
+    <div class="cfg-panel" id="cfg-quarantine">
+      <div style="max-width:800px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <h3>🔒 Cuarentena de ficheros maliciosos</h3>
+          <div id="quarantine-stats" style="font-size:.82rem;color:var(--text2)"></div>
+        </div>
+        <p class="hint">Los ficheros en cuarentena están cifrados y no pueden ejecutarse. Puedes restaurarlos si son falsos positivos.</p>
+        <div id="quarantine-empty" style="padding:20px;text-align:center;color:var(--text2);font-size:.85rem">
+          Sin ficheros en cuarentena.
+        </div>
+        <table id="quarantine-table" style="display:none">
+          <thead><tr><th>Fichero</th><th>Finding</th><th>Fecha</th><th>Tamaño</th><th>Estado</th><th>Acciones</th></tr></thead>
+          <tbody id="quarantine-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- SBOM -->
+    <div class="cfg-panel" id="cfg-sbom">
+      <div style="max-width:700px">
+        <h3>📦 Software Bill of Materials (SBOM)</h3>
+        <p class="hint">Inventario completo del software instalado. Compatible con CycloneDX 1.4 y SPDX 2.3.</p>
+        <div class="field" style="margin-bottom:12px">
+          <label>Gestores de paquetes</label>
+          <div class="checkbox-row">
+            <label class="checkbox-label"><input type="checkbox" class="sbom-check" value="dpkg" checked> APT/DPKG</label>
+            <label class="checkbox-label"><input type="checkbox" class="sbom-check" value="rpm" checked> RPM/YUM</label>
+            <label class="checkbox-label"><input type="checkbox" class="sbom-check" value="pip" checked> Python/pip</label>
+            <label class="checkbox-label"><input type="checkbox" class="sbom-check" value="npm" checked> Node.js/npm</label>
+            <label class="checkbox-label"><input type="checkbox" class="sbom-check" value="docker" checked> Docker images</label>
+            <label class="checkbox-label"><input type="checkbox" class="sbom-check" value="kernel" checked> Kernel</label>
+          </div>
+        </div>
+        <div class="field" style="margin-bottom:12px">
+          <label>Formato de exportación</label>
+          <select id="sbom-format">
+            <option value="json">JSON (interno)</option>
+            <option value="cyclonedx">CycloneDX 1.4 (OWASP)</option>
+            <option value="spdx">SPDX 2.3 (texto)</option>
+          </select>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">
+          <button class="btn-primary" onclick="generateSBOM()">⚙️ Generar SBOM</button>
+          <button class="btn-secondary" onclick="downloadSBOM()">⬇ Descargar</button>
+          <button class="btn-secondary" onclick="loadSBOM()">↻ Cargar último</button>
+        </div>
+        <div id="sbom-result" style="display:none">
+          <div id="sbom-summary" style="padding:12px;background:var(--bg3);border-radius:8px;margin-bottom:12px;font-size:.85rem"></div>
+          <div id="sbom-table-area" style="max-height:400px;overflow-y:auto">
+            <table>
+              <thead><tr><th>Paquete</th><th>Versión</th><th>Tipo</th><th>Gestor</th></tr></thead>
+              <tbody id="sbom-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- Licencia -->
+    <div class="cfg-panel" id="cfg-license">
+      <div style="max-width:600px">
+        <h3>🏆 Licencia de CyberHound Pro</h3>
+        <div id="license-info" style="background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:16px;margin-bottom:16px">
+          <div style="font-size:.82rem;color:var(--text2)">Cargando información de licencia…</div>
+        </div>
+        <div class="settings-card">
+          <h4>Activar licencia</h4>
+          <div class="field"><label>Clave de licencia</label>
+            <textarea id="license-key" rows="4" placeholder="Pega aquí tu clave de licencia…"
+              style="font-family:monospace;font-size:.78rem;width:100%"></textarea></div>
+          <button class="btn-primary" onclick="activateLicense()">✓ Activar</button>
+          <div id="license-msg" style="margin-top:8px;font-size:.82rem"></div>
+        </div>
+        <div style="margin-top:16px;font-size:.82rem;color:var(--text2)">
+          <p>La versión Community incluye todas las funcionalidades de auditoría sin límites.</p>
+          <p>Licencias Starter, Professional y Enterprise añaden: notificaciones avanzadas, SIEM, modo agente y soporte prioritario.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- LDAP / AD -->
+    <div class="cfg-panel" id="cfg-ldap">
+      <div style="max-width:600px">
+        <h3>🗂 Análisis de Active Directory / LDAP</h3>
+        <p class="hint">Audita la seguridad de tu directorio. Se autodetecta desde sssd.conf si el sistema está integrado en AD.</p>
+        <div class="settings-grid">
+          <div class="field"><label>URI LDAP (vacío = autodetectar)</label>
+            <input type="text" id="ldap-uri" placeholder="ldap://dc.empresa.local"></div>
+          <div class="field"><label>Base DN</label>
+            <input type="text" id="ldap-base" placeholder="DC=empresa,DC=local"></div>
+          <div class="field"><label>Bind DN (usuario de solo lectura)</label>
+            <input type="text" id="ldap-binddn" placeholder="CN=readonly,CN=Users,DC=empresa,DC=local"></div>
+          <div class="field"><label>Contraseña</label>
+            <input type="password" id="ldap-bindpw" placeholder=""></div>
+        </div>
+        <button class="btn-primary" id="btn-ldap" onclick="runLDAPScan()">▶ Auditar AD/LDAP</button>
+        <div id="ldap-results" style="margin-top:16px;display:none">
+          <div id="ldap-summary-bar"></div>
+          <table style="margin-top:12px"><thead><tr><th>Severidad</th><th>Check</th><th>Hallazgo</th><th>Solución</th></tr></thead>
+            <tbody id="ldap-tbody"></tbody></table>
+        </div>
+        <div id="ldap-empty" style="display:none">
+          <p style="color:var(--text2);font-size:.85rem">No se detectaron problemas en el directorio.</p>
+        </div>
+      </div>
+    </div>
+    <!-- Ansible AWX/Tower en cfg-panel -->
+    <div class="cfg-panel" id="cfg-ansible">
+      <div style="max-width:700px">
+        <h3>⚙️ Integración Ansible AWX / Tower</h3>
+        <p class="hint">Lanza playbooks de remediación automáticamente cuando CyberHound detecta hallazgos corregibles.</p>
+        <div style="background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:16px">
+          <div style="font-size:.82rem;font-weight:600;margin-bottom:8px">Modo de ejecución</div>
+          <div class="checkbox-row">
+            <label class="checkbox-label"><input type="radio" name="ansible-mode" value="local" checked> Local (ansible-playbook en este servidor)</label>
+            <label class="checkbox-label"><input type="radio" name="ansible-mode" value="awx"> AWX / Ansible Tower (API remota)</label>
+          </div>
+          <div id="awx-fields" style="display:none;margin-top:12px">
+            <div class="settings-grid">
+              <div class="field"><label>URL de AWX</label><input type="text" id="awx-url" placeholder="https://awx.empresa.com"></div>
+              <div class="field"><label>Token de acceso</label><input type="password" id="awx-token" placeholder="Personal Access Token"></div>
+              <div class="field"><label>ID de template</label><input type="number" id="awx-template-id" value="1" min="1"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="field" style="margin-bottom:12px">
+          <label>Scan a remediar (scan_id, vacío = último audit)</label>
+          <input type="number" id="ansible-scan-id" placeholder="ID del scan">
+        </div>
+        <div class="field" style="margin-bottom:12px">
+          <label>Objetivo (host/IP)</label>
+          <input type="text" id="ansible-target" value="localhost">
+        </div>
+        <button class="btn-primary" onclick="runAnsiblePlaybook()">▶ Lanzar playbook de remediación</button>
+
+        <div id="ansible-result" style="display:none;margin-top:16px">
+          <div style="font-size:.85rem;font-weight:600;margin-bottom:8px">Resultado del job:</div>
+          <div id="ansible-status" style="margin-bottom:8px;font-size:.82rem"></div>
+          <pre id="ansible-output" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:12px;font-size:.72rem;overflow-x:auto;max-height:300px;white-space:pre-wrap"></pre>
+          <details style="margin-top:8px"><summary style="cursor:pointer;font-size:.82rem;color:var(--text2)">Ver playbook generado</summary>
+            <pre id="ansible-playbook" style="background:var(--bg3);padding:10px;font-size:.7rem;overflow-x:auto;max-height:250px;white-space:pre-wrap;margin-top:6px"></pre>
+          </details>
+        </div>
+
+        <div style="margin-top:20px">
+          <div style="font-size:.85rem;font-weight:600;margin-bottom:8px">Jobs recientes</div>
+          <div id="ansible-jobs-list" style="font-size:.8rem;color:var(--text2)">Sin jobs ejecutados.</div>
+        </div>
+      </div>
+    </div>
+
+
     <!-- YARA -->
     <div class="cfg-panel" id="cfg-yara">
       <div style="max-width:600px">

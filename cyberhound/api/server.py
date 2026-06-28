@@ -28,6 +28,8 @@ from cyberhound.core.logging import audit_log, get_logger
 from cyberhound.core.models import Finding, ScanReport
 from cyberhound.core.notifications import NotificationConfig, NotificationManager
 from cyberhound.core.scheduler import Scheduler, build_scheduler
+from cyberhound.core.licensing import license_manager
+from cyberhound.core.licensing import license_manager
 from cyberhound.core.security import (
     CsrfProtection, InputValidator, TLSManager, ValidationError, _get_real_ip,
 )
@@ -158,10 +160,13 @@ class CyberHoundServer:
         self.cfg = cfg
         self._app: Optional[web.Application] = None
         self._findings_cache: dict[str, list[Finding]] = {}
-        self._scan_id_cache:  dict[str, int] = {}   # ws_id → scan_id en BD
+        self._scan_id_cache:  dict[str, int] = {}
+        self._push_clients:   set = set()  # WebSocket push connections   # ws_id → scan_id en BD
 
         # Inicializar DB, notificaciones y scheduler
-        self.db = Database(Path(cfg.db_path))
+        from cyberhound.core.database_pg import create_database
+        db_url = getattr(cfg, "db_url", "") or ""
+        self.db = create_database(db_url=db_url, db_path=cfg.db_path)
         self.notification_manager = NotificationManager(
             NotificationConfig(
                 email_enabled=cfg.notifications.email_enabled,
@@ -194,6 +199,11 @@ class CyberHoundServer:
             min_severity=cfg.siem.min_severity,
         ))
         self.scheduler: Optional[Scheduler] = None
+        self._sbom_cache: Optional[dict] = None
+        self._ansible_jobs: list = []
+        self._tenant_store = None
+        self._ebpf_monitor = None
+
         # Modo agente
         from cyberhound.core.agent import AgentConfig, AgentManager, AgentReporter
         agent_cfg = AgentConfig(
@@ -229,7 +239,8 @@ class CyberHoundServer:
             app.router.add_static("/static", static_dir)
 
         app.router.add_get("/", self.serve_spa)
-        app.router.add_get("/ws", self.websocket_handler)
+        app.router.add_get("/ws",     self.websocket_handler)
+        app.router.add_get("/ws/push", self.push_websocket_handler)
 
         # ── Escaneos ──────────────────────────────────────────────────────────
         app.router.add_post("/api/fix/local",    self.api_fix_local)
@@ -279,6 +290,57 @@ class CyberHoundServer:
         app.router.add_post("/api/agent/report",     self.api_agent_report)
         app.router.add_post("/api/agent/heartbeat",  self.api_agent_heartbeat)
         app.router.add_get ("/api/agent/list",       self.api_agent_list)
+
+        # ── PDF + Compliance ─────────────────────────────────────────────────────
+        app.router.add_post("/api/report/pdf",           self.api_report_pdf)
+        app.router.add_post("/api/compliance",           self.api_compliance)
+        app.router.add_get ("/api/compliance",           self.api_compliance_get)
+
+        # ── Cuarentena ───────────────────────────────────────────────────────────
+        app.router.add_get ("/api/quarantine",              self.api_quarantine_list)
+        app.router.add_post("/api/quarantine",              self.api_quarantine_add)
+        app.router.add_post("/api/quarantine/{name}/restore", self.api_quarantine_restore)
+        app.router.add_delete("/api/quarantine/{name}",    self.api_quarantine_delete)
+        app.router.add_get ("/api/quarantine/stats",       self.api_quarantine_stats)
+
+        # ── OpenAPI / Swagger ─────────────────────────────────────────────────────
+        app.router.add_get ("/api/openapi.json",       self.api_openapi_spec)
+        app.router.add_get ("/api/docs",               self.api_swagger_ui)
+
+        # ── Ansible AWX/Tower ────────────────────────────────────────────────────
+        app.router.add_post("/api/ansible/run",        self.api_ansible_run)
+        app.router.add_get ("/api/ansible/jobs",       self.api_ansible_jobs)
+        app.router.add_get ("/api/ansible/templates",  self.api_ansible_templates)
+
+        # ── Multi-tenant ──────────────────────────────────────────────────────────
+        app.router.add_get ("/api/tenants",            self.api_tenants_list)
+        app.router.add_post("/api/tenants",            self.api_tenants_create)
+        app.router.add_get ("/api/tenants/{slug}",     self.api_tenant_get)
+        app.router.add_patch("/api/tenants/{slug}",    self.api_tenant_update)
+        app.router.add_delete("/api/tenants/{slug}",   self.api_tenant_delete)
+
+        # ── Runtime container scan ────────────────────────────────────────────────
+        app.router.add_post("/api/scan/runtime",       self.api_runtime_scan)
+
+        # ── Docker image deep scan ───────────────────────────────────────────────
+        app.router.add_post("/api/scan/docker-image",   self.api_docker_image_scan)
+
+        # ── Monitor status ───────────────────────────────────────────────────────
+        app.router.add_get("/api/monitor/status",       self.api_monitor_status)
+
+        # ── SBOM ─────────────────────────────────────────────────────────────────
+        app.router.add_post("/api/sbom/generate",           self.api_sbom_generate)
+        app.router.add_get ("/api/sbom/latest",             self.api_sbom_latest)
+
+        # ── Licencias ─────────────────────────────────────────────────────────
+        app.router.add_get ("/api/license",            self.api_license_info)
+        app.router.add_post("/api/license/activate",   self.api_license_activate)
+
+        # ── LDAP / AD ─────────────────────────────────────────────────────────
+        app.router.add_post("/api/scan/ldap",          self.api_ldap_scan)
+
+        # ── WebSocket push (notificaciones sin polling) ───────────────────────
+        app.router.add_get("/ws/push",  self.push_websocket_handler)
 
         # ── 2FA / TOTP ────────────────────────────────────────────────────────
         app.router.add_post("/api/auth/2fa/setup",    self.api_2fa_setup)
@@ -401,6 +463,17 @@ class CyberHoundServer:
         history = await self.db.get_scan_history(limit=1)
         score = history[0]["score"] if history else None
         await send({"type": "done", "count": len(findings), "scan_id": scan_id, "score": score})
+
+        # Notificar a clientes push si hay críticos
+        critical = [f for f in findings if f.severity == "critical"]
+        if critical:
+            asyncio.ensure_future(self._broadcast_push("new_findings", {
+                "scan_id": scan_id,
+                "score":   score,
+                "critical": len(critical),
+                "total":   len(findings),
+                "titles":  [f.title for f in critical[:3]],
+            }))
 
         # En modo agente: enviar al manager en background
         if self.agent_reporter:
@@ -960,6 +1033,455 @@ class CyberHoundServer:
         results = await self.siem.test()
         return web.json_response(results)
 
+    # ── WebSocket push — notificaciones sin polling ───────────────────────────
+
+    async def push_websocket_handler(self, request: web.Request) -> web.WebSocketResponse:
+        """
+        WebSocket de solo lectura para recibir notificaciones en tiempo real.
+        El cliente se conecta una vez y recibe eventos conforme ocurren,
+        sin necesidad de polling periódico.
+        """
+        ws = web.WebSocketResponse(heartbeat=30)
+        await ws.prepare(request)
+        self._push_clients.add(ws)
+        logger.info("Push WS conectado: %d clientes activos", len(self._push_clients))
+        try:
+            # Enviar estado inicial al conectar
+            stats = await self.db.get_dashboard_stats()
+            await ws.send_json({"type": "initial", "data": stats})
+            # Mantener conexión abierta esperando mensajes del cliente (ping/pong)
+            async for msg in ws:
+                if msg.type in (web.WSMsgType.CLOSE, web.WSMsgType.ERROR):
+                    break
+        except Exception:
+            pass
+        finally:
+            self._push_clients.discard(ws)
+        return ws
+
+    async def _broadcast_push(self, event_type: str, data: dict) -> None:
+        """Envía un evento a todos los clientes push conectados."""
+        if not self._push_clients:
+            return
+        message = {"type": event_type, "data": data, "ts": asyncio.get_event_loop().time()}
+        dead = set()
+        for ws in self._push_clients:
+            try:
+                await ws.send_json(message)
+            except Exception:
+                dead.add(ws)
+        self._push_clients -= dead
+
+    # ── OpenAPI / Swagger ─────────────────────────────────────────────────────
+
+    async def api_openapi_spec(self, request: web.Request) -> web.Response:
+        from cyberhound.core.openapi import build_openapi_spec
+        scheme = "https" if request.secure else "http"
+        server_url = f"{scheme}://{request.host}"
+        return web.json_response(build_openapi_spec(server_url))
+
+    async def api_swagger_ui(self, request: web.Request) -> web.Response:
+        from cyberhound.core.openapi import SWAGGER_UI_HTML
+        return web.Response(text=SWAGGER_UI_HTML, content_type="text/html")
+
+    # ── Ansible AWX/Tower ─────────────────────────────────────────────────────
+
+    async def api_ansible_run(self, request: web.Request) -> web.Response:
+        try:
+            body     = await request.json()
+            scan_id  = body.get("scan_id")
+            target   = body.get("target", "localhost")
+            mode     = body.get("mode", "local")  # local | awx
+
+            # Cargar findings del scan
+            if scan_id:
+                findings_raw = await self.db.get_scan_findings(int(scan_id))
+                from cyberhound.core.models import Finding as F
+                findings = [F(
+                    id=f["finding_id"], category=f["category"],
+                    severity=f["severity"], title=f["title"],
+                    description=f.get("description",""), remediation=f.get("remediation",""),
+                    auto_fix=bool(f.get("auto_fix")),
+                ) for f in findings_raw]
+            else:
+                findings = []
+
+            from cyberhound.core.ansible_integration import generate_playbook, run_playbook_local
+            playbook = generate_playbook(findings, target)
+            if not playbook:
+                return web.json_response({"error": "Sin hallazgos con corrección automática"}, status=400)
+
+            if mode == "local":
+                job = await run_playbook_local(playbook, target)
+            else:
+                # AWX mode
+                awx_cfg = getattr(self.cfg, 'awx', None)
+                if not awx_cfg or not getattr(awx_cfg, 'enabled', False):
+                    return web.json_response({"error": "AWX no configurado"}, status=400)
+                from cyberhound.core.ansible_integration import AWXClient, AWXConfig
+                client = AWXClient(AWXConfig(
+                    url=awx_cfg.url, token=awx_cfg.token,
+                    org_id=getattr(awx_cfg,'org_id',1),
+                ))
+                template_id = body.get("template_id", 1)
+                job = await client.launch_job_template(int(template_id))
+
+            self._ansible_jobs.insert(0, {
+                "job_id": job.job_id, "status": job.status,
+                "target": target, "mode": mode,
+                "started_at": job.started_at,
+                "output_preview": job.output[:500] if job.output else "",
+            })
+            return web.json_response({
+                "job_id":  job.job_id,
+                "status":  job.status,
+                "output":  job.output[-3000:] if job.output else "",
+                "playbook": playbook[:2000],
+            })
+        except Exception as e:
+            logger.error("api_ansible_run: %s", e, exc_info=True)
+            return web.json_response({"error": str(e)}, status=500)
+
+    async def api_ansible_jobs(self, request: web.Request) -> web.Response:
+        return web.json_response(self._ansible_jobs[:20])
+
+    async def api_ansible_templates(self, request: web.Request) -> web.Response:
+        awx_cfg = getattr(self.cfg, 'awx', None)
+        if not awx_cfg or not getattr(awx_cfg, 'enabled', False):
+            return web.json_response({"error": "AWX no configurado"}, status=400)
+        from cyberhound.core.ansible_integration import AWXClient, AWXConfig
+        client = AWXClient(AWXConfig(url=awx_cfg.url, token=awx_cfg.token))
+        templates = await client.list_job_templates()
+        return web.json_response(templates)
+
+    # ── Multi-tenant ──────────────────────────────────────────────────────────
+
+    def _get_tenant_store(self):
+        if not self._tenant_store:
+            from cyberhound.core.multitenancy import TenantStore
+            self._tenant_store = TenantStore()
+        return self._tenant_store
+
+    async def api_tenants_list(self, request: web.Request) -> web.Response:
+        store = self._get_tenant_store()
+        return web.json_response([t.to_dict() for t in store.list()])
+
+    async def api_tenants_create(self, request: web.Request) -> web.Response:
+        try:
+            body   = await request.json()
+            store  = self._get_tenant_store()
+            tenant = store.create(
+                slug=body.get("slug",""),
+                name=body.get("name",""),
+                admin_email=body.get("admin_email",""),
+                plan=body.get("plan","starter"),
+            )
+            logger.info("Tenant creado por %s: %s", request.get("auth_user"), tenant.slug)
+            return web.json_response(tenant.to_dict(include_key=True), status=201)
+        except ValueError as e:
+            return web.json_response({"error": str(e)}, status=400)
+        except Exception as e:
+            return web.json_response({"error": str(e)}, status=500)
+
+    async def api_tenant_get(self, request: web.Request) -> web.Response:
+        slug   = request.match_info["slug"]
+        store  = self._get_tenant_store()
+        tenant = store.get(slug)
+        if not tenant:
+            return web.json_response({"error": f"Tenant '{slug}' no encontrado"}, status=404)
+        return web.json_response(tenant.to_dict())
+
+    async def api_tenant_update(self, request: web.Request) -> web.Response:
+        slug  = request.match_info["slug"]
+        store = self._get_tenant_store()
+        body  = await request.json()
+        t     = store.update(slug, **body)
+        if not t:
+            return web.json_response({"error": "No encontrado"}, status=404)
+        return web.json_response(t.to_dict())
+
+    async def api_tenant_delete(self, request: web.Request) -> web.Response:
+        slug  = request.match_info["slug"]
+        store = self._get_tenant_store()
+        ok    = store.delete(slug)
+        return web.json_response({"ok": ok})
+
+    # ── Runtime container scan ────────────────────────────────────────────────
+
+    async def api_runtime_scan(self, request: web.Request) -> web.Response:
+        try:
+            body       = await request.json()
+            containers = body.get("containers") or None
+            from cyberhound.scanners.runtime_scan import RuntimeScanner
+            scan_id  = await self.db.create_scan("runtime", triggered_by="manual")
+            findings = await RuntimeScanner.full_scan(containers=containers)
+            findings = await self.db.filter_suppressed(findings)
+            await self.db.complete_scan(scan_id, findings)
+            return web.json_response({
+                "scan_id":  scan_id,
+                "count":    len(findings),
+                "findings": [f.to_dict() for f in findings],
+            })
+        except Exception as e:
+            logger.error("api_runtime_scan: %s", e, exc_info=True)
+            return web.json_response({"error": str(e)}, status=500)
+
+    # ── Docker image deep scan ────────────────────────────────────────────────
+
+    async def api_docker_image_scan(self, request: web.Request) -> web.Response:
+        """Análisis profundo del filesystem de imágenes Docker."""
+        try:
+            body      = await request.json()
+            images    = body.get("images") or None
+            deep      = body.get("deep", True)
+            max_imgs  = min(int(body.get("max_images", 5)), 10)
+            max_mb    = int(body.get("max_size_mb", 200))
+            user      = request.get("auth_user", "unknown")
+
+            from cyberhound.scanners.docker_image_scan import DockerImageScanner
+            scan_id  = await self.db.create_scan("docker_image", triggered_by="manual")
+            findings = await DockerImageScanner.scan_images(
+                images=images, max_images=max_imgs,
+                deep_scan=deep, max_size_mb=max_mb,
+            )
+            findings = await self.db.filter_suppressed(findings)
+            await self.db.complete_scan(scan_id, findings)
+            return web.json_response({
+                "scan_id":  scan_id,
+                "count":    len(findings),
+                "findings": [f.to_dict() for f in findings],
+            })
+        except Exception as e:
+            logger.error("api_docker_image_scan: %s", e, exc_info=True)
+            return web.json_response({"error": str(e)}, status=500)
+
+    # ── Monitor status ────────────────────────────────────────────────────────
+
+    async def api_monitor_status(self, request: web.Request) -> web.Response:
+        """Estado del monitor eBPF/auditd en tiempo real."""
+        monitor = self._ebpf_monitor
+        if not monitor:
+            return web.json_response({
+                "active": False, "mode": "none",
+                "message": "Monitor no iniciado",
+            })
+        return web.json_response({
+            "active":  self._ebpf_monitor.mode != "none",
+            "mode":    self._ebpf_monitor.mode,
+            "message": f"Monitor activo en modo {self._ebpf_monitor.mode}",
+        })
+
+    # ── PDF Report ────────────────────────────────────────────────────────────
+
+    async def api_report_pdf(self, request: web.Request) -> web.Response:
+        """Genera un informe PDF del último scan o de los findings proporcionados."""
+        try:
+            body       = await request.json()
+            scan_id    = body.get("scan_id")
+            scan_type  = body.get("scan_type", "audit")
+            target     = body.get("target", "localhost")
+
+            # Cargar findings
+            if scan_id:
+                findings_raw = await self.db.get_scan_findings(int(scan_id))
+                findings = [Finding(
+                    id=f["finding_id"], category=f["category"],
+                    severity=f["severity"], title=f["title"],
+                    description=f.get("description",""), remediation=f.get("remediation",""),
+                    auto_fix=bool(f.get("auto_fix")),
+                ) for f in findings_raw]
+                # Obtener score del scan
+                history = await self.db.get_scan_history(limit=1)
+                score = next((h["score"] for h in history if h["id"] == int(scan_id)), None)
+            else:
+                findings_raw = body.get("findings", [])
+                findings = [Finding.from_dict(f) for f in findings_raw]
+                score = body.get("score")
+
+            from cyberhound.scanners.pdf_report import generate_pdf
+            from cyberhound.core.licensing import license_manager
+            lic = license_manager.get()
+
+            pdf_bytes = generate_pdf(
+                findings, target=target, scan_type=scan_type,
+                score=score, licensee=lic.licensee,
+            )
+
+            # Determinar tipo de contenido
+            content_type = "application/pdf" if pdf_bytes[:4] == b"%PDF" else "text/html"
+            ext = "pdf" if content_type == "application/pdf" else "html"
+            filename = f"cyberhound-report-{scan_type}-{datetime.now().strftime('%Y%m%d')}.{ext}"
+
+            return web.Response(
+                body=pdf_bytes,
+                content_type=content_type,
+                headers={"Content-Disposition": f"attachment; filename={filename}"},
+            )
+        except Exception as e:
+            logger.error("api_report_pdf: %s", e, exc_info=True)
+            return web.json_response({"error": str(e)}, status=500)
+
+    # ── Compliance ────────────────────────────────────────────────────────────
+
+    async def api_compliance(self, request: web.Request) -> web.Response:
+        """Analiza compliance a partir de los findings del último scan o scan_id."""
+        try:
+            body       = await request.json()
+            scan_id    = body.get("scan_id")
+            frameworks = body.get("frameworks") or None
+
+            if scan_id:
+                findings_raw = await self.db.get_scan_findings(int(scan_id))
+            else:
+                history = await self.db.get_scan_history("audit", limit=1)
+                if not history:
+                    return web.json_response({"error": "Sin scans disponibles"}, status=404)
+                findings_raw = await self.db.get_scan_findings(history[0]["id"])
+
+            findings = [Finding(
+                id=f["finding_id"], category=f["category"],
+                severity=f["severity"], title=f["title"],
+                description=f.get("description",""), remediation=f.get("remediation",""),
+            ) for f in findings_raw]
+
+            from cyberhound.scanners.compliance import analyze_compliance, compliance_to_dict
+            results = analyze_compliance(findings, frameworks=frameworks)
+            return web.json_response(compliance_to_dict(results))
+        except Exception as e:
+            logger.error("api_compliance: %s", e, exc_info=True)
+            return web.json_response({"error": str(e)}, status=500)
+
+    async def api_compliance_get(self, request: web.Request) -> web.Response:
+        """GET /api/compliance — compliance del último audit automáticamente."""
+        frameworks_param = request.rel_url.query.get("frameworks", "")
+        frameworks = frameworks_param.split(",") if frameworks_param else None
+        history = await self.db.get_scan_history("audit", limit=1)
+        if not history:
+            return web.json_response({})
+        findings_raw = await self.db.get_scan_findings(history[0]["id"])
+        findings = [Finding(
+            id=f["finding_id"], category=f["category"],
+            severity=f["severity"], title=f["title"],
+            description=f.get("description",""), remediation=f.get("remediation",""),
+        ) for f in findings_raw]
+        from cyberhound.scanners.compliance import analyze_compliance, compliance_to_dict
+        results = analyze_compliance(findings, frameworks=frameworks)
+        return web.json_response(compliance_to_dict(results))
+
+    # ── Cuarentena ────────────────────────────────────────────────────────────
+
+    async def api_quarantine_list(self, request: web.Request) -> web.Response:
+        from cyberhound.core.quarantine import list_quarantine
+        return web.json_response(list_quarantine())
+
+    async def api_quarantine_stats(self, request: web.Request) -> web.Response:
+        from cyberhound.core.quarantine import quarantine_stats
+        return web.json_response(quarantine_stats())
+
+    async def api_quarantine_add(self, request: web.Request) -> web.Response:
+        try:
+            body       = await request.json()
+            filepath   = str(body.get("filepath", "")).strip()
+            finding_id = str(body.get("finding_id", ""))
+            title      = str(body.get("title", ""))
+            user       = request.get("auth_user", "unknown")
+            if not filepath:
+                return web.json_response({"ok": False, "error": "filepath requerido"}, status=400)
+            from cyberhound.core.quarantine import quarantine_file
+            ok, msg = quarantine_file(filepath, finding_id, title, quarantined_by=user)
+            logger.info("Cuarentena [%s]: %s → %s", user, filepath, "OK" if ok else msg)
+            return web.json_response({"ok": ok, "message": msg})
+        except Exception as e:
+            return web.json_response({"ok": False, "error": str(e)}, status=500)
+
+    async def api_quarantine_restore(self, request: web.Request) -> web.Response:
+        try:
+            name = request.match_info["name"]
+            body = await request.json()
+            restore_path = body.get("path") or None
+            from cyberhound.core.quarantine import restore_file
+            ok, msg = restore_file(name, restore_path)
+            return web.json_response({"ok": ok, "message": msg})
+        except Exception as e:
+            return web.json_response({"ok": False, "error": str(e)}, status=500)
+
+    async def api_quarantine_delete(self, request: web.Request) -> web.Response:
+        name = request.match_info["name"]
+        from cyberhound.core.quarantine import delete_quarantined
+        ok, msg = delete_quarantined(name)
+        return web.json_response({"ok": ok, "message": msg})
+
+    # ── SBOM ──────────────────────────────────────────────────────────────────
+
+    async def api_sbom_generate(self, request: web.Request) -> web.Response:
+        try:
+            body = await request.json()
+            include   = body.get("include") or None
+            pip_venvs = body.get("pip_venvs") or None
+            from cyberhound.scanners.sbom import SBOMGenerator
+            sbom = await SBOMGenerator.generate(include=include, pip_venvs=pip_venvs)
+            fmt  = body.get("format", "json")   # json | cyclonedx | spdx
+
+            if fmt == "cyclonedx":
+                return web.json_response(sbom.to_cyclonedx())
+            elif fmt == "spdx":
+                return web.Response(text=sbom.to_spdx_basic(), content_type="text/plain",
+                    headers={"Content-Disposition": "attachment; filename=sbom.spdx"})
+            else:
+                data = sbom.to_dict()
+                self._sbom_cache = data
+                return web.json_response(data)
+        except Exception as e:
+            logger.error("api_sbom_generate: %s", e, exc_info=True)
+            return web.json_response({"error": str(e)}, status=500)
+
+    async def api_sbom_latest(self, request: web.Request) -> web.Response:
+        if self._sbom_cache:
+            return web.json_response(self._sbom_cache)
+        return web.json_response({"error": "Sin SBOM generado — ejecuta /api/sbom/generate"}, status=404)
+
+    # ── Licencias ─────────────────────────────────────────────────────────────
+
+    async def api_license_info(self, request: web.Request) -> web.Response:
+        return web.json_response(license_manager.get().to_dict())
+
+    async def api_license_activate(self, request: web.Request) -> web.Response:
+        try:
+            body = await request.json()
+            key  = str(body.get("key", "")).strip()
+            if not key:
+                return web.json_response({"ok": False, "error": "Clave vacía"}, status=400)
+            ok, msg = license_manager.activate(key)
+            return web.json_response({"ok": ok, "message": msg})
+        except Exception as e:
+            return web.json_response({"ok": False, "error": str(e)}, status=500)
+
+    # ── LDAP / AD ─────────────────────────────────────────────────────────────
+
+    async def api_ldap_scan(self, request: web.Request) -> web.Response:
+        """Ejecuta un audit de LDAP/AD y devuelve los hallazgos."""
+        try:
+            body   = await request.json()
+            user   = request.get("auth_user", "unknown")
+            from cyberhound.scanners.ldap_audit import LDAPAuditor
+            scan_id = await self.db.create_scan("ldap", triggered_by="manual")
+            findings = await LDAPAuditor.full_audit(
+                uri=body.get("uri", ""),
+                base=body.get("base", ""),
+                binddn=body.get("binddn", ""),
+                bindpw=body.get("bindpw", ""),
+            )
+            findings = await self.db.filter_suppressed(findings)
+            await self.db.complete_scan(scan_id, findings)
+            return web.json_response({
+                "scan_id":  scan_id,
+                "count":    len(findings),
+                "findings": [f.to_dict() for f in findings],
+            })
+        except Exception as e:
+            logger.error("api_ldap_scan: %s", e, exc_info=True)
+            return web.json_response({"error": str(e)}, status=500)
+
     # ── Modo agente ───────────────────────────────────────────────────────────
 
     async def api_agent_report(self, request: web.Request) -> web.Response:
@@ -1137,6 +1659,10 @@ class CyberHoundServer:
             self.cfg.auth.password_hash or hashlib.sha256(b"cyberhound").hexdigest(),
         )
 
+        # Cargar licencia
+        lic = license_manager.load()
+        logger.info("Licencia: %s (%s)", lic.tier, lic.licensee)
+
         # 2. Construir app
         app = self.build_app()
         runner = web.AppRunner(app)
@@ -1178,6 +1704,14 @@ class CyberHoundServer:
         if self.cfg.scheduler.enabled:
             self.scheduler = build_scheduler(self, self.cfg.scheduler)
             await self.scheduler.start()
+
+        # 6. Monitor eBPF/auditd en tiempo real (si está habilitado en config)
+        if getattr(self.cfg, 'monitor_enabled', True):
+            from cyberhound.core.ebpf_monitor import EBPFMonitor
+            self._ebpf_monitor = EBPFMonitor(self)
+            await self._ebpf_monitor.start()
+            if self._ebpf_monitor.mode != "none":
+                logger.info("Monitor en tiempo real activo (modo: %s)", self._ebpf_monitor.mode)
 
         cert_info = ""
         if ssl_ctx and not self.cfg.server.tls_cert:
