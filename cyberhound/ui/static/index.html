@@ -39,6 +39,7 @@
     <button class="nav-tab" data-panel="services"  onclick="showPanel('services')">⚙️ Servicios</button>
     <button class="nav-tab" data-panel="tls"       onclick="showPanel('tls')">🔒 TLS/SSL</button>
     <button class="nav-tab" data-panel="webhdr"    onclick="showPanel('webhdr')">🌐 Cabeceras Web</button>
+    <button class="nav-tab" data-panel="webexp"    onclick="showPanel('webexp')">🕵️ Exposición Web</button>
     <button class="nav-tab" data-panel="dnssec"    onclick="showPanel('dnssec')">📛 DNS Security</button>
     <button class="nav-tab" data-panel="intel"    onclick="showPanel('intel')">🌐 Intel</button>
     <button class="nav-tab" data-panel="history"   onclick="showPanel('history')">📅 Historial</button>
@@ -465,6 +466,41 @@
       <div class="empty-icon">🌐</div>
       <h3>Análisis de cabeceras no ejecutado</h3>
       <p>Introduce las URLs de tus sitios para auditar sus cabeceras de seguridad HTTP.</p>
+    </div>
+  </section>
+
+
+  <!-- ═══ EXPOSICIÓN WEB ═══ -->
+  <section class="panel" id="panel-webexp">
+    <div class="page-header"><h1>🕵️ Exposición de recursos web</h1>
+      <p>Detecta .git/.env expuestos, copias de seguridad, directory listing y métodos HTTP peligrosos.</p>
+    </div>
+    <div class="config-bar">
+      <div class="field">
+        <label>URLs a analizar (una por línea)</label>
+        <textarea id="webexp-urls" rows="3" placeholder="https://midominio.com&#10;https://app.midominio.com"></textarea>
+      </div>
+      <button class="btn-primary" id="btn-webexp" onclick="runWebExposureScan()">▶ Analizar exposición</button>
+    </div>
+    <div id="webexp-results" style="display:none">
+      <div id="webexp-summary-bar"></div>
+      <div class="toolbar">
+        <button class="filter active" onclick="filterTable('webexp','all',this)">Todos</button>
+        <button class="filter" data-sev="critical" onclick="filterTable('webexp','critical',this)">Crítico</button>
+        <button class="filter" data-sev="high" onclick="filterTable('webexp','high',this)">Alto</button>
+        <button class="filter" data-sev="medium" onclick="filterTable('webexp','medium',this)">Medio</button>
+        <input type="text" placeholder="🔎 Buscar…" oninput="searchTable('webexp-tbody',this.value)">
+        <button class="btn-secondary small" onclick="exportJSON('webexp')">⬇ JSON</button>
+      </div>
+      <table>
+        <thead><tr><th>Severidad</th><th>Sitio</th><th>Problema</th><th>Solución</th></tr></thead>
+        <tbody id="webexp-tbody"></tbody>
+      </table>
+    </div>
+    <div class="empty-panel" id="webexp-empty">
+      <div class="empty-icon">🕵️</div>
+      <h3>Análisis de exposición no ejecutado</h3>
+      <p>Introduce las URLs de tus sitios para detectar recursos sensibles accesibles.</p>
     </div>
   </section>
 
