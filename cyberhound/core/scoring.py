@@ -82,6 +82,17 @@ AUTO_FIX_REDUCTION = 0.75   # -25% si hay fix disponible
 # El 1er finding de un tipo vale 100%, el 2do 80%, el 5to 40%...
 ACCUMULATION_DECAY = 0.80
 
+# Tope de penalización TOTAL por nivel de severidad (rendimientos decrecientes).
+# Evita que el mero volumen de hallazgos de baja criticidad hunda el score: un
+# sistema sin críticos ni altos no debería caer a "Crítico" solo por acumular
+# medios/bajos. Los críticos sí pueden, por sí solos, hundir el score.
+SEVERITY_PENALTY_CAP: dict[str, float] = {
+    "critical": 100.0,
+    "high":      45.0,
+    "medium":    22.0,
+    "low":       10.0,
+}
+
 
 @dataclass
 class ScoringContext:
@@ -153,7 +164,7 @@ def compute_score(
 
     # Contar por categoría para el decaimiento por acumulación
     category_counts: dict[str, int] = {}
-    total_penalty = 0.0
+    penalty_by_severity: dict[str, float] = {}
 
     breakdown: list[dict] = []
 
@@ -187,7 +198,7 @@ def compute_score(
 
         penalty = base * cat_weight * fix_factor * decay * exposure
 
-        total_penalty += penalty
+        penalty_by_severity[f.severity] = penalty_by_severity.get(f.severity, 0.0) + penalty
         breakdown.append({
             "finding_id": f.id,
             "severity": f.severity,
@@ -199,6 +210,12 @@ def compute_score(
             "exposure": round(exposure, 2),
             "final_penalty": round(penalty, 2),
         })
+
+    # Tope por severidad: el volumen de un nivel no puede penalizar más de su cap.
+    total_penalty = sum(
+        min(pen, SEVERITY_PENALTY_CAP.get(sev, pen))
+        for sev, pen in penalty_by_severity.items()
+    )
 
     score = max(0, min(100, round(100 - total_penalty)))
 
