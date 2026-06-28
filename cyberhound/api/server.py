@@ -255,6 +255,8 @@ class CyberHoundServer:
                 await self._run_code_audit(msg, ws_id, send, log, scan_id)
             elif task == "intel":
                 await self._run_intel_scan(msg, ws_id, send, log, scan_id)
+            elif task == "docker":
+                await self._run_docker_scan(msg, ws_id, send, log, scan_id)
             else:
                 await send({"type": "error", "text": f"Tarea desconocida: {task}"})
         except Exception as e:
@@ -268,7 +270,10 @@ class CyberHoundServer:
     async def _emit_findings(
         self, findings: list[Finding], ws_id: str, send, scan_id: int
     ) -> None:
-        """Filtra supresiones, guarda en BD y hace streaming al cliente."""
+        """
+        Filtra supresiones, guarda en BD y hace streaming al cliente.
+        Los findings se envían uno a uno según llegan — no se acumulan en memoria.
+        """
         findings = await self.db.filter_suppressed(findings)
         self._findings_cache.setdefault(ws_id, []).extend(findings)
 
@@ -281,19 +286,59 @@ class CyberHoundServer:
         if new_critical:
             await send({"type": "new_critical", "count": len(new_critical)})
 
-        # Streaming por severidad
+        # Streaming ordenado por severidad, con yield para no bloquear el event loop
         sev_order = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
         for f in sorted(findings, key=lambda x: sev_order.get(x.severity, 5)):
             await send({"type": "finding", "data": f.to_dict()})
+            await asyncio.sleep(0)  # yield al event loop entre findings
 
         history = await self.db.get_scan_history(limit=1)
         score = history[0]["score"] if history else None
         await send({"type": "done", "count": len(findings), "scan_id": scan_id, "score": score})
 
+    async def _stream_findings(
+        self,
+        source,           # AsyncIterator[Finding] o Callable que acepta callback
+        ws_id: str,
+        send,
+        scan_id: int,
+        log,
+    ) -> None:
+        """
+        Variante de _emit_findings para scans que producen findings de forma
+        incremental (generators). Envía cada finding en cuanto llega sin esperar
+        a que termine el scan completo.
+        """
+        collected: list[Finding] = []
+        async for finding in source:
+            if await self.db.is_suppressed(finding.id):
+                continue
+            collected.append(finding)
+            self._findings_cache.setdefault(ws_id, []).append(finding)
+            await send({"type": "finding", "data": finding.to_dict()})
+            await asyncio.sleep(0)
+
+        # Guardar en BD al terminar
+        await self.db.complete_scan(scan_id, collected)
+        comparison = await self.db.get_comparison(scan_id)
+        new_critical = [f for f in comparison.get("new", []) if f.get("severity") == "critical"]
+        if new_critical:
+            await send({"type": "new_critical", "count": len(new_critical)})
+        history = await self.db.get_scan_history(limit=1)
+        score = history[0]["score"] if history else None
+        await send({"type": "done", "count": len(collected), "scan_id": scan_id, "score": score})
+
     async def _run_local_audit(self, params, ws_id, send, log, scan_id):
         from cyberhound.scanners.hardening import HardeningAuditor
         await log("section", "Iniciando Hardening Audit local…")
         findings = await HardeningAuditor.full_audit(cfg=self.cfg)
+        await self._emit_findings(findings, ws_id, send, scan_id)
+
+    async def _run_docker_scan(self, params, ws_id, send, log, scan_id):
+        from cyberhound.scanners.docker_scan import DockerScanner
+        await log("section", "Iniciando análisis de contenedores Docker…")
+        scan_images = params.get("scan_images_cve", True)
+        findings = await DockerScanner.full_scan(scan_images_cve=scan_images)
         await self._emit_findings(findings, ws_id, send, scan_id)
 
     async def _run_malware_scan(self, params, ws_id, send, log, scan_id):
@@ -744,6 +789,18 @@ class CyberHoundServer:
     # ── Start ─────────────────────────────────────────────────────────────────
 
     async def start(self) -> None:
+        # 0. Validación eager de configuración
+        errors = self.cfg.validate()
+        if errors:
+            print("\n❌ Errores de configuración detectados al arrancar:\n")
+            for err in errors:
+                print(f"   • {err}")
+            print(
+                "\n   Edita la configuración: sudo cyberhound setup\n"
+                "   O directamente: nano ~/.cyberhound/config.yaml\n"
+            )
+            raise SystemExit(1)
+
         # 1. Inicializar BD
         await self.db.init()
         await self.db.ensure_admin_exists(

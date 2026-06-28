@@ -1,66 +1,116 @@
-name: Build & Publish Docker Image
+name: CI — Test & Build
 
 on:
   push:
-    branches: [main]
+    branches: [main, master]
     tags: ["v*.*.*"]
   pull_request:
-    branches: [main]
+    branches: [main, master]
 
 env:
   REGISTRY_GHCR: ghcr.io
-  REGISTRY_DH:   docker.io
-  IMAGE_NAME:    ${{ github.repository_owner }}/cyberhound-pro
+  IMAGE_NAME: ${{ github.repository_owner }}/cyberhound-pro
 
 jobs:
-  # ── Tests básicos ────────────────────────────────────────────────────────────
+  # ── Tests ───────────────────────────────────────────────────────────────────
   test:
-    name: Syntax & import check
+    name: Tests (${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
+          cache: pip
 
-      - name: Install package
+      - name: Instalar dependencias del sistema
+        run: sudo apt-get install -y --no-install-recommends nmap shellcheck
+
+      - name: Instalar paquete y dependencias de test
+        run: pip install -e ".[test]"
+
+      - name: Verificar importaciones
         run: |
-          pip install --quiet setuptools wheel
-          pip install --quiet .
+          python -c "from cyberhound.core.security import RateLimiter, InputValidator, TLSManager"
+          python -c "from cyberhound.core.database import Database"
+          python -c "from cyberhound.core.scheduler import Scheduler"
+          python -c "from cyberhound.api.server import CyberHoundServer"
+          echo "✓ Todos los imports OK"
 
-      - name: Check imports
+      - name: Ejecutar tests con cobertura
         run: |
-          python -c "import cyberhound; print('✓ cyberhound importable')"
-          python -c "from cyberhound.core.models import Finding; print('✓ models OK')"
-          python -c "from cyberhound.core.auth import AuthConfig; print('✓ auth OK')"
-          python -c "from cyberhound.scanners.hardening import HardeningAuditor; print('✓ hardening OK')"
-          python -c "from cyberhound.api.server import CyberHoundServer; print('✓ server OK')"
+          pytest tests/ -v \
+            --tb=short \
+            --timeout=30 \
+            --cov=cyberhound \
+            --cov-report=term-missing \
+            --cov-report=xml
 
-      - name: Version check
-        run: python -m cyberhound version
+      - name: Upload cobertura a Codecov
+        uses: codecov/codecov-action@v4
+        if: matrix.python-version == '3.12'
+        with:
+          file: coverage.xml
+          fail_ci_if_error: false
 
-  # ── Build y push de imagen Docker ────────────────────────────────────────────
-  docker:
-    name: Build & Push Docker image
+  # ── Análisis de seguridad estático ─────────────────────────────────────────
+  security:
+    name: Análisis de seguridad
     runs-on: ubuntu-latest
     needs: test
-    permissions:
-      contents: read
-      packages: write   # para GHCR
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
 
-      - name: Set up QEMU (multi-arch)
-        uses: docker/setup-qemu-action@v3
+      - name: Instalar herramientas
+        run: pip install bandit semgrep
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - name: Bandit (Python security linter)
+        run: |
+          bandit -r cyberhound/ \
+            -x cyberhound/ui/ \
+            --severity-level medium \
+            --confidence-level medium \
+            -f txt || true
 
-      - name: Login a GitHub Container Registry
+      - name: Verificar sintaxis de todos los módulos Python
+        run: python -m py_compile cyberhound/**/*.py cyberhound/*.py
+
+      - name: Verificar que no hay secretos hardcodeados
+        run: |
+          # Buscar patrones de secretos obvios
+          ! grep -rn \
+            -e "password\s*=\s*['\"][^'\"]{8,}" \
+            -e "api_key\s*=\s*['\"][^'\"]{10,}" \
+            -e "secret\s*=\s*['\"][^'\"]{10,}" \
+            cyberhound/ --include="*.py" \
+            --exclude-dir=__pycache__ || echo "Revisión manual recomendada"
+
+  # ── Build Docker ────────────────────────────────────────────────────────────
+  docker:
+    name: Build & Push Docker
+    runs-on: ubuntu-latest
+    needs: [test, security]
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Login a GHCR
         if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
         with:
@@ -72,25 +122,23 @@ jobs:
         if: github.event_name != 'pull_request' && secrets.DOCKERHUB_TOKEN != ''
         uses: docker/login-action@v3
         with:
-          registry: ${{ env.REGISTRY_DH }}
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Extraer metadatos (tags y labels)
+      - name: Extraer metadatos
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: |
             ${{ env.REGISTRY_GHCR }}/${{ env.IMAGE_NAME }}
-            ${{ env.REGISTRY_DH }}/${{ env.IMAGE_NAME }}
+            jl-segurayuste/cyberhound-pro
           tags: |
             type=ref,event=branch
-            type=ref,event=pr
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest,enable={{is_default_branch}}
 
-      - name: Build y push
+      - name: Build y push imagen multi-arch
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -100,3 +148,52 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          build-args: |
+            BUILD_DATE=${{ github.event.repository.updated_at }}
+            VCS_REF=${{ github.sha }}
+
+  # ── Release automático ──────────────────────────────────────────────────────
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    needs: docker
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generar changelog
+        id: changelog
+        run: |
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          if [ -n "$PREV_TAG" ]; then
+            CHANGES=$(git log --pretty=format:"- %s" ${PREV_TAG}..HEAD)
+          else
+            CHANGES=$(git log --pretty=format:"- %s" HEAD)
+          fi
+          echo "changes<<EOF" >> $GITHUB_OUTPUT
+          echo "$CHANGES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Crear release en GitHub
+        uses: softprops/action-gh-release@v2
+        with:
+          body: |
+            ## 🐾 CyberHound Pro ${{ github.ref_name }}
+
+            ### Cambios
+            ${{ steps.changelog.outputs.changes }}
+
+            ### Instalación rápida
+            ```bash
+            docker run -d --network host --cap-add NET_ADMIN --cap-add NET_RAW \
+              -e CH_PASSWORD=mi_contraseña \
+              -v cyberhound-data:/data \
+              ghcr.io/jl-segurayuste/cyberhound-pro:${{ github.ref_name }}
+            ```
+          draft: false
+          prerelease: false

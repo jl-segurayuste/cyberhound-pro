@@ -364,7 +364,7 @@ class InputValidator:
         Lanza ValidationError si algo no es válido.
         Devuelve el mensaje sanitizado.
         """
-        ALLOWED_TASKS = {"audit", "malware", "network", "ssh", "code", "intel"}
+        ALLOWED_TASKS = {"audit", "malware", "network", "ssh", "code", "intel", "docker"}
         ALLOWED_MALWARE_MODULES = {"yara", "hash", "auditd", "cron", "webshell"}
         ALLOWED_INTEL_MODULES = {"shodan", "virustotal", "abuseipdb", "greynoise", "otx", "hibp"}
 
