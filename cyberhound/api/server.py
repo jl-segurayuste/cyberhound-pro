@@ -1,8 +1,10 @@
 """
 Servidor web de CyberHound con:
-- Autenticación JWT en todas las rutas (configurable)
-- WebSockets para streaming de resultados
-- Rate limiting básico
+- Autenticación JWT en todas las rutas
+- Rate limiting en /login
+- Validación de todos los inputs WebSocket
+- CSRF protection en formularios
+- TLS automático (auto-signed o Let's Encrypt)
 - Headers de seguridad en todas las respuestas
 - Logging estructurado de cada petición
 """
@@ -21,6 +23,10 @@ from cyberhound.core.auth import AuthConfig, auth_middleware, setup_auth_routes
 from cyberhound.core.config import CyberHoundConfig
 from cyberhound.core.logging import audit_log, get_logger
 from cyberhound.core.models import Finding, HostResult, ScanReport
+from cyberhound.core.security import (
+    CsrfProtection, InputValidator, RateLimiter,
+    TLSManager, ValidationError, _get_real_ip,
+)
 
 logger = get_logger("api")
 
@@ -92,10 +98,13 @@ class CyberHoundServer:
             localhost_only= self.cfg.auth.localhost_only,
         )
 
+        csrf = CsrfProtection()
+
         app = web.Application(
             middlewares=[
                 security_headers_middleware,
                 request_logger_middleware,
+                csrf.middleware_factory(),
                 auth_middleware,
             ],
             client_max_size=10 * 1024 * 1024,
@@ -169,31 +178,43 @@ class CyberHoundServer:
             await ws.close()
             return ws
 
-        task = msg_raw.get("task", "")
+        # ── Validar y sanitizar el mensaje antes de procesarlo ────────────────
+        try:
+            msg = InputValidator.ws_message(msg_raw)
+        except ValidationError as e:
+            logger.warning(
+                "WS input inválido de %s: %s=%s",
+                _get_real_ip(request), e.field, e.reason,
+            )
+            await send({"type": "error", "text": f"Input inválido: {e.field} — {e.reason}"})
+            await ws.close()
+            return ws
+
+        task = msg.get("task", "")
         audit_log.scan_started(
-            target=msg_raw.get("target", "localhost"),
+            target=msg.get("target", "localhost"),
             scan_type=task,
             user=user,
         )
 
         try:
             if task == "audit":
-                await self._run_local_audit(msg_raw, ws_id, send, log)
+                await self._run_local_audit(msg, ws_id, send, log)
 
             elif task == "malware":
-                await self._run_malware_scan(msg_raw, ws_id, send, log)
+                await self._run_malware_scan(msg, ws_id, send, log)
 
             elif task == "network":
-                await self._run_network_scan(msg_raw, ws_id, send, log)
+                await self._run_network_scan(msg, ws_id, send, log)
 
             elif task == "ssh":
-                await self._run_ssh_scan(msg_raw, ws_id, send, log)
+                await self._run_ssh_scan(msg, ws_id, send, log)
 
             elif task == "code":
-                await self._run_code_audit(msg_raw, ws_id, send, log)
+                await self._run_code_audit(msg, ws_id, send, log)
 
             elif task == "intel":
-                await self._run_intel_scan(msg_raw, ws_id, send, log)
+                await self._run_intel_scan(msg, ws_id, send, log)
 
             else:
                 await send({"type": "error", "text": f"Tarea desconocida: {task}"})
@@ -482,13 +503,22 @@ class CyberHoundServer:
         runner = web.AppRunner(app)
         await runner.setup()
 
-        # TLS si se configuraron certificados
+        # ── TLS: auto-signed por defecto, certificado externo si se configura ──
         ssl_ctx = None
-        if self.cfg.server.tls_cert and self.cfg.server.tls_key:
-            import ssl
-            ssl_ctx = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
-            ssl_ctx.load_cert_chain(self.cfg.server.tls_cert, self.cfg.server.tls_key)
-            logger.info("TLS activado con cert=%s", self.cfg.server.tls_cert)
+        try:
+            ssl_ctx = TLSManager.create_ssl_context(
+                cert_path=self.cfg.server.tls_cert,
+                key_path=self.cfg.server.tls_key,
+            )
+            proto = "https"
+        except Exception as e:
+            logger.error(
+                "No se pudo activar TLS: %s\n"
+                "El servidor arrancará en HTTP — INSEGURO para producción.\n"
+                "Instala 'cryptography' para TLS automático: pip install cryptography",
+                e,
+            )
+            proto = "http"
 
         site = web.TCPSite(
             runner,
@@ -497,15 +527,24 @@ class CyberHoundServer:
             ssl_context=ssl_ctx,
         )
         await site.start()
-        proto = "https" if ssl_ctx else "http"
+
+        cert_info = ""
+        if ssl_ctx and not self.cfg.server.tls_cert:
+            cert_path, _ = TLSManager.cert_paths()
+            cert_info = (
+                f"\n   Certificado : {cert_path} (auto-firmado)"
+                f"\n   ⚠ Para evitar avisos del navegador, importa el cert o usa Let's Encrypt"
+            )
+
         logger.info(
             "CyberHound Pro escuchando en %s://%s:%d",
             proto, self.cfg.server.host, self.cfg.server.port,
         )
         print(
             f"\n🐾 CyberHound Pro listo en "
-            f"{proto}://{self.cfg.server.host}:{self.cfg.server.port}\n"
-            f"   Login: usuario='{self.cfg.auth.username}' "
-            f"contraseña por defecto='cyberhound' (cámbiala en config.yaml)\n"
+            f"{proto}://{self.cfg.server.host}:{self.cfg.server.port}"
+            f"{cert_info}"
+            f"\n   Login: usuario='{self.cfg.auth.username}'"
+            f"\n   Cambia la contraseña con: cyberhound setup\n"
         )
         await asyncio.Event().wait()
