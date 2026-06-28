@@ -912,6 +912,24 @@ class CyberHoundServer:
             )
             raise SystemExit(1)
 
+        # Persistir el secreto JWT si aún no estaba guardado en config
+        # (evita invalidar sesiones en cada reinicio del servidor)
+        from cyberhound.core.config import DEFAULT_CONFIG_PATH
+        config_path = Path(self.cfg.db_path).parent / "config.yaml"
+        if not self.cfg.auth.secret:
+            import secrets as _sec
+            self.cfg.auth.secret = _sec.token_hex(32)
+        # Guardar solo si el secreto no estaba ya en el fichero
+        try:
+            import yaml as _yaml
+            if config_path.exists():
+                raw = _yaml.safe_load(config_path.read_text()) or {}
+                if not raw.get("auth", {}).get("secret"):
+                    self.cfg.save(config_path)
+                    logger.info("JWT secret persistido en %s", config_path)
+        except Exception as e:
+            logger.warning("No se pudo persistir el JWT secret: %s", e)
+
         # 1. Inicializar BD
         await self.db.init()
         await self.db.ensure_admin_exists(
