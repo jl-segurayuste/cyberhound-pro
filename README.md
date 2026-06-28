@@ -459,6 +459,7 @@ pytest tests/ --cov=cyberhound --cov-report=term-missing
 | Servicios | `services_audit.py` | nginx, apache, mysql, pg, redis, mongodb |
 | TLS/SSL | `tls_scan.py` | expiración, autofirmados, protocolos/firmas/claves débiles |
 | Cabeceras web | `web_headers.py` | HSTS, CSP, X-Frame, cookies inseguras, fuga de info |
+| DNS security | `dns_security.py` | SPF, DMARC, DKIM, DNSSEC, CAA |
 | Código | `code.py` | bandit, shellcheck, eslint, secretos |
 | Intel | `intel.py` | Shodan, VT, AbuseIPDB, GreyNoise, HIBP |
 | LDAP/AD | `ldap_audit.py` | 6 checks: AS-REP, domain admins, policy |

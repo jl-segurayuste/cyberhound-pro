@@ -3,7 +3,7 @@
 
 // ── Estado global ──────────────────────────────────────────────────────────
 const S = {
-  findings: { audit: [], malware: [], code: [], network: [], services: [], tls: [], webhdr: [] },
+  findings: { audit: [], malware: [], code: [], network: [], services: [], tls: [], webhdr: [], dnssec: [] },
   devices:  [],
   ws:       null,
   wsRetries: 0,
@@ -1634,6 +1634,48 @@ function runWebHeadersScan() {
     },
     onError() { btn('btn-webhdr', false, '▶ Analizar cabeceras'); },
   }, 'Cabeceras de seguridad web', '🌐');
+}
+
+function runDNSScan() {
+  S.findings.dnssec = [];
+  document.getElementById('dnssec-results').style.display = 'none';
+  document.getElementById('dnssec-empty').style.display = '';
+  document.getElementById('dnssec-tbody').innerHTML = '';
+
+  const raw = (document.getElementById('dnssec-domains').value || '').trim();
+  const domains = raw ? raw.split('\n').map(s => s.trim()).filter(Boolean) : [];
+  if (!domains.length) { toast('Introduce al menos un dominio'); return; }
+  btn('btn-dnssec', true, '⏳ Auditando…');
+
+  wsRunWithActivity('dns', { domains }, {
+    onFinding(f) {
+      S.findings.dnssec.push(f);
+      const tbody = document.getElementById('dnssec-tbody');
+      const tr = document.createElement('tr');
+      tr.dataset.sev = f.severity;
+      tr.onclick = () => openDrawer(f);
+      tr.innerHTML = `
+        <td>${sevBadge(f.severity)}</td>
+        <td style="font-size:.8rem">📛 ${esc(f.source_host || '—')}</td>
+        <td><b>${esc(f.title)}</b></td>
+        <td style="font-size:.78rem;color:var(--text2)">${esc((f.remediation||'').substring(0,70))}</td>`;
+      tbody.appendChild(tr);
+    },
+    onDone() {
+      btn('btn-dnssec', false, '▶ Auditar DNS');
+      if (S.findings.dnssec.length) {
+        document.getElementById('dnssec-results').style.display = '';
+        document.getElementById('dnssec-empty').style.display = 'none';
+        renderSummary('dnssec-summary-bar', S.findings.dnssec);
+      } else {
+        const h3 = document.querySelector('#dnssec-empty h3');
+        const p  = document.querySelector('#dnssec-empty p');
+        if (h3) h3.textContent = '✅ DNS correctamente configurado';
+        if (p)  p.textContent  = 'SPF, DMARC, DNSSEC y CAA en orden.';
+      }
+    },
+    onError() { btn('btn-dnssec', false, '▶ Auditar DNS'); },
+  }, 'Seguridad DNS', '📛');
 }
 
 // ── 2FA ───────────────────────────────────────────────────────────────────────
