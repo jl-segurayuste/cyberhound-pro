@@ -60,7 +60,7 @@ function showCfgTab(name) {
     scheduler:    () => loadScheduler(),
     '2fa':        () => load2FAStatus(),
     yara:         () => loadYaraRules(),
-    agents:       () => loadAgents(),
+    agents:       () => { loadAgents(); loadAgentConfig(); },
     license:      () => loadLicenseInfo(),
     quarantine:   () => loadQuarantine(),
     ansible:      () => loadAnsibleJobs(),
@@ -817,7 +817,7 @@ async function deleteUser(username) {
 }
 
 // ── Supresiones ───────────────────────────────────────────────────────────
-async function loadSuppresions() {
+async function loadSuppressions() {
   try {
     const data = await fetch('/api/suppressions').then(r => r.json());
     const tbody = document.getElementById('suppressions-tbody');
@@ -833,7 +833,7 @@ async function loadSuppresions() {
         <td style="font-size:.78rem;color:var(--text2)">${s.expires_at ? fmt(s.expires_at) : 'Permanente'}</td>
         <td><button class="btn-secondary small" onclick="removeSuppression('${esc(s.finding_id_pattern)}')">Eliminar</button></td>
       </tr>`).join('');
-  } catch(e) { console.error('loadSuppresions:', e); }
+  } catch(e) { console.error('loadSuppressions:', e); }
 }
 
 async function addSuppression() {
@@ -846,7 +846,7 @@ async function addSuppression() {
     body: JSON.stringify({pattern, reason, expires_at: expires || null}),
   });
   const d = await r.json();
-  if (d.ok) { toast('✓ Supresión añadida'); loadSuppresions();
+  if (d.ok) { toast('✓ Supresión añadida'); loadSuppressions();
     document.getElementById('supp-pattern').value = '';
     document.getElementById('supp-reason').value = '';
   } else toast('Error: ' + d.error, 'error');
@@ -856,7 +856,7 @@ async function removeSuppression(pattern) {
   if (!confirm(`¿Eliminar supresión "${pattern}"?`)) return;
   const r = await fetch(`/api/suppressions/${encodeURIComponent(pattern)}`, {method: 'DELETE'});
   const d = await r.json();
-  if (d.ok) { toast('✓ Supresión eliminada'); loadSuppresions(); }
+  if (d.ok) { toast('✓ Supresión eliminada'); loadSuppressions(); }
   else toast('Error: ' + d.error, 'error');
 }
 
@@ -2048,6 +2048,49 @@ function compareHistory(scanId) {
 }
 
 // ── Agentes ───────────────────────────────────────────────────────────────────
+// Muestra/oculta los campos de "manager" según el modo elegido.
+function _toggleAgentFields() {
+  const mode = document.getElementById('agent-mode')?.value;
+  const f = document.getElementById('agent-manager-fields');
+  if (f) f.style.display = (mode === 'agent') ? '' : 'none';
+}
+
+// Carga la configuración actual del modo agente en el formulario.
+async function loadAgentConfig() {
+  try {
+    const a = await fetch('/api/config/agent').then(r => r.json());
+    const sel = document.getElementById('agent-mode');         if (sel) sel.value = a.mode || 'standalone';
+    const mu  = document.getElementById('agent-manager-url');  if (mu)  mu.value  = a.manager_url || '';
+    const an  = document.getElementById('agent-name');         if (an)  an.value  = a.agent_name || '';
+    const badge = document.getElementById('agent-mode-badge'); if (badge) badge.textContent = a.mode || 'standalone';
+    const key = document.getElementById('agent-key');          if (key && a.has_key) key.placeholder = '•••••• (sin cambios)';
+    _toggleAgentFields();
+  } catch(e) { /* silencioso */ }
+}
+
+// Guarda la configuración del modo agente.
+async function saveAgentConfig() {
+  const body = {
+    mode:        document.getElementById('agent-mode')?.value,
+    manager_url: document.getElementById('agent-manager-url')?.value || '',
+    agent_key:   document.getElementById('agent-key')?.value || '',
+    agent_name:  document.getElementById('agent-name')?.value || '',
+  };
+  const msg = document.getElementById('agent-cfg-msg');
+  try {
+    const r = await fetch('/api/config/agent', {
+      method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body),
+    });
+    const d = await r.json();
+    if (msg) { msg.textContent = d.ok ? '✓ Configuración de agente guardada' : '✗ Error: ' + d.error;
+               msg.style.color = d.ok ? 'var(--green)' : 'var(--red)'; }
+    toast(d.ok ? '✓ Modo agente guardado' : '✗ Error: ' + d.error, d.ok ? 'success' : 'error');
+    if (d.ok && document.getElementById('agent-key')) document.getElementById('agent-key').value = '';
+  } catch(e) {
+    if (msg) { msg.textContent = '✗ Error de red'; msg.style.color = 'var(--red)'; }
+  }
+}
+
 async function loadAgents() {
   try {
     const r = await fetch('/api/agent/list');
