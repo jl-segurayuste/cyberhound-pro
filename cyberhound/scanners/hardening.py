@@ -95,7 +95,7 @@ async def check_firewall() -> list[Finding]:
     if command_exists("ufw"):
         proc = await run_command(["ufw", "status"], timeout=10)
         if "inactive" in proc.stdout.lower():
-            return [_f("fw_ufw_inactive", "firewall", "critical",
+            return [_f("fw_ufw_inactive", "firewall", "high",
                        "Firewall (UFW) inactivo",
                        "El firewall no está activo. El sistema no tiene filtrado de red.",
                        "ufw enable", auto_fix=True)]
@@ -104,12 +104,12 @@ async def check_firewall() -> list[Finding]:
     if command_exists("firewall-cmd"):
         proc = await run_command(["firewall-cmd", "--state"], timeout=10)
         if "running" not in proc.stdout.lower():
-            return [_f("fw_firewalld_inactive", "firewall", "critical",
+            return [_f("fw_firewalld_inactive", "firewall", "high",
                        "Firewall (firewalld) inactivo", "",
                        "systemctl enable --now firewalld", auto_fix=True)]
         return []
 
-    return [_f("fw_none", "firewall", "critical",
+    return [_f("fw_none", "firewall", "high",
                "Sin firewall detectado",
                "No se encontró ufw ni firewalld en el sistema.",
                "sudo apt install ufw && ufw enable", auto_fix=False)]

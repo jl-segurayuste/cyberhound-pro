@@ -87,10 +87,10 @@ ACCUMULATION_DECAY = 0.80
 # sistema sin críticos ni altos no debería caer a "Crítico" solo por acumular
 # medios/bajos. Los críticos sí pueden, por sí solos, hundir el score.
 SEVERITY_PENALTY_CAP: dict[str, float] = {
-    "critical": 100.0,
-    "high":      45.0,
-    "medium":    22.0,
-    "low":       10.0,
+    "critical": 70.0,
+    "high":     24.0,
+    "medium":   12.0,
+    "low":       6.0,
 }
 
 
