@@ -539,8 +539,9 @@
         <div class="empty-icon">📅</div><h3>Sin historial todavía</h3>
         <p>Los análisis se guardan automáticamente. Ejecuta el primero para empezar.</p>
       </div>
+      <div style="overflow-y:auto;flex:1">
       <table id="history-table" style="display:none">
-        <thead><tr>
+        <thead style="position:sticky;top:0;z-index:2;background:var(--bg2)"><tr>
           <th>Fecha</th><th>Tipo</th><th>Objetivo</th>
           <th style="width:80px">Score</th>
           <th style="width:280px">Hallazgos</th>
@@ -548,7 +549,7 @@
         </tr></thead>
         <tbody id="history-tbody"></tbody>
       </table>
-    </div>
+      </div>
 
     <div id="history-detail" style="display:none;border-top:2px solid var(--border);margin-top:16px">
       <div style="padding:12px 20px;display:flex;justify-content:space-between;align-items:center">
