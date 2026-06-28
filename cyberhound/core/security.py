@@ -358,13 +358,42 @@ class InputValidator:
         return [str(m) for m in value]
 
     @staticmethod
+    def url_list(value, field_name: str = "urls", max_items: int = 50) -> list[str]:
+        """Valida una lista de URLs/hosts/dominios.
+
+        Acepta una lista o una cadena separada por comas/saltos de línea.
+        Rechaza espacios y metacaracteres peligrosos (anti-inyección), de modo
+        que sea seguro pasar los valores a clientes HTTP o a binarios externos.
+        """
+        if isinstance(value, str):
+            items = re.split(r"[\n,]", value)
+        elif isinstance(value, list):
+            items = [str(v) for v in value]
+        else:
+            raise ValidationError(field_name, "Debe ser una lista de URLs")
+        items = [i.strip() for i in items if i and i.strip()]
+        if len(items) > max_items:
+            raise ValidationError(field_name, f"Máximo {max_items} objetivos")
+        pattern = re.compile(r"^(https?://)?[A-Za-z0-9._~:/?#@%+=&\[\]-]+$")
+        out = []
+        for it in items:
+            if len(it) > 2048 or not pattern.match(it):
+                raise ValidationError(field_name, f"URL/dominio inválido: {it[:60]}")
+            out.append(it)
+        return out
+
+    @staticmethod
     def ws_message(msg: dict) -> dict:
         """
         Valida y sanitiza un mensaje WebSocket completo.
         Lanza ValidationError si algo no es válido.
         Devuelve el mensaje sanitizado.
         """
-        ALLOWED_TASKS = {"audit", "malware", "network", "ssh", "code", "intel", "docker", "services"}
+        ALLOWED_TASKS = {
+            "audit", "malware", "network", "ssh", "code", "intel", "docker", "services",
+            "tls", "web_headers", "dns", "web_exposure", "api_security",
+            "subdomain_enum", "nuclei",
+        }
         ALLOWED_MALWARE_MODULES = {"yara", "hash", "auditd", "cron", "webshell"}
         ALLOWED_INTEL_MODULES = {"shodan", "virustotal", "abuseipdb", "greynoise", "otx", "hibp"}
 
@@ -425,6 +454,21 @@ class InputValidator:
             sanitized["modules"] = InputValidator.modules_list(
                 modules, ALLOWED_INTEL_MODULES, "modules"
             )
+
+        elif task in ("web_exposure", "api_security", "web_headers", "nuclei"):
+            sanitized["urls"] = InputValidator.url_list(msg.get("urls", []), "urls")
+            if task == "nuclei":
+                sev = msg.get("severities") or []
+                if sev:
+                    sanitized["severities"] = InputValidator.modules_list(
+                        sev, {"info", "low", "medium", "high", "critical"}, "severities"
+                    )
+
+        elif task in ("subdomain_enum", "dns"):
+            sanitized["domains"] = InputValidator.url_list(msg.get("domains", []), "domains")
+
+        elif task == "tls":
+            sanitized["targets"] = InputValidator.url_list(msg.get("targets", []), "targets")
 
         return sanitized
 
