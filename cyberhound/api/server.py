@@ -142,6 +142,49 @@ def _requires_role(*roles: str):
     return decorator
 
 
+# ── Métricas (formato Prometheus, sin dependencias) ───────────────────────────
+
+class _Metrics:
+    """Contadores en proceso, expuestos en /metrics (texto Prometheus)."""
+
+    def __init__(self) -> None:
+        self._start = time.time()
+        self._requests: dict[tuple[str, str], int] = {}
+        self._duration_ms = 0.0
+        self._count = 0
+
+    def observe(self, method: str, status: int, ms: float) -> None:
+        key = (method, f"{status // 100}xx")
+        self._requests[key] = self._requests.get(key, 0) + 1
+        self._duration_ms += ms
+        self._count += 1
+
+    def render(self) -> str:
+        out = [
+            "# HELP cyberhound_up 1 si el servicio responde",
+            "# TYPE cyberhound_up gauge",
+            "cyberhound_up 1",
+            "# HELP cyberhound_uptime_seconds Segundos desde el arranque",
+            "# TYPE cyberhound_uptime_seconds gauge",
+            f"cyberhound_uptime_seconds {time.time() - self._start:.0f}",
+            "# HELP cyberhound_http_requests_total Peticiones por método y clase de estado",
+            "# TYPE cyberhound_http_requests_total counter",
+        ]
+        for (method, status), n in sorted(self._requests.items()):
+            out.append(
+                f'cyberhound_http_requests_total{{method="{method}",status="{status}"}} {n}'
+            )
+        out += [
+            "# HELP cyberhound_http_request_duration_ms_sum Suma de latencias (ms)",
+            "# TYPE cyberhound_http_request_duration_ms_sum counter",
+            f"cyberhound_http_request_duration_ms_sum {self._duration_ms:.0f}",
+        ]
+        return "\n".join(out) + "\n"
+
+
+METRICS = _Metrics()
+
+
 # ── Middlewares ───────────────────────────────────────────────────────────────
 
 @web.middleware
@@ -175,12 +218,14 @@ async def request_logger_middleware(request: web.Request, handler):
     try:
         response = await handler(request)
         elapsed = (time.monotonic() - start) * 1000
+        METRICS.observe(request.method, response.status, elapsed)
         logger.info("%s %s %d %.0fms user=%s",
                     request.method, request.path, response.status, elapsed,
                     request.get("auth_user", "anonymous"))
         return response
     except web.HTTPException as e:
         elapsed = (time.monotonic() - start) * 1000
+        METRICS.observe(request.method, e.status, elapsed)
         logger.warning("%s %s %d %.0fms", request.method, request.path, e.status, elapsed)
         raise
 
@@ -280,6 +325,7 @@ class CyberHoundServer:
         app.router.add_post("/api/fix/remote",   self.api_fix_remote)
         app.router.add_get ("/api/rollback",      self.api_rollback_list)
         app.router.add_post("/api/rollback/local", self.api_rollback_local)
+        app.router.add_get ("/metrics",           self.api_metrics)
         app.router.add_post("/api/report/{fmt}", self.api_report)
 
         # ── Histórico y resultados ────────────────────────────────────────────
@@ -910,6 +956,12 @@ class CyberHoundServer:
         except Exception as e:
             logger.error("api_rollback_local: %s", e, exc_info=True)
             return web.json_response({"ok": False, "error": str(e)}, status=500)
+
+    # ── Observabilidad ─────────────────────────────────────────────────────────
+
+    async def api_metrics(self, request: web.Request) -> web.Response:
+        """Métricas en formato Prometheus (texto). Ruta pública (PUBLIC_ROUTES)."""
+        return web.Response(text=METRICS.render(), content_type="text/plain")
 
     # ── Histórico ─────────────────────────────────────────────────────────────
 

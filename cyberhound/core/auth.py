@@ -27,8 +27,9 @@ logger = get_logger("auth")
 AUTH_COOKIE = "ch_token"
 AUTH_HEADER = "Authorization"
 
-# Rutas que no requieren autenticación
-PUBLIC_ROUTES = {"/health", "/login", "/static"}
+# Rutas que no requieren autenticación (incluye /metrics para que lo raspe
+# Prometheus; el bind por defecto es 127.0.0.1, no expuesto a Internet).
+PUBLIC_ROUTES = {"/health", "/login", "/static", "/metrics"}
 
 # Rate limiter global para /login (5 intentos / 15 minutos)
 _login_rate_limiter = RateLimiter(max_attempts=5, window_seconds=900, block_seconds=900)
