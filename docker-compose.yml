@@ -1,0 +1,73 @@
+version: "3.9"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CyberHound Pro — Docker Compose
+#
+# Uso rápido:
+#   docker compose up -d
+#
+# Con contraseña personalizada:
+#   CH_PASSWORD=mipassword docker compose up -d
+#
+# Con API keys:
+#   SHODAN_API_KEY=xxx VT_API_KEY=yyy docker compose up -d
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  cyberhound:
+    image: ${CYBERHOUND_IMAGE:-ghcr.io/qjossyx/cyberhound-pro:latest}
+    container_name: cyberhound
+    restart: unless-stopped
+
+    ports:
+      - "${CH_PORT:-8443}:8443"
+
+    # Capacidades necesarias para nmap y análisis de red
+    cap_add:
+      - NET_ADMIN      # Modificar configuración de red
+      - NET_RAW        # Sockets raw para nmap/ping
+      - SYS_PTRACE     # Para análisis de procesos
+    # Necesario para nmap OS detection
+    network_mode: host   # comentar si no se necesita scan de red local
+
+    environment:
+      # Credenciales (cambiar en producción)
+      CH_USERNAME: ${CH_USERNAME:-admin}
+      CH_PASSWORD: ${CH_PASSWORD:-cyberhound}
+      CH_PORT: ${CH_PORT:-8443}
+
+      # API Keys para inteligencia externa (todas opcionales)
+      SHODAN_API_KEY:   ${SHODAN_API_KEY:-}
+      VT_API_KEY:       ${VT_API_KEY:-}
+      ABUSEIPDB_KEY:    ${ABUSEIPDB_KEY:-}
+      GREYNOISE_KEY:    ${GREYNOISE_KEY:-}
+      OTX_KEY:          ${OTX_KEY:-}
+      HIBP_API_KEY:     ${HIBP_API_KEY:-}
+
+      # Clave SSH privada para análisis de hosts remotos (contenido en base64)
+      # CH_SSH_KEY: ${CH_SSH_KEY:-}
+
+    volumes:
+      # Configuración y logs persistentes
+      - cyberhound-data:/data
+      # Clave SSH del host (solo lectura)
+      - ${HOME}/.ssh:/root/.ssh:ro
+      # Socket Docker para análisis de contenedores (opcional)
+      # - /var/run/docker.sock:/var/run/docker.sock:ro
+
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8443/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+volumes:
+  cyberhound-data:
+    driver: local

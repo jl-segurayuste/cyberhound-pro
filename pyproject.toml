@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cyberhound"
+version = "6.0.0"
+description = "Plataforma de seguridad y auditoría para PYMEs"
+requires-python = ">=3.11"
+dependencies = [
+    "aiohttp>=3.9",
+    "aiosqlite>=0.20",
+    "asyncssh>=2.14",          # SSH sin credenciales en texto plano
+    "aiofiles>=23.0",          # I/O de disco sin bloquear el event loop
+    "pyyaml>=6.0",
+    "colorama>=0.4",
+    "fpdf2>=2.7",
+    "jinja2>=3.1",
+    "beautifulsoup4>=4.12",
+    "PyJWT>=2.8",              # Autenticación JWT
+    "cryptography>=42.0",      # TLS, claves, mTLS
+    "python-multipart>=0.0.9",
+    "tenacity>=8.0",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+yara = ["yara-python>=4.3"]
+dev  = ["pytest", "pytest-asyncio", "ruff", "mypy"]
+
+[project.scripts]
+cyberhound = "cyberhound.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["cyberhound*"]
+
+[tool.setuptools.package-data]
+"cyberhound.ui.static" = ["*.html", "*.css", "*.js", "*.ico", "*.png"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
