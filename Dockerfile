@@ -38,7 +38,7 @@ RUN /opt/venv/bin/pip install --quiet . && \
 FROM python:3.12-slim AS runtime
 
 LABEL maintainer="CyberHound Pro" \
-      version="6.0.0" \
+      version="6.1.0" \
       description="Plataforma de auditoría y seguridad para PYMEs"
 
 # Herramientas de sistema necesarias en runtime
