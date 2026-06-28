@@ -34,3 +34,6 @@ htmlcov/
 .docker/
 docker-compose.override.yml
 reports/
+
+# artefacto temporal
+tmpfile
