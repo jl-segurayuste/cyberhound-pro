@@ -40,7 +40,7 @@
 
 | Prioridad | Recomendación |
 |---|---|
-| Baja | CSP permite `'unsafe-inline'` en `script-src` (necesario por los `onclick` inline). Mejora futura: nonce/hash + quitar inline. |
+| ~~Baja~~ ✅ | **HECHO**: CSP migrada a **nonce por petición** en `script-src` (bloquea `<script>` inyectados; verificado en navegador). Los `onclick` inline pasan a `script-src-attr 'unsafe-inline'`. Pendiente menor a futuro: eliminar también esos handlers de atributo. |
 | Baja | Rehash transparente al primer login para migrar el hash del admin de SHA-256 a PBKDF2 (hoy se migra al cambiar la contraseña). |
 | — | Limpieza menor: `id="history-trend-wrap"` duplicado en el panel de Historial. |
 
