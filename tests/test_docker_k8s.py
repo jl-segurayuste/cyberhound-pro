@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from cyberhound.core.security import InputValidator, ValidationError
 from cyberhound.scanners.docker_scan import (
     DockerScanner,
     _docker_available,
@@ -23,8 +24,6 @@ from cyberhound.scanners.kubernetes_scan import (
     check_pods_as_root,
     check_privileged_pods,
 )
-from cyberhound.core.security import InputValidator, ValidationError
-
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 

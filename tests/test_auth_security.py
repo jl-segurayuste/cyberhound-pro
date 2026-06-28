@@ -14,7 +14,6 @@ import pytest
 
 from cyberhound.core.models import Finding
 
-
 # ── Auth ──────────────────────────────────────────────────────────────────────
 
 class TestAuthConfig:
@@ -36,8 +35,9 @@ class TestAuthConfig:
         assert cfg2.verify_jwt(token) is None
 
     def test_jwt_expired_token(self):
-        from cyberhound.core.auth import AuthConfig
         from datetime import timedelta
+
+        from cyberhound.core.auth import AuthConfig
         cfg = AuthConfig(secret="test_secret_32chars_long_enough_x")
         cfg.token_ttl = timedelta(seconds=-1)
         token = cfg.issue_jwt("admin")
@@ -52,8 +52,9 @@ class TestAuthConfig:
         assert cfg.verify_jwt(None) is None
 
     def test_password_verify(self):
-        from cyberhound.core.auth import AuthConfig
         import hashlib
+
+        from cyberhound.core.auth import AuthConfig
         password = "mysecurepassword"
         pw_hash = hashlib.sha256(password.encode()).hexdigest()
         cfg = AuthConfig(password_hash=pw_hash, secret="test_secret_32chars_long_enough_x")
@@ -163,7 +164,7 @@ class TestSIEM:
     @pytest.mark.asyncio
     async def test_disabled_siem_no_exception(self):
         """Con SIEM desactivado no debe lanzar excepción."""
-        from cyberhound.core.siem import SIEMIntegration, SIEMConfig
+        from cyberhound.core.siem import SIEMConfig, SIEMIntegration
         cfg = SIEMConfig(wazuh_enabled=False, elk_enabled=False, splunk_enabled=False)
         siem = SIEMIntegration(cfg)
         finding = self._make_finding()
@@ -173,7 +174,7 @@ class TestSIEM:
     @pytest.mark.asyncio
     async def test_siem_test_connectivity_returns_dict(self):
         """El test de conectividad debe devolver un dict con resultados."""
-        from cyberhound.core.siem import SIEMIntegration, SIEMConfig
+        from cyberhound.core.siem import SIEMConfig, SIEMIntegration
         cfg = SIEMConfig(wazuh_enabled=False, elk_enabled=False, splunk_enabled=False)
         siem = SIEMIntegration(cfg)
         result = await siem.test()
@@ -229,7 +230,7 @@ class TestNotifications:
 
     @pytest.mark.asyncio
     async def test_disabled_notifications_no_exception(self):
-        from cyberhound.core.notifications import NotificationManager, NotificationConfig
+        from cyberhound.core.notifications import NotificationConfig, NotificationManager
         cfg = NotificationConfig(
             email_enabled=False,
         )

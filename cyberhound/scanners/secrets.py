@@ -96,7 +96,7 @@ class SecretScanner:
 
     @staticmethod
     async def _gitleaks_scan(path: Path) -> list[Finding]:
-        findings = []
+        findings: list[Finding] = []
         with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tmp:
             tmp_path = tmp.name
 
@@ -196,7 +196,7 @@ class SecretScanner:
 
     @staticmethod
     async def _semgrep_scan(path: Path) -> list[Finding]:
-        findings = []
+        findings: list[Finding] = []
         try:
             cmd = [
                 "semgrep", "--config", "p/secrets",

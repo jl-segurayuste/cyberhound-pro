@@ -11,7 +11,6 @@ from cyberhound.core.config import CyberHoundConfig
 from cyberhound.core.database import Database
 from cyberhound.core.models import Finding
 
-
 # ── Fixtures básicas ──────────────────────────────────────────────────────────
 
 @pytest.fixture

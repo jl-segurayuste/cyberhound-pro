@@ -7,11 +7,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from cyberhound.scanners.hardening import (
-    check_ssh_host_keys,
-    check_passwd_integrity,
     check_at_cron_allow,
     check_grub_password,
     check_ipv6_disabled_if_unused,
+    check_passwd_integrity,
+    check_ssh_host_keys,
 )
 
 

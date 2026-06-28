@@ -1,5 +1,6 @@
 """Tests de configuración — adaptados a la API real de CyberHoundConfig."""
 import pytest
+
 from cyberhound.core.config import CyberHoundConfig
 
 

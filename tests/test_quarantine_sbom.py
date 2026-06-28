@@ -18,7 +18,6 @@ from cyberhound.core.quarantine import (
 )
 from cyberhound.scanners.sbom import SBOM, SBOMGenerator
 
-
 # ── Cuarentena ────────────────────────────────────────────────────────────────
 
 @pytest.fixture

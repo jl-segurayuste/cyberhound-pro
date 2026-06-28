@@ -3,12 +3,17 @@ Tests del importador de auditorías externas.
 Cubre: Nessus XML, XCCDF/OpenSCAP, CSV genérico, JSON, detección de formato.
 """
 import pytest
-from cyberhound.scanners.audit_import import (
-    import_audit_file, detect_format,
-    parse_nessus, parse_xccdf, parse_csv,
-    cvss_to_severity, _xccdf_category, _nessus_category,
-)
 
+from cyberhound.scanners.audit_import import (
+    _nessus_category,
+    _xccdf_category,
+    cvss_to_severity,
+    detect_format,
+    import_audit_file,
+    parse_csv,
+    parse_nessus,
+    parse_xccdf,
+)
 
 # ── Fixtures de contenido de ejemplo ─────────────────────────────────────────
 

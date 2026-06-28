@@ -13,15 +13,16 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from cyberhound.core.ansible_integration import _finding_to_task, generate_playbook
 from cyberhound.core.models import Finding
-from cyberhound.core.openapi import build_openapi_spec, ENDPOINT_DOCS, SWAGGER_UI_HTML
-from cyberhound.core.multitenancy import Tenant, TenantStore, TenantMiddleware
-from cyberhound.core.ansible_integration import generate_playbook, _finding_to_task
+from cyberhound.core.multitenancy import Tenant, TenantMiddleware, TenantStore
+from cyberhound.core.openapi import ENDPOINT_DOCS, SWAGGER_UI_HTML, build_openapi_spec
 from cyberhound.scanners.runtime_scan import (
-    SUSPICIOUS_PROCS, check_resource_limits,
-    check_running_processes, check_container_diff,
+    SUSPICIOUS_PROCS,
+    check_container_diff,
+    check_resource_limits,
+    check_running_processes,
 )
-
 
 # ── OpenAPI ───────────────────────────────────────────────────────────────────
 
@@ -285,6 +286,35 @@ class TestAnsiblePlaybookGeneration:
         task = _finding_to_task(f)
         assert isinstance(task, str)
         assert len(task) > 10
+
+    def test_generates_auditd_inactive_task(self):
+        findings = [self._make_finding("auditd_inactive", category="audit")]
+        pb = generate_playbook(findings)
+        assert "auditd" in pb
+        assert "started" in pb
+
+    def test_generates_sticky_bit_task(self):
+        findings = [self._make_finding("tmp_no_sticky_bit", category="filesystem")]
+        pb = generate_playbook(findings)
+        assert "/tmp" in pb
+        assert "1777" in pb
+
+    def test_generates_cron_restriction_task(self):
+        findings = [self._make_finding("cron_no_restriction", category="cron")]
+        pb = generate_playbook(findings)
+        assert "cron.allow" in pb
+        assert "root" in pb
+
+    def test_generates_at_restriction_task(self):
+        findings = [self._make_finding("at_no_restriction", category="cron")]
+        pb = generate_playbook(findings)
+        assert "at.allow" in pb
+
+    def test_generates_umask_task(self):
+        findings = [self._make_finding("umask_insecure_user", category="hardening")]
+        pb = generate_playbook(findings)
+        assert "UMASK 027" in pb
+        assert "login.defs" in pb
 
     def test_finding_to_task_unknown_returns_debug(self):
         f = self._make_finding("unknown_check_xyz", auto_fix=True)

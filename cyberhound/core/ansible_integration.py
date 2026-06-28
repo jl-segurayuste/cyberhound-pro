@@ -186,7 +186,7 @@ def _finding_to_task(f: Finding) -> str:
 {indent}    sysctl_file: /etc/sysctl.d/99-cyberhound.conf
 {indent}    reload: yes"""
 
-    # Auditd
+    # Auditd no instalado
     if "no_auditd" in fid:
         return f"""{indent}- name: "CyberHound: Instalar y activar auditd"
 {indent}  package:
@@ -197,6 +197,55 @@ def _finding_to_task(f: Finding) -> str:
 {indent}    name: auditd
 {indent}    state: started
 {indent}    enabled: yes"""
+
+    # Auditd instalado pero inactivo
+    if "auditd_inactive" in fid:
+        return f"""{indent}- name: "CyberHound: Activar servicio auditd"
+{indent}  service:
+{indent}    name: auditd
+{indent}    state: started
+{indent}    enabled: yes"""
+
+    # Sticky bit en /tmp
+    if "tmp_no_sticky_bit" in fid:
+        return f"""{indent}- name: "CyberHound: Aplicar sticky bit a /tmp"
+{indent}  file:
+{indent}    path: /tmp
+{indent}    mode: '1777'
+{indent}    state: directory"""
+
+    # Restricción de cron (crear cron.allow con solo root)
+    if "cron_no_restriction" in fid or "cron_unrestricted" in fid:
+        return f"""{indent}- name: "CyberHound: Restringir cron a root"
+{indent}  copy:
+{indent}    dest: /etc/cron.allow
+{indent}    content: "root\\n"
+{indent}    mode: '0600'
+{indent}- name: "CyberHound: Eliminar cron.deny"
+{indent}  file:
+{indent}    path: /etc/cron.deny
+{indent}    state: absent"""
+
+    # Restricción de at
+    if "at_no_restriction" in fid:
+        return f"""{indent}- name: "CyberHound: Restringir at a root"
+{indent}  copy:
+{indent}    dest: /etc/at.allow
+{indent}    content: "root\\n"
+{indent}    mode: '0600'
+{indent}- name: "CyberHound: Eliminar at.deny"
+{indent}  file:
+{indent}    path: /etc/at.deny
+{indent}    state: absent"""
+
+    # Umask inseguro (configurar 027 en login.defs)
+    if "umask_insecure" in fid:
+        return f"""{indent}- name: "CyberHound: Establecer UMASK 027 en login.defs"
+{indent}  lineinfile:
+{indent}    path: /etc/login.defs
+{indent}    regexp: '^UMASK'
+{indent}    line: 'UMASK 027'
+{indent}    state: present"""
 
     # NTP
     if "no_ntp" in fid:
