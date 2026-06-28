@@ -178,9 +178,14 @@ class TestCheckOpenSSHVersion:
     @pytest.mark.asyncio
     async def test_detects_regresshion_vulnerability(self):
         proc = make_proc(stderr="OpenSSH_9.6p1 Ubuntu-3ubuntu13.3")
+        # Aislar la lógica de versión del chequeo de backport de la distro
+        # (en un sistema parcheado el changelog suprimiría el hallazgo).
         with patch(
             "cyberhound.scanners.hardening.run_command",
             new_callable=AsyncMock, return_value=proc
+        ), patch(
+            "cyberhound.scanners.hardening._openssh_patched_via_distro",
+            new_callable=AsyncMock, return_value=False
         ):
             findings = await check_openssh_version()
         assert len(findings) >= 1

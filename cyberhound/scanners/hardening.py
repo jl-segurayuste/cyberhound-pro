@@ -614,6 +614,35 @@ async def check_services_listening_all() -> list[Finding]:
     return results
 
 
+async def _openssh_patched_via_distro(cve: str) -> bool:
+    """¿La distro ha backporteado el parche del CVE en su paquete openssh?
+
+    Debian/Ubuntu/RHEL corrigen vulnerabilidades manteniendo el número de
+    versión upstream (p. ej. 9.6p1), por lo que el banner de `ssh -V` no basta:
+    hay que mirar el changelog del paquete. Evita falsos positivos.
+    """
+    import glob
+    import gzip
+    import shutil as _shutil
+
+    cve = cve.upper()
+    # Debian / Ubuntu
+    for path in glob.glob("/usr/share/doc/openssh-*/changelog.Debian.gz"):
+        try:
+            with gzip.open(path, "rt", errors="replace") as fh:
+                if cve in fh.read():
+                    return True
+        except OSError:
+            continue
+    # RHEL / derivados
+    rpm = _shutil.which("rpm")
+    if rpm:
+        proc = await run_command([rpm, "-q", "--changelog", "openssh-server"], timeout=10)
+        if cve in (proc.stdout or ""):
+            return True
+    return False
+
+
 async def check_openssh_version() -> list[Finding]:
     """Verifica la versión de OpenSSH contra CVEs conocidos."""
     # CVEs relevantes por versión (simplificado, las más críticas)
@@ -637,6 +666,11 @@ async def check_openssh_version() -> list[Finding]:
     findings = []
     for (vuln_maj, vuln_min, vuln_pat), (cve, sev, desc) in VULNERABLE_VERSIONS.items():
         if current <= (vuln_maj, vuln_min, vuln_pat):
+            # El banner indica versión vulnerable, pero la distro puede haber
+            # backporteado el parche (mismo número de versión). Si es así, no
+            # es vulnerable → evitamos el falso positivo.
+            if await _openssh_patched_via_distro(cve):
+                continue
             findings.append(_f(
                 f"openssh_cve_{cve.replace('-','_').lower()}",
                 "ssh/cve", sev,
