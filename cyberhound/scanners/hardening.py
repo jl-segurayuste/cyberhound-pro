@@ -417,6 +417,257 @@ async def check_aide() -> list[Finding]:
                auto_fix=True)]
 
 
+async def check_umask() -> list[Finding]:
+    """Verifica que el umask del sistema sea 027 o más restrictivo."""
+    results = []
+    for path in ["/etc/profile", "/etc/bash.bashrc", "/etc/login.defs"]:
+        content = await read_file_async(path)
+        if content and re.search(r"umask\s+0?22", content):
+            results.append(_f(
+                f"umask_insecure_{Path(path).name}", "filesystem", "medium",
+                f"Umask permisivo (022) en {path}",
+                "Un umask de 022 crea ficheros legibles por todos los usuarios. "
+                "El valor recomendado es 027 (grupo puede leer, otros sin acceso).",
+                f"Cambiar en {path}: umask 027",
+                evidence=f"umask 022 en {path}", auto_fix=True, file_path=path,
+            ))
+    return results
+
+
+async def check_ntp() -> list[Finding]:
+    """Verifica que el sistema tenga sincronización de tiempo configurada."""
+    for svc in ["chrony", "chronyd", "ntpd", "timesyncd", "ntp"]:
+        if command_exists(svc):
+            proc = await run_command(["systemctl", "is-active", svc], timeout=10)
+            if "active" in proc.stdout:
+                return []
+    # Comprobar timedatectl como fallback
+    proc = await run_command(["timedatectl", "status"], timeout=10)
+    if "synchronized: yes" in proc.stdout.lower() or "ntp service: active" in proc.stdout.lower():
+        return []
+    return [_f(
+        "no_ntp", "time", "medium",
+        "Sin sincronización de tiempo (NTP) activa",
+        "Sin NTP los logs tendrán timestamps incorrectos, lo que invalida "
+        "cualquier auditoría forense y correlación de eventos.",
+        "apt install chrony && systemctl enable --now chrony",
+        auto_fix=True,
+    )]
+
+
+async def check_login_banners() -> list[Finding]:
+    """Verifica que los banners de login estén configurados (requisito legal ENS/ISO27001)."""
+    results = []
+    for banner_file, banner_type in [
+        ("/etc/issue", "consola local (pre-login)"),
+        ("/etc/issue.net", "SSH (pre-login remoto)"),
+        ("/etc/motd", "mensaje post-login"),
+    ]:
+        content = await read_file_async(banner_file)
+        if not content or len(content.strip()) < 10:
+            results.append(_f(
+                f"no_banner_{Path(banner_file).name.replace('.','_')}",
+                "compliance", "low",
+                f"Banner de login ausente: {banner_file}",
+                f"El banner {banner_type} está vacío o no configurado. "
+                "Es un requisito legal en muchos entornos regulados (ENS, ISO 27001, PCI-DSS).",
+                f"echo 'Acceso restringido a usuarios autorizados. "
+                f"Toda actividad es registrada.' > {banner_file}",
+                auto_fix=True, file_path=banner_file,
+            ))
+    return results
+
+
+async def check_empty_passwords() -> list[Finding]:
+    """Detecta cuentas de sistema sin contraseña en /etc/shadow."""
+    content = await read_file_async("/etc/shadow")
+    if content is None:
+        return [_f("shadow_unreadable", "authentication", "info",
+                   "No se pudo leer /etc/shadow (requiere root)",
+                   "", "Ejecutar como root para verificar contraseñas vacías")]
+    results = []
+    for line in content.splitlines():
+        parts = line.split(":")
+        if len(parts) < 2:
+            continue
+        username, pw_field = parts[0], parts[1]
+        # Campo vacío = sin contraseña; ! o * = bloqueada (OK)
+        if pw_field == "" or pw_field == "U6aMy0wojraho":  # hash conocido de vacío
+            results.append(_f(
+                f"empty_password_{username}", "authentication", "critical",
+                f"Cuenta sin contraseña: {username}",
+                f"La cuenta '{username}' no tiene contraseña establecida. "
+                "Cualquier usuario puede autenticarse sin credenciales.",
+                f"passwd -l {username}  # bloquear cuenta\n"
+                f"# O establecer contraseña: passwd {username}",
+                evidence=f"shadow: {username}::",
+                auto_fix=True,
+            ))
+    return results
+
+
+async def check_duplicate_uid0() -> list[Finding]:
+    """Detecta cuentas con UID 0 distintas de root (backdoor clásico)."""
+    content = await read_file_async("/etc/passwd")
+    if content is None:
+        return []
+    results = []
+    for line in content.splitlines():
+        parts = line.split(":")
+        if len(parts) < 4:
+            continue
+        username, uid = parts[0], parts[2]
+        if uid == "0" and username != "root":
+            results.append(_f(
+                f"duplicate_uid0_{username}", "authentication", "critical",
+                f"UID 0 duplicado: cuenta '{username}' tiene privilegios de root",
+                f"La cuenta '{username}' tiene UID 0, lo que le otorga privilegios "
+                "equivalentes a root. Esto es un indicador de compromiso.",
+                f"usermod -u $(awk -F: '($3>999){{print $3}}' /etc/passwd | sort -n | tail -1) {username}\n"
+                f"# O si es una cuenta no legítima: userdel {username}",
+                evidence=f"/etc/passwd: {line}", auto_fix=False,
+            ))
+    return results
+
+
+async def check_tmp_noexec() -> list[Finding]:
+    """Verifica que /tmp y /var/tmp estén montados con noexec y nosuid."""
+    content = await read_file_async("/proc/mounts")
+    if content is None:
+        return []
+    results = []
+    for mount_point, check_label in [("/tmp", "tmp"), ("/var/tmp", "var_tmp")]:
+        mounted_noexec = False
+        mounted_nosuid = False
+        for line in content.splitlines():
+            parts = line.split()
+            if len(parts) < 4 or parts[1] != mount_point:
+                continue
+            opts = parts[3].split(",")
+            mounted_noexec = "noexec" in opts
+            mounted_nosuid = "nosuid" in opts
+            break
+        missing = []
+        if not mounted_noexec:
+            missing.append("noexec")
+        if not mounted_nosuid:
+            missing.append("nosuid")
+        if missing:
+            results.append(_f(
+                f"tmp_{check_label}_{'_'.join(missing)}", "filesystem", "high",
+                f"{mount_point} sin {', '.join(missing)}",
+                f"{mount_point} permite ejecución de binarios o SUID. "
+                "Es el vector de ataque más común para escalada de privilegios.",
+                f"Añadir a /etc/fstab:\n"
+                f"tmpfs {mount_point} tmpfs defaults,noexec,nosuid,nodev 0 0\n"
+                f"mount -o remount,noexec,nosuid,nodev {mount_point}",
+                auto_fix=False,  # requiere verificar que no rompe nada
+            ))
+    return results
+
+
+async def check_services_listening_all() -> list[Finding]:
+    """Detecta servicios escuchando en 0.0.0.0 que no deberían estar expuestos."""
+    SAFE_PORTS = {
+        22,    # SSH — esperado
+        80,    # HTTP
+        443,   # HTTPS
+        8080,  # HTTP alt
+        8443,  # HTTPS alt (CyberHound mismo)
+    }
+    SUSPICIOUS_SERVICES = {
+        "mysql", "mysqld", "postgres", "redis", "mongodb", "memcached",
+        "elasticsearch", "kibana", "grafana", "rabbitmq", "activemq",
+    }
+    proc = await run_command(["ss", "-tlnp"], timeout=15)
+    if proc.returncode != 0:
+        proc = await run_command(["netstat", "-tlnp"], timeout=15)
+    results = []
+    for line in proc.stdout.splitlines()[1:]:  # saltar cabecera
+        # Buscar servicios en 0.0.0.0 o :::
+        if "0.0.0.0:" not in line and ":::":
+            continue
+        # Extraer puerto
+        port_match = re.search(r'[0:]:(\d+)\s', line)
+        if not port_match:
+            continue
+        port = int(port_match.group(1))
+        if port in SAFE_PORTS:
+            continue
+        # Extraer nombre del proceso si está disponible
+        proc_match = re.search(r'users:\(\("([^"]+)"', line)
+        proc_name = proc_match.group(1) if proc_match else "desconocido"
+        if proc_name.lower() in SUSPICIOUS_SERVICES:
+            sev = "high"
+            desc = (f"El servicio '{proc_name}' está escuchando en todas las interfaces "
+                    f"(puerto {port}). Servicios de BD/cache nunca deben ser accesibles "
+                    "desde la red externa.")
+        else:
+            sev = "medium"
+            desc = (f"Servicio '{proc_name}' escuchando en todas las interfaces "
+                    f"(puerto {port}). Verificar si es intencional.")
+        results.append(_f(
+            f"svc_listen_all_{port}", "network", sev,
+            f"Servicio en todas las interfaces: {proc_name}:{port}",
+            desc,
+            f"Configurar {proc_name} para escuchar solo en 127.0.0.1 o la IP necesaria.\n"
+            f"Ejemplo: bind-address = 127.0.0.1 en la configuración del servicio.",
+            evidence=line.strip(), auto_fix=False,
+        ))
+    return results
+
+
+async def check_openssh_version() -> list[Finding]:
+    """Verifica la versión de OpenSSH contra CVEs conocidos."""
+    # CVEs relevantes por versión (simplificado, las más críticas)
+    VULNERABLE_VERSIONS = {
+        # (max_versión_vulnerable, CVE, severidad, descripción)
+        (9, 2, 0): ("CVE-2023-38408", "critical",
+                    "regreSSHion: RCE sin autenticación vía ssh-agent forwarding"),
+        (9, 5, 0): ("CVE-2023-51385", "high",
+                    "Inyección de comandos vía nombres de host con metacaracteres"),
+        (9, 7, 0): ("CVE-2024-6387", "critical",
+                    "regreSSHion: condición de carrera en signal handler, RCE sin auth"),
+    }
+    proc = await run_command(["ssh", "-V"], timeout=10)
+    version_str = proc.stderr or proc.stdout
+    m = re.search(r"OpenSSH[_/](\d+)\.(\d+)(?:p(\d+))?", version_str)
+    if not m:
+        return []
+    major, minor = int(m.group(1)), int(m.group(2))
+    patch = int(m.group(3)) if m.group(3) else 0
+    current = (major, minor, patch)
+    findings = []
+    for (vuln_maj, vuln_min, vuln_pat), (cve, sev, desc) in VULNERABLE_VERSIONS.items():
+        if current <= (vuln_maj, vuln_min, vuln_pat):
+            findings.append(_f(
+                f"openssh_cve_{cve.replace('-','_').lower()}",
+                "ssh/cve", sev,
+                f"OpenSSH {major}.{minor}p{patch} vulnerable a {cve}",
+                f"{desc}\nVersión actual: OpenSSH {major}.{minor}p{patch}",
+                "apt update && apt upgrade openssh-server",
+                evidence=f"Versión detectada: {version_str.strip()}", auto_fix=True,
+            ))
+    return findings
+
+
+async def check_sticky_bit_tmp() -> list[Finding]:
+    """Verifica que /tmp tenga sticky bit activado."""
+    try:
+        mode = Path("/tmp").stat().st_mode
+        if not (mode & 0o1000):  # sticky bit
+            return [_f(
+                "tmp_no_sticky_bit", "filesystem", "high",
+                "/tmp sin sticky bit",
+                "Sin sticky bit en /tmp cualquier usuario puede borrar ficheros de otros usuarios.",
+                "chmod +t /tmp",
+                auto_fix=True,
+            )]
+    except OSError:
+        pass
+    return []
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Orquestador
 # ──────────────────────────────────────────────────────────────────────────────
@@ -440,6 +691,16 @@ class HardeningAuditor:
         check_log_permissions,
         check_unattended_upgrades,
         check_aide,
+        # Nuevos checks v6.1
+        check_umask,
+        check_ntp,
+        check_login_banners,
+        check_empty_passwords,
+        check_duplicate_uid0,
+        check_tmp_noexec,
+        check_sticky_bit_tmp,
+        check_services_listening_all,
+        check_openssh_version,
     ]
 
     @classmethod
@@ -498,6 +759,15 @@ class HardeningFixer:
                 return await self._fix_service(fid)
             if fid.startswith("login_defs_"):
                 return await self._fix_login_defs(fid)
+            if fid.startswith("umask_insecure_"):
+                return await self._fix_umask(finding)
+            if fid.startswith("no_banner_"):
+                return await self._fix_login_banner(finding)
+            if fid.startswith("empty_password_"):
+                username = fid.replace("empty_password_", "")
+                return await self._run(["passwd", "-l", username])
+            if fid.startswith("openssh_cve_"):
+                return await self._fix_openssh()
             # Fixes por ID exacto
             dispatch = {
                 "no_pam_faillock":       self._fix_pam_faillock,
@@ -510,6 +780,12 @@ class HardeningFixer:
                 "no_unattended_upgrades":self._fix_unattended,
                 "no_aide":               self._fix_aide,
                 "aide_db_missing":       self._fix_aide_db,
+                # Nuevos v6.1
+                "no_ntp":                self._fix_ntp,
+                "tmp_no_sticky_bit":     self._fix_sticky_bit,
+                "openssh_cve_cve_2024_6387": self._fix_openssh,
+                "openssh_cve_cve_2023_38408": self._fix_openssh,
+                "openssh_cve_cve_2023_51385": self._fix_openssh,
             }
             if fid in dispatch:
                 return await dispatch[fid]()
@@ -678,3 +954,44 @@ class HardeningFixer:
             if src.exists():
                 src.rename(dst)
         return ok, err
+
+    async def _fix_ntp(self) -> tuple[bool, str]:
+        ok, err = await self._run(["apt-get", "install", "-y", "chrony"], timeout=120)
+        if ok:
+            await self._run(["systemctl", "enable", "--now", "chrony"])
+        return ok, err
+
+    async def _fix_sticky_bit(self) -> tuple[bool, str]:
+        return await self._run(["chmod", "+t", "/tmp"])
+
+    async def _fix_openssh(self) -> tuple[bool, str]:
+        ok, err = await self._run(["apt-get", "update"], timeout=60)
+        if ok:
+            ok, err = await self._run(
+                ["apt-get", "install", "--only-upgrade", "-y", "openssh-server"],
+                timeout=120,
+            )
+        return ok, err
+
+    async def _fix_umask(self, finding: Finding) -> tuple[bool, str]:
+        path = finding.file_path
+        if not path:
+            return False, "file_path vacío"
+        content = await read_file_async(path)
+        if content is None:
+            return False, f"No se pudo leer {path}"
+        content = re.sub(r"(umask\s+)0?22\b", r"\g<1>027", content)
+        Path(path).write_text(content)
+        return True, ""
+
+    async def _fix_login_banner(self, finding: Finding) -> tuple[bool, str]:
+        path = finding.file_path
+        if not path:
+            return False, "file_path vacío"
+        msg = (
+            "AVISO: Este sistema es de uso exclusivo para personal autorizado.\n"
+            "Toda actividad es registrada y supervisada.\n"
+            "El acceso no autorizado está prohibido y puede ser objeto de acciones legales.\n"
+        )
+        Path(path).write_text(msg)
+        return True, ""

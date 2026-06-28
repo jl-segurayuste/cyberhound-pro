@@ -262,14 +262,26 @@ class InputValidator:
         value = value.strip()
         if len(value) > 253:
             raise ValidationError(field_name, "Hostname demasiado largo")
-        # Verificar si es IPv4 válida
+        # Verificar si parece una IP (contiene solo dígitos y puntos)
+        # y en ese caso forzar la validación estricta como IP
+        if re.match(r'^\d{1,3}(\.\d{1,3}){3}$', value):
+            try:
+                ipaddress.ip_address(value)
+                return value
+            except ValueError:
+                raise ValidationError(field_name, f"Dirección IPv4 inválida: {value}")
+        # Intentar como IPv6 o IP genérica
         try:
             ipaddress.ip_address(value)
             return value
         except ValueError:
             pass
-        # Verificar hostname
-        if not InputValidator._IP_RE.match(value):
+        # Verificar hostname válido (RFC 1123)
+        hostname_re = re.compile(
+            r'^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?'
+            r'(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$'
+        )
+        if not hostname_re.match(value):
             raise ValidationError(field_name, f"IP/hostname inválido: {value}")
         return value
 
