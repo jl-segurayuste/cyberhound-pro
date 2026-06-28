@@ -278,6 +278,8 @@ class CyberHoundServer:
         # ── Escaneos ──────────────────────────────────────────────────────────
         app.router.add_post("/api/fix/local",    self.api_fix_local)
         app.router.add_post("/api/fix/remote",   self.api_fix_remote)
+        app.router.add_get ("/api/rollback",      self.api_rollback_list)
+        app.router.add_post("/api/rollback/local", self.api_rollback_local)
         app.router.add_post("/api/report/{fmt}", self.api_report)
 
         # ── Histórico y resultados ────────────────────────────────────────────
@@ -825,17 +827,28 @@ class CyberHoundServer:
             if not finding:
                 return web.json_response({"ok": False, "error": "Finding no encontrado"})
             from cyberhound.scanners.hardening import HardeningFixer
-            ok, msg = await HardeningFixer(dry_run=dry).fix(finding)
+            fixer = HardeningFixer(dry_run=dry)
+            ok, msg = await fixer.fix(finding)
             audit_log.fix_applied(fid, user, "localhost", dry)
             # Marcar como corregido en BD si tenemos el scan_id
             if ok and not dry:
+                # Registrar en el journal de rollback para poder deshacer el fix.
+                if fixer.rollback_actions:
+                    from cyberhound.core.rollback import RollbackEntry
+                    self._rollback_journal().append(RollbackEntry(
+                        finding_id=fid, host="localhost", user=user, ts=time.time(),
+                        fix_message=msg or finding.remediation,
+                        actions=fixer.rollback_actions,
+                    ))
                 for ws_id, findings in self._findings_cache.items():
                     if any(f.id == fid for f in findings):
                         scan_id = self._scan_id_cache.get(ws_id)
                         if scan_id:
                             await self.db.mark_finding_fixed(scan_id, fid, user)
                         break
-            return web.json_response({"ok": ok, "message": msg})
+            return web.json_response(
+                {"ok": ok, "message": msg, "reversible": bool(fixer.rollback_actions) and not dry}
+            )
         except Exception as e:
             logger.error("api_fix_local: %s", e, exc_info=True)
             return web.json_response({"ok": False, "error": str(e)}, status=500)
@@ -861,6 +874,41 @@ class CyberHoundServer:
             return web.json_response({"ok": ok, "message": msg})
         except Exception as e:
             logger.error("api_fix_remote: %s", e, exc_info=True)
+            return web.json_response({"ok": False, "error": str(e)}, status=500)
+
+    # ── Rollback de fixes locales ───────────────────────────────────────────────
+
+    def _rollback_journal(self):
+        from cyberhound.core.rollback import RollbackJournal
+        return RollbackJournal(Path(self.cfg.server.log_dir) / "rollback-journal.jsonl")
+
+    async def api_rollback_list(self, request: web.Request) -> web.Response:
+        """Lista los fixes locales que aún se pueden deshacer."""
+        try:
+            entries = self._rollback_journal().list_active()
+            return web.json_response({"ok": True, "entries": [
+                {"finding_id": e.finding_id, "host": e.host, "user": e.user,
+                 "ts": e.ts, "reversible": e.reversible, "fix_message": e.fix_message}
+                for e in sorted(entries, key=lambda e: e.ts, reverse=True)
+            ]})
+        except Exception as e:
+            logger.error("api_rollback_list: %s", e, exc_info=True)
+            return web.json_response({"ok": False, "error": str(e)}, status=500)
+
+    async def api_rollback_local(self, request: web.Request) -> web.Response:
+        """Revierte el último fix local aplicado a un finding."""
+        try:
+            body = await _read_json(request)
+            fid  = body.get("finding_id")
+            user = request.get("auth_user", "unknown")
+            if not fid:
+                return web.json_response({"ok": False, "error": "finding_id requerido"}, status=400)
+            from cyberhound.core.rollback import rollback_finding
+            ok, msg = await rollback_finding(self._rollback_journal(), fid, host="localhost")
+            audit_log.fix_rolled_back(fid, user, "localhost", ok)
+            return web.json_response({"ok": ok, "message": msg})
+        except Exception as e:
+            logger.error("api_rollback_local: %s", e, exc_info=True)
             return web.json_response({"ok": False, "error": str(e)}, status=500)
 
     # ── Histórico ─────────────────────────────────────────────────────────────

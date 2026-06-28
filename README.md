@@ -150,6 +150,15 @@ Los hallazgos con ⚡ pueden corregirse con un clic, tanto en local como en host
 | NTP | apt install chrony + enable |
 | OpenSSH CVE | apt upgrade openssh-server |
 
+#### Rollback (deshacer un fix)
+
+Cada fix **local** se registra en un *journal* (`<log_dir>/rollback-journal.jsonl`) con lo
+necesario para revertirlo: snapshot del fichero modificado, modo de permisos previo, estado
+del servicio o el comando inverso. Tras aplicar un fix reversible, el botón pasa a **«↶ Deshacer»**;
+también vía API: `GET /api/rollback` (lista lo reversible) y `POST /api/rollback/local`
+(`{"finding_id": "..."}`). Las instalaciones de paquetes se marcan **no reversibles** (no se
+desinstalan a ciegas): el rollback lo informa en vez de hacer algo peligroso.
+
 ---
 
 ## Arquitectura

@@ -14,6 +14,14 @@ from typing import TYPE_CHECKING
 from cyberhound.core.executor import command_exists, read_file_async, run_command
 from cyberhound.core.logging import get_logger
 from cyberhound.core.models import Finding
+from cyberhound.core.rollback import (
+    Action,
+    command_undo,
+    irreversible,
+    snapshot_chmod,
+    snapshot_file,
+    snapshot_service,
+)
 
 if TYPE_CHECKING:
     pass
@@ -898,6 +906,15 @@ class HardeningAuditor:
 class HardeningFixer:
     def __init__(self, dry_run: bool = False) -> None:
         self.dry_run = dry_run
+        # Acciones de reversión acumuladas durante el último fix() aplicado.
+        # Quien invoca el fix las persiste en el journal de rollback.
+        self.rollback_actions: list[Action] = []
+
+    def _record(self, action: Action) -> None:
+        self.rollback_actions.append(action)
+
+    async def _record_service(self, svc: str) -> None:
+        self.rollback_actions.append(await snapshot_service(svc))
 
     async def fix(self, finding: Finding) -> tuple[bool, str]:
         """
@@ -908,6 +925,9 @@ class HardeningFixer:
         # Quitar prefijo de host remoto si existe
         if "::" in fid:
             fid = fid.split("::", 1)[1]
+
+        # Reinicia el registro de reversión para este fix.
+        self.rollback_actions = []
 
         if self.dry_run:
             logger.info("[DRY-RUN] fix: %s → %s", fid, finding.remediation)
@@ -935,6 +955,8 @@ class HardeningFixer:
                 return await self._fix_login_banner(finding)
             if fid.startswith("empty_password_"):
                 username = fid.replace("empty_password_", "")
+                self._record(command_undo(["passwd", "-u", username],
+                                          f"desbloquear cuenta {username}"))
                 return await self._run(["passwd", "-l", username])
             if fid.startswith("openssh_cve_"):
                 return await self._fix_openssh()
@@ -983,6 +1005,11 @@ class HardeningFixer:
         if fid not in param_map:
             return False, f"SSH param desconocido: {fid}"
         param, value = param_map[fid]
+        # Reversión: restaurar el fichero y recargar sshd. Se registra el reload
+        # ANTES del snapshot para que, al revertir en orden inverso, primero se
+        # restaure el fichero y luego se recargue el servicio.
+        self._record(command_undo(["systemctl", "reload", "sshd"], "recargar sshd"))
+        self._record(snapshot_file("/etc/ssh/sshd_config"))
         if param is None:
             # Eliminar Protocol 1
             ok, err = await self._run(["sed", "-i", r"/^\s*Protocol\s*1/d", "/etc/ssh/sshd_config"])
@@ -1003,7 +1030,10 @@ class HardeningFixer:
 
     async def _fix_firewall(self, fid: str) -> tuple[bool, str]:
         if command_exists("ufw"):
+            # Reversión: volver al estado previo del firewall (estaba inactivo).
+            self._record(command_undo(["ufw", "--force", "disable"], "desactivar ufw"))
             return await self._run(["ufw", "--force", "enable"])
+        await self._record_service("firewalld")
         return await self._run(["systemctl", "enable", "--now", "firewalld"])
 
     async def _fix_sysctl(self, finding: Finding) -> tuple[bool, str]:
@@ -1012,9 +1042,15 @@ class HardeningFixer:
         if not m:
             return False, "No se pudo parsear el comando sysctl de la remediación"
         param, value = m.group(1), m.group(2)
+        # Reversión: snapshot del fichero de config y restauración del valor runtime previo.
+        conf = Path("/etc/sysctl.d/99-cyberhound.conf")
+        old = (await run_command(["sysctl", "-n", param], timeout=10, check=False)).stdout.strip()
+        self._record(snapshot_file(str(conf)))
+        if old:
+            self._record(command_undo(["sysctl", "-w", f"{param}={old}"],
+                                      f"restaurar {param}={old}"))
         ok, err = await self._run(["sysctl", "-w", f"{param}={value}"])
         if ok:
-            conf = Path("/etc/sysctl.d/99-cyberhound.conf")
             existing = conf.read_text() if conf.exists() else ""
             if param not in existing:
                 with open(conf, "a") as f:
@@ -1024,15 +1060,18 @@ class HardeningFixer:
     async def _fix_world_writable(self, finding: Finding) -> tuple[bool, str]:
         if not finding.file_path:
             return False, "file_path vacío"
+        self._record(snapshot_chmod(finding.file_path))
         return await self._run(["chmod", "o-w", finding.file_path])
 
     async def _fix_log_perm(self, finding: Finding) -> tuple[bool, str]:
         if not finding.file_path:
             return False, "file_path vacío"
+        self._record(snapshot_chmod(finding.file_path))
         return await self._run(["chmod", "o-r", finding.file_path])
 
     async def _fix_service(self, fid: str) -> tuple[bool, str]:
         svc = fid.removeprefix("svc_")
+        await self._record_service(svc)
         return await self._run(["systemctl", "disable", "--now", svc])
 
     async def _fix_login_defs(self, fid: str) -> tuple[bool, str]:
@@ -1046,6 +1085,7 @@ class HardeningFixer:
             return False, f"Param desconocido: {fid}"
         param, value = param_vals[fid]
         path = Path("/etc/login.defs")
+        self._record(snapshot_file(str(path)))
         content = (await read_file_async(str(path))) or ""
         if re.search(rf"^\s*{param}\s+", content, re.MULTILINE):
             content = re.sub(rf"^\s*{param}\s+.*", f"{param}\t{value}", content, flags=re.MULTILINE)
@@ -1061,6 +1101,8 @@ class HardeningFixer:
         content = pam.read_text()
         if "pam_faillock" in content:
             return True, "Ya configurado"
+        self._record(snapshot_file(str(pam)))
+        self._record(snapshot_file("/etc/pam.d/common-account"))
         line = "auth required pam_faillock.so preauth silent deny=5 unlock_time=600\n"
         lines = content.splitlines(keepends=True)
         new_lines = []
@@ -1084,6 +1126,12 @@ class HardeningFixer:
 
     async def _fix_core_dumps(self) -> tuple[bool, str]:
         conf = Path("/etc/security/limits.conf")
+        old = (await run_command(["sysctl", "-n", "fs.suid_dumpable"],
+                                 timeout=10, check=False)).stdout.strip()
+        self._record(snapshot_file(str(conf)))
+        if old:
+            self._record(command_undo(["sysctl", "-w", f"fs.suid_dumpable={old}"],
+                                      "restaurar fs.suid_dumpable"))
         content = conf.read_text() if conf.exists() else ""
         if "* hard core 0" not in content:
             with open(conf, "a") as f:
@@ -1093,30 +1141,38 @@ class HardeningFixer:
 
     async def _fix_usb_storage(self) -> tuple[bool, str]:
         conf = Path("/etc/modprobe.d/cyberhound-usb.conf")
+        self._record(snapshot_file(str(conf)))
         conf.write_text("blacklist usb-storage\ninstall usb-storage /bin/false\n")
         await self._run(["modprobe", "-r", "usb-storage"])
         return True, ""
 
     async def _fix_ctrlaltdel(self) -> tuple[bool, str]:
+        self._record(command_undo(["systemctl", "unmask", "ctrl-alt-del.target"],
+                                  "desenmascarar ctrl-alt-del"))
         return await self._run(["systemctl", "mask", "ctrl-alt-del.target"])
 
     async def _fix_apparmor(self) -> tuple[bool, str]:
+        await self._record_service("apparmor")
         return await self._run(["systemctl", "enable", "--now", "apparmor"])
 
     async def _fix_auditd(self) -> tuple[bool, str]:
+        self._record(irreversible("instalación de paquete 'auditd' (no se desinstala en rollback)"))
         await self._run(["apt-get", "install", "-y", "auditd"], timeout=120)
         return await self._run(["systemctl", "enable", "--now", "auditd"])
 
     async def _fix_unattended(self) -> tuple[bool, str]:
+        self._record(irreversible("instalación de 'unattended-upgrades' (no se desinstala en rollback)"))
         ok, err = await self._run(["apt-get", "install", "-y", "unattended-upgrades"], timeout=120)
         if ok:
             await self._run(["dpkg-reconfigure", "-f", "noninteractive", "unattended-upgrades"])
         return ok, err
 
     async def _fix_aide(self) -> tuple[bool, str]:
+        self._record(irreversible("instalación de 'aide' (no se desinstala en rollback)"))
         return await self._run(["apt-get", "install", "-y", "aide"], timeout=120)
 
     async def _fix_aide_db(self) -> tuple[bool, str]:
+        self._record(irreversible("inicialización de la base de datos AIDE (no reversible)"))
         ok, err = await self._run(["aideinit"], timeout=300)
         if ok:
             src = Path("/var/lib/aide/aide.db.new")
@@ -1126,15 +1182,18 @@ class HardeningFixer:
         return ok, err
 
     async def _fix_ntp(self) -> tuple[bool, str]:
+        self._record(irreversible("instalación de 'chrony' (no se desinstala en rollback)"))
         ok, err = await self._run(["apt-get", "install", "-y", "chrony"], timeout=120)
         if ok:
             await self._run(["systemctl", "enable", "--now", "chrony"])
         return ok, err
 
     async def _fix_sticky_bit(self) -> tuple[bool, str]:
+        self._record(snapshot_chmod("/tmp"))
         return await self._run(["chmod", "+t", "/tmp"])
 
     async def _fix_openssh(self) -> tuple[bool, str]:
+        self._record(irreversible("actualización de paquete 'openssh-server' (no se revierte la versión)"))
         ok, err = await self._run(["apt-get", "update"], timeout=60)
         if ok:
             ok, err = await self._run(
@@ -1150,6 +1209,7 @@ class HardeningFixer:
         content = await read_file_async(path)
         if content is None:
             return False, f"No se pudo leer {path}"
+        self._record(snapshot_file(path))
         content = re.sub(r"(umask\s+)0?22\b", r"\g<1>027", content)
         Path(path).write_text(content)
         return True, ""
@@ -1163,5 +1223,6 @@ class HardeningFixer:
             "Toda actividad es registrada y supervisada.\n"
             "El acceso no autorizado está prohibido y puede ser objeto de acciones legales.\n"
         )
+        self._record(snapshot_file(path))
         Path(path).write_text(msg)
         return True, ""
