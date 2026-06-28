@@ -3,7 +3,7 @@
 
 // ── Estado global ──────────────────────────────────────────────────────────
 const S = {
-  findings: { audit: [], malware: [], code: [], network: [] },
+  findings: { audit: [], malware: [], code: [], network: [], services: [], tls: [] },
   devices:  [],
   ws:       null,
   wsRetries: 0,
@@ -1550,6 +1550,48 @@ function runServicesAudit() {
     },
     onError() { btn('btn-services', false, '▶ Auditar servicios'); },
   }, 'Auditoría de servicios', '⚙️');
+}
+
+function runTLSScan() {
+  S.findings.tls = [];
+  document.getElementById('tls-results').style.display = 'none';
+  document.getElementById('tls-empty').style.display = '';
+  document.getElementById('tls-tbody').innerHTML = '';
+  btn('btn-tls', true, '⏳ Escaneando…');
+
+  const raw = (document.getElementById('tls-targets').value || '').trim();
+  const targets = raw ? raw.split('\n').map(s => s.trim()).filter(Boolean) : [];
+
+  wsRunWithActivity('tls', { targets }, {
+    onFinding(f) {
+      S.findings.tls.push(f);
+      const tbody = document.getElementById('tls-tbody');
+      const tr = document.createElement('tr');
+      tr.dataset.sev = f.severity;
+      tr.onclick = () => openDrawer(f);
+      const tgt = f.source_host || (f.evidence || '').split(',')[0] || '—';
+      tr.innerHTML = `
+        <td>${sevBadge(f.severity)}</td>
+        <td style="font-size:.8rem">🔒 ${esc(tgt)}</td>
+        <td><b>${esc(f.title)}</b></td>
+        <td style="font-size:.78rem;color:var(--text2)">${esc((f.remediation||'').substring(0,70))}</td>`;
+      tbody.appendChild(tr);
+    },
+    onDone() {
+      btn('btn-tls', false, '▶ Escanear TLS');
+      if (S.findings.tls.length) {
+        document.getElementById('tls-results').style.display = '';
+        document.getElementById('tls-empty').style.display = 'none';
+        renderSummary('tls-summary-bar', S.findings.tls);
+      } else {
+        const h3 = document.querySelector('#tls-empty h3');
+        const p  = document.querySelector('#tls-empty p');
+        if (h3) h3.textContent = '✅ TLS sin problemas detectados';
+        if (p)  p.textContent  = 'Los certificados analizados son válidos y seguros.';
+      }
+    },
+    onError() { btn('btn-tls', false, '▶ Escanear TLS'); },
+  }, 'Escaneo TLS/SSL', '🔒');
 }
 
 // ── 2FA ───────────────────────────────────────────────────────────────────────

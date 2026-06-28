@@ -457,6 +457,7 @@ pytest tests/ --cov=cyberhound --cov-report=term-missing
 | Docker image | `docker_image_scan.py` | Secretos en capas, SUID, EOL |
 | Runtime | `runtime_scan.py` | Procesos, diff, red, CPU en vivo |
 | Servicios | `services_audit.py` | nginx, apache, mysql, pg, redis, mongodb |
+| TLS/SSL | `tls_scan.py` | expiración, autofirmados, protocolos/firmas/claves débiles |
 | Código | `code.py` | bandit, shellcheck, eslint, secretos |
 | Intel | `intel.py` | Shodan, VT, AbuseIPDB, GreyNoise, HIBP |
 | LDAP/AD | `ldap_audit.py` | 6 checks: AS-REP, domain admins, policy |

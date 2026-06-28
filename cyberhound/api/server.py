@@ -447,6 +447,8 @@ class CyberHoundServer:
                 await self._run_docker_scan(msg, ws_id, send, log, scan_id)
             elif task == "services":
                 await self._run_services_audit(msg, ws_id, send, log, scan_id)
+            elif task == "tls":
+                await self._run_tls_scan(msg, ws_id, send, log, scan_id)
             else:
                 await send({"type": "error", "text": f"Tarea desconocida: {task}"})
         except Exception as e:
@@ -566,6 +568,24 @@ class CyberHoundServer:
         svc_str = ", ".join(services) if services else "nginx, apache, mysql, postgresql, redis, mongodb"
         await log("section", f"Auditando servicios: {svc_str}…")
         findings = await ServicesAuditor.full_audit(services=services)
+        await self._emit_findings(findings, ws_id, send, scan_id)
+
+    async def _run_tls_scan(self, params, ws_id, send, log, scan_id):
+        from cyberhound.scanners.tls_scan import TLSScanner
+        # params.targets: lista de "host:port"; si no, usa defaults
+        raw = params.get("targets") or []
+        targets = None
+        if raw:
+            targets = []
+            for t in raw:
+                if ":" in str(t):
+                    h, p = str(t).rsplit(":", 1)
+                    targets.append((h, int(p)))
+                else:
+                    targets.append((str(t), 443))
+        tgt_str = ", ".join(f"{h}:{p}" for h, p in (targets or TLSScanner.DEFAULT_TARGETS))
+        await log("section", f"Escaneando TLS/SSL: {tgt_str}…")
+        findings = await TLSScanner.full_scan(targets=targets)
         await self._emit_findings(findings, ws_id, send, scan_id)
 
     async def _run_malware_scan(self, params, ws_id, send, log, scan_id):

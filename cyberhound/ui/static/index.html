@@ -37,6 +37,7 @@
     <button class="nav-tab" data-panel="docker"    onclick="showPanel('docker')">🐳 Docker</button>
     <button class="nav-tab" data-panel="code"      onclick="showPanel('code')">📝 Código</button>
     <button class="nav-tab" data-panel="services"  onclick="showPanel('services')">⚙️ Servicios</button>
+    <button class="nav-tab" data-panel="tls"       onclick="showPanel('tls')">🔒 TLS/SSL</button>
     <button class="nav-tab" data-panel="intel"    onclick="showPanel('intel')">🌐 Intel</button>
     <button class="nav-tab" data-panel="history"   onclick="showPanel('history')">📅 Historial</button>
     <button class="nav-tab" data-panel="monitor"   onclick="showPanel('monitor')">👁 Monitor</button>
@@ -392,6 +393,41 @@
       <div class="empty-icon">⚙️</div>
       <h3>Auditoría de servicios no ejecutada</h3>
       <p>Solo se analizarán los servicios que estén instalados y activos.</p>
+    </div>
+  </section>
+
+
+  <!-- ═══ TLS / SSL ═══ -->
+  <section class="panel" id="panel-tls">
+    <div class="page-header"><h1>🔒 Escáner TLS/SSL</h1>
+      <p>Analiza certificados: expiración, autofirmados, protocolos obsoletos, firmas y claves débiles.</p>
+    </div>
+    <div class="config-bar">
+      <div class="field">
+        <label>Objetivos (host:puerto, uno por línea — vacío usa los del homelab)</label>
+        <textarea id="tls-targets" rows="3" placeholder="localhost:8443&#10;ejemplo.com:443&#10;192.168.1.10:9200"></textarea>
+      </div>
+      <button class="btn-primary" id="btn-tls" onclick="runTLSScan()">▶ Escanear TLS</button>
+    </div>
+    <div id="tls-results" style="display:none">
+      <div id="tls-summary-bar"></div>
+      <div class="toolbar">
+        <button class="filter active" onclick="filterTable('tls','all',this)">Todos</button>
+        <button class="filter" data-sev="critical" onclick="filterTable('tls','critical',this)">Crítico</button>
+        <button class="filter" data-sev="high" onclick="filterTable('tls','high',this)">Alto</button>
+        <button class="filter" data-sev="medium" onclick="filterTable('tls','medium',this)">Medio</button>
+        <input type="text" placeholder="🔎 Buscar…" oninput="searchTable('tls-tbody',this.value)">
+        <button class="btn-secondary small" onclick="exportJSON('tls')">⬇ JSON</button>
+      </div>
+      <table>
+        <thead><tr><th>Severidad</th><th>Objetivo</th><th>Problema</th><th>Solución</th></tr></thead>
+        <tbody id="tls-tbody"></tbody>
+      </table>
+    </div>
+    <div class="empty-panel" id="tls-empty">
+      <div class="empty-icon">🔒</div>
+      <h3>Escaneo TLS no ejecutado</h3>
+      <p>Verifica los certificados de tus servicios HTTPS y detecta configuraciones inseguras.</p>
     </div>
   </section>
 
