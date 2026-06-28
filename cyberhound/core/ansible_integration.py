@@ -13,11 +13,9 @@ de CyberHound en formato Ansible estándar (roles, tasks, handlers).
 """
 from __future__ import annotations
 
-import asyncio
 import json
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 from cyberhound.core.executor import command_exists, run_command
 from cyberhound.core.logging import get_logger
@@ -44,7 +42,7 @@ class AnsibleJob:
     status:     str    # pending | running | successful | failed
     playbook:   str
     started_at: str
-    finished_at: Optional[str] = None
+    finished_at: str | None = None
     output:     str = ""
     findings_fixed: list[str] = field(default_factory=list)
 
@@ -72,7 +70,7 @@ def generate_playbook(findings: list[Finding], target: str = "localhost") -> str
     tasks_yaml = "\n".join(tasks)
     return f"""---
 # CyberHound Pro — Playbook de remediación
-# Generado: {datetime.now(timezone.utc).isoformat()}
+# Generado: {datetime.now(UTC).isoformat()}
 # Objetivo: {target}
 # Hallazgos: {len(fixable)} con corrección automática disponible
 
@@ -106,7 +104,6 @@ def generate_playbook(findings: list[Finding], target: str = "localhost") -> str
 def _finding_to_task(f: Finding) -> str:
     """Convierte un Finding en una task Ansible."""
     fid = f.id or ""
-    cat = f.category or ""
     rem = f.remediation or ""
 
     indent = "    "
@@ -267,7 +264,7 @@ async def run_playbook_local(
     playbook_content: str,
     target: str = "localhost",
     inventory: str = "localhost,",
-    extra_vars: Optional[dict] = None,
+    extra_vars: dict | None = None,
 ) -> AnsibleJob:
     """Ejecuta un playbook Ansible en local."""
     if not command_exists("ansible-playbook"):
@@ -275,17 +272,18 @@ async def run_playbook_local(
             job_id="local_unavailable",
             status="failed",
             playbook="",
-            started_at=datetime.now(timezone.utc).isoformat(),
+            started_at=datetime.now(UTC).isoformat(),
             output="ansible-playbook no está instalado. Instala con: apt install ansible",
         )
 
-    import tempfile, os
+    import os
+    import tempfile
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False) as f:
         f.write(playbook_content)
         pb_path = f.name
 
-    job_id = f"local_{int(datetime.now(timezone.utc).timestamp())}"
-    started_at = datetime.now(timezone.utc).isoformat()
+    job_id = f"local_{int(datetime.now(UTC).timestamp())}"
+    started_at = datetime.now(UTC).isoformat()
 
     try:
         cmd = ["ansible-playbook", pb_path, "-i", inventory, "--connection=local"]
@@ -297,7 +295,7 @@ async def run_playbook_local(
         return AnsibleJob(
             job_id=job_id, status=status,
             playbook=pb_path, started_at=started_at,
-            finished_at=datetime.now(timezone.utc).isoformat(),
+            finished_at=datetime.now(UTC).isoformat(),
             output=proc.stdout[-5000:] if proc.stdout else proc.stderr[-2000:],
         )
     finally:
@@ -314,7 +312,9 @@ class AWXClient:
 
     async def launch_job_template(self, template_id: int, extra_vars: dict = None) -> AnsibleJob:
         """Lanza un job template en AWX y devuelve el job."""
-        import aiohttp, ssl
+        import ssl
+
+        import aiohttp
         ssl_ctx = None if self.cfg.verify_ssl else ssl.create_default_context()
         if ssl_ctx:
             ssl_ctx.check_hostname = False
@@ -329,7 +329,7 @@ class AWXClient:
             payload["extra_vars"] = json.dumps(extra_vars)
 
         url = f"{self.cfg.url.rstrip('/')}/api/v2/job_templates/{template_id}/launch/"
-        started_at = datetime.now(timezone.utc).isoformat()
+        started_at = datetime.now(UTC).isoformat()
 
         try:
             async with aiohttp.ClientSession(headers=headers) as session:

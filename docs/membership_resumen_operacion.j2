@@ -1,0 +1,35 @@
+==================================================================
+ RESUMEN GESTIÓN DE MEMBRESÍA — {{ membership_action | upper }}
+==================================================================
+
+  Fecha    : {{ membership_date.stdout }}
+  Acción   : {{ 'AÑADIR USUARIOS' if membership_action == 'add' else 'RETIRAR USUARIOS' }}
+  Grupos   : {{ membership_groups_list | join(', ') }}
+
+  Usuarios afectados:
+{% for usuario in membership_users_list %}
+    - {{ usuario }}
+{% endfor %}
+
+==================================================================
+{% for grupo in membership_groups_list %}
+  ── {{ grupo }} ──
+  Antes:
+{% if membership_before[grupo].members | default([]) | length > 0 %}
+{% for miembro in membership_before[grupo].members %}
+    - {{ miembro }}
+{% endfor %}
+{% else %}
+    Sin miembros
+{% endif %}
+  Después:
+{% if membership_after[grupo].members | default([]) | length > 0 %}
+{% for miembro in membership_after[grupo].members %}
+    - {{ miembro }}
+{% endfor %}
+{% else %}
+    Sin miembros
+{% endif %}
+
+{% endfor %}
+==================================================================

@@ -16,24 +16,24 @@ import hashlib
 import json
 import re
 import time
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 from aiohttp import web
 
 from cyberhound.core.auth import AuthConfig, auth_middleware, setup_auth_routes
-from cyberhound.api.routes.intel_routes import register_routes as register_intel_routes
 from cyberhound.core.config import CyberHoundConfig
-from cyberhound.core.database import AssetRecord, Database, UserRecord
+from cyberhound.core.database import AssetRecord, UserRecord
+from cyberhound.core.licensing import license_manager
 from cyberhound.core.logging import audit_log, get_logger
 from cyberhound.core.models import Finding, ScanReport
 from cyberhound.core.notifications import NotificationConfig, NotificationManager
 from cyberhound.core.scheduler import Scheduler, build_scheduler
-from cyberhound.core.licensing import license_manager
-from cyberhound.core.licensing import license_manager
 from cyberhound.core.security import (
-    CsrfProtection, InputValidator, TLSManager, ValidationError, _get_real_ip,
+    CsrfProtection,
+    InputValidator,
+    TLSManager,
+    ValidationError,
 )
 
 logger = get_logger("api")
@@ -183,7 +183,7 @@ class CyberHoundServer:
 
     def __init__(self, cfg: CyberHoundConfig) -> None:
         self.cfg = cfg
-        self._app: Optional[web.Application] = None
+        self._app: web.Application | None = None
         self._findings_cache: dict[str, list[Finding]] = {}
         self._scan_id_cache:  dict[str, int] = {}
         self._push_clients:   set = set()  # WebSocket push connections   # ws_id → scan_id en BD
@@ -223,8 +223,8 @@ class CyberHoundServer:
             splunk_hec_token=cfg.siem.splunk_hec_token,
             min_severity=cfg.siem.min_severity,
         ))
-        self.scheduler: Optional[Scheduler] = None
-        self._sbom_cache: Optional[dict] = None
+        self.scheduler: Scheduler | None = None
+        self._sbom_cache: dict | None = None
         self._ansible_jobs: list = []
         self._tenant_store = None
         self._ebpf_monitor = None
@@ -411,7 +411,7 @@ class CyberHoundServer:
 
         try:
             msg_raw = await asyncio.wait_for(ws.receive_json(), timeout=30)
-        except (asyncio.TimeoutError, Exception) as e:
+        except (TimeoutError, Exception) as e:
             logger.error("WS receive error: %s", e)
             await ws.close()
             return ws
@@ -794,7 +794,7 @@ class CyberHoundServer:
 
             findings_raw = await self.db.get_scan_findings(scan_id)
             from cyberhound.core.models import Finding
-            from cyberhound.core.scoring import compute_score, ScoringContext
+            from cyberhound.core.scoring import compute_score
             findings = [Finding(
                 id=f["finding_id"], category=f["category"], severity=f["severity"],
                 title=f["title"], description=f.get("description", ""),
@@ -1387,7 +1387,7 @@ class CyberHoundServer:
             user      = request.get("auth_user", "unknown")
 
             from cyberhound.scanners.docker_image_scan import DockerImageScanner
-            scan_id  = await self.db.create_scan("docker_image", triggered_by="manual")
+            scan_id  = await self.db.create_scan("docker_image", triggered_by=user)
             findings = await DockerImageScanner.scan_images(
                 images=images, max_images=max_imgs,
                 deep_scan=deep, max_size_mb=max_mb,
@@ -1446,8 +1446,8 @@ class CyberHoundServer:
                 findings = [Finding.from_dict(f) for f in findings_raw]
                 score = body.get("score")
 
-            from cyberhound.scanners.pdf_report import generate_pdf
             from cyberhound.core.licensing import license_manager
+            from cyberhound.scanners.pdf_report import generate_pdf
             lic = license_manager.get()
 
             pdf_bytes = generate_pdf(
@@ -1612,7 +1612,7 @@ class CyberHoundServer:
             body   = await _read_json(request)
             user   = request.get("auth_user", "unknown")
             from cyberhound.scanners.ldap_audit import LDAPAuditor
-            scan_id = await self.db.create_scan("ldap", triggered_by="manual")
+            scan_id = await self.db.create_scan("ldap", triggered_by=user)
             findings = await LDAPAuditor.full_audit(
                 uri=body.get("uri", ""),
                 base=body.get("base", ""),
@@ -1760,7 +1760,7 @@ class CyberHoundServer:
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
-    def _find_cached(self, finding_id: str) -> Optional[Finding]:
+    def _find_cached(self, finding_id: str) -> Finding | None:
         for fl in self._findings_cache.values():
             for f in fl:
                 if f.id == finding_id:
@@ -1784,7 +1784,6 @@ class CyberHoundServer:
 
         # Persistir el secreto JWT si aún no estaba guardado en config
         # (evita invalidar sesiones en cada reinicio del servidor)
-        from cyberhound.core.config import DEFAULT_CONFIG_PATH
         config_path = Path(self.cfg.db_path).parent / "config.yaml"
         if not self.cfg.auth.secret:
             import secrets as _sec
@@ -1845,7 +1844,7 @@ class CyberHoundServer:
                     f"   O usar otro: sudo cyberhound web --port 9443\n"
                     f"   {proc.stdout.strip()}\n"
                 )
-                raise SystemExit(1)
+                raise SystemExit(1) from None
             raise
 
         # 5. Scheduler

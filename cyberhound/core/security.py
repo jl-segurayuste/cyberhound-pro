@@ -22,8 +22,8 @@ import secrets
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
+from datetime import UTC
 from pathlib import Path
-from typing import Optional
 
 from aiohttp import web
 
@@ -242,7 +242,7 @@ class InputValidator:
         try:
             normalized = str(Path(value).resolve())
         except Exception:
-            raise ValidationError(field_name, "Ruta no normalizable")
+            raise ValidationError(field_name, "Ruta no normalizable") from None
         # Bloquear path traversal explícito
         if ".." in value:
             raise ValidationError(field_name, "Path traversal no permitido")
@@ -269,7 +269,7 @@ class InputValidator:
                 ipaddress.ip_address(value)
                 return value
             except ValueError:
-                raise ValidationError(field_name, f"Dirección IPv4 inválida: {value}")
+                raise ValidationError(field_name, f"Dirección IPv4 inválida: {value}") from None
         # Intentar como IPv6 o IP genérica
         try:
             ipaddress.ip_address(value)
@@ -313,7 +313,7 @@ class InputValidator:
             if net.prefixlen < 16:
                 raise ValidationError(field_name, f"Red demasiado grande (/{net.prefixlen}). Mínimo /16")
         except ValueError as e:
-            raise ValidationError(field_name, str(e))
+            raise ValidationError(field_name, str(e)) from e
         return value
 
     @staticmethod
@@ -332,7 +332,7 @@ class InputValidator:
         try:
             p = int(value)
         except (TypeError, ValueError):
-            raise ValidationError(field_name, "Puerto debe ser un número")
+            raise ValidationError(field_name, "Puerto debe ser un número") from None
         if not 1 <= p <= 65535:
             raise ValidationError(field_name, f"Puerto fuera de rango: {p}")
         return p
@@ -574,8 +574,8 @@ class TLSManager:
             cert = x509.load_pem_x509_certificate(
                 cert_path.read_bytes(), default_backend()
             )
-            from datetime import datetime, timezone
-            remaining = cert.not_valid_after_utc - datetime.now(timezone.utc)
+            from datetime import datetime
+            remaining = cert.not_valid_after_utc - datetime.now(UTC)
             if remaining.days < 30:
                 logger.info("Certificado TLS expira en %d días, regenerando", remaining.days)
                 return True
@@ -588,7 +588,7 @@ class TLSManager:
     def generate_self_signed(
         cls,
         common_name: str = "cyberhound.local",
-        san_ips: Optional[list[str]] = None,
+        san_ips: list[str] | None = None,
         days: int = 365,
     ) -> tuple[Path, Path]:
         """
@@ -598,17 +598,18 @@ class TLSManager:
         - Válido por 1 año
         """
         try:
+            import ipaddress as _ip
+            from datetime import datetime, timedelta
+
             from cryptography import x509
             from cryptography.hazmat.primitives import hashes, serialization
             from cryptography.hazmat.primitives.asymmetric import rsa
             from cryptography.x509.oid import NameOID
-            from datetime import datetime, timedelta, timezone
-            import ipaddress as _ip
-        except ImportError:
+        except ImportError as e:
             raise RuntimeError(
                 "La librería 'cryptography' es necesaria para TLS automático. "
                 "Instala con: pip install cryptography"
-            )
+            ) from e
 
         cert_path, key_path = cls.cert_paths()
         logger.info("Generando certificado TLS auto-firmado en %s…", cert_path.parent)
@@ -648,7 +649,7 @@ class TLSManager:
             x509.NameAttribute(NameOID.ORGANIZATION_NAME, "CyberHound Pro"),
         ])
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         cert = (
             x509.CertificateBuilder()
             .subject_name(subject)
@@ -696,8 +697,8 @@ class TLSManager:
     @classmethod
     def ensure_tls(
         cls,
-        cert_path: Optional[str] = None,
-        key_path: Optional[str] = None,
+        cert_path: str | None = None,
+        key_path: str | None = None,
     ) -> tuple[Path, Path]:
         """
         Asegura que hay certificados TLS disponibles.
@@ -721,8 +722,8 @@ class TLSManager:
     @classmethod
     def create_ssl_context(
         cls,
-        cert_path: Optional[str] = None,
-        key_path: Optional[str] = None,
+        cert_path: str | None = None,
+        key_path: str | None = None,
     ):
         """Crea y devuelve un ssl.SSLContext configurado de forma segura."""
         import ssl

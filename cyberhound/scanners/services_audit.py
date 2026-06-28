@@ -17,7 +17,6 @@ from __future__ import annotations
 import asyncio
 import re
 from pathlib import Path
-from typing import Optional
 
 from cyberhound.core.executor import command_exists, read_file_async, run_command
 from cyberhound.core.logging import get_logger
@@ -40,7 +39,7 @@ async def _service_active(name: str) -> bool:
     return "active" in proc.stdout.lower()
 
 
-async def _find_config(candidates: list[str]) -> Optional[str]:
+async def _find_config(candidates: list[str]) -> str | None:
     for path in candidates:
         if Path(path).exists():
             return path
@@ -54,7 +53,6 @@ async def audit_nginx() -> list[Finding]:
         return []
 
     findings = []
-    config_dirs = ["/etc/nginx/nginx.conf", "/etc/nginx/sites-enabled"]
 
     # Recopilar todos los ficheros de config
     config_files: list[str] = []
@@ -540,7 +538,7 @@ class ServicesAuditor:
 
     @classmethod
     async def full_audit(
-        cls, services: Optional[list[str]] = None
+        cls, services: list[str] | None = None
     ) -> list[Finding]:
         """
         Audita todos los servicios instalados.
@@ -555,7 +553,7 @@ class ServicesAuditor:
         )
 
         findings: list[Finding] = []
-        for service, result in zip(targets.keys(), results):
+        for service, result in zip(targets.keys(), results, strict=False):
             if isinstance(result, list):
                 findings.extend(result)
                 if result:

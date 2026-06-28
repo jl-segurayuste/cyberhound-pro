@@ -32,3 +32,5 @@ htmlcov/
 
 # Docker
 .docker/
+docker-compose.override.yml
+reports/

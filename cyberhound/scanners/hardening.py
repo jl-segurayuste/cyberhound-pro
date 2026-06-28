@@ -7,18 +7,16 @@ se loguean como información de seguridad, no se silencian.
 from __future__ import annotations
 
 import asyncio
-import os
 import re
-import shutil
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from cyberhound.core.executor import command_exists, read_file_async, run_command
 from cyberhound.core.logging import get_logger
 from cyberhound.core.models import Finding
 
 if TYPE_CHECKING:
-    from cyberhound.core.config import CyberHoundConfig
+    pass
 
 logger = get_logger("hardening")
 
@@ -850,7 +848,7 @@ class HardeningAuditor:
             return_exceptions=True,
         )
         findings: list[Finding] = []
-        for check_fn, result in zip(cls.CHECKS, results):
+        for check_fn, result in zip(cls.CHECKS, results, strict=False):
             if isinstance(result, list):
                 findings.extend(result)
             else:

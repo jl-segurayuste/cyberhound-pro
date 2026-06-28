@@ -17,12 +17,9 @@ Comunicación: HTTPS + API key compartida (no JWT)
 """
 from __future__ import annotations
 
-import json
 import socket
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Optional
+from datetime import UTC, datetime
 
 import aiohttp
 
@@ -68,7 +65,7 @@ class AgentReporter:
         self,
         findings: list[Finding],
         scan_type: str,
-        score: Optional[int] = None,
+        score: int | None = None,
     ) -> bool:
         """Envía los hallazgos de un scan al manager."""
         if not self.cfg.manager_url or not self.cfg.agent_key:
@@ -78,7 +75,7 @@ class AgentReporter:
         payload = {
             "agent_name":  self.cfg.agent_name,
             "scan_type":   scan_type,
-            "timestamp":   datetime.now(timezone.utc).isoformat(),
+            "timestamp":   datetime.now(UTC).isoformat(),
             "score":       score,
             "findings":    [f.to_dict() for f in findings],
             "total":       len(findings),
@@ -100,7 +97,7 @@ class AgentReporter:
             ) as session:
                 async with session.post(url, json=payload, headers=headers) as resp:
                     if resp.status in (200, 201):
-                        data = await resp.json()
+                        await resp.json()
                         logger.info(
                             "Agente '%s': %d hallazgos enviados al manager (%s)",
                             self.cfg.agent_name, len(findings), self.cfg.manager_url,
@@ -132,7 +129,7 @@ class AgentReporter:
         payload = {
             "agent_name": self.cfg.agent_name,
             "hostname":   socket.gethostname(),
-            "timestamp":  datetime.now(timezone.utc).isoformat(),
+            "timestamp":  datetime.now(UTC).isoformat(),
             "version":    AGENT_API_VERSION,
         }
         try:
@@ -177,7 +174,7 @@ class AgentManager:
         scan_type  = payload.get("scan_type", "audit")
         findings_raw = payload.get("findings", [])
         score      = payload.get("score")
-        timestamp  = payload.get("timestamp", datetime.now(timezone.utc).isoformat())
+        timestamp  = payload.get("timestamp", datetime.now(UTC).isoformat())
 
         # Reconstruir objetos Finding con source_host = agent_name
         findings = []
@@ -224,7 +221,7 @@ class AgentManager:
             **self._agents.get(agent_name, {}),
             "name":      agent_name,
             "hostname":  payload.get("hostname", agent_name),
-            "last_seen": payload.get("timestamp", datetime.now(timezone.utc).isoformat()),
+            "last_seen": payload.get("timestamp", datetime.now(UTC).isoformat()),
             "online":    True,
         }
 

@@ -16,7 +16,6 @@ import ssl
 from dataclasses import dataclass, field
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from typing import Optional
 
 import aiohttp
 
@@ -56,7 +55,7 @@ class NotificationManager:
         self.db = db   # Database | None
 
     async def send(
-        self, message: str, level: str = "info", scan_id: Optional[int] = None
+        self, message: str, level: str = "info", scan_id: int | None = None
     ) -> None:
         """Envía una notificación por todos los canales configurados."""
         # Guardar en BD primero

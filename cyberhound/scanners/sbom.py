@@ -17,10 +17,8 @@ from __future__ import annotations
 
 import asyncio
 import json
-import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional
 
 from cyberhound.core.executor import command_exists, run_command
 from cyberhound.core.logging import get_logger
@@ -81,7 +79,7 @@ async def collect_rpm() -> list[dict]:
     return packages
 
 
-async def collect_pip(venvs: Optional[list[str]] = None) -> list[dict]:
+async def collect_pip(venvs: list[str] | None = None) -> list[dict]:
     """Paquetes Python pip."""
     pips = ["pip3", "pip"]
     # Añadir venvs si se especifican
@@ -177,9 +175,9 @@ async def collect_kernel() -> list[dict]:
 class SBOMGenerator:
     @staticmethod
     async def generate(
-        include: Optional[list[str]] = None,
-        pip_venvs: Optional[list[str]] = None,
-    ) -> "SBOM":
+        include: list[str] | None = None,
+        pip_venvs: list[str] | None = None,
+    ) -> SBOM:
         """
         Genera el SBOM completo del sistema.
         include: lista de gestores a incluir (None = todos)
@@ -201,7 +199,7 @@ class SBOMGenerator:
         )
 
         components: list[dict] = []
-        for name, result in zip(collectors.keys(), results):
+        for name, result in zip(collectors.keys(), results, strict=False):
             if isinstance(result, list):
                 components.extend(result)
             else:
@@ -213,7 +211,7 @@ class SBOMGenerator:
 class SBOM:
     def __init__(self, components: list[dict]) -> None:
         self.components  = components
-        self.generated_at = datetime.now(timezone.utc).isoformat()
+        self.generated_at = datetime.now(UTC).isoformat()
         self.total        = len(components)
 
     def to_dict(self) -> dict:
@@ -261,10 +259,10 @@ class SBOM:
         lines = [
             "SPDXVersion: SPDX-2.3",
             "DataLicense: CC0-1.0",
-            f"SPDXID: SPDXRef-DOCUMENT",
-            f"DocumentName: CyberHound-SBOM",
+            "SPDXID: SPDXRef-DOCUMENT",
+            "DocumentName: CyberHound-SBOM",
             f"DocumentNamespace: https://cyberhound.local/sbom/{self.generated_at}",
-            f"Creator: Tool: CyberHound Pro 6.1.0",
+            "Creator: Tool: CyberHound Pro 6.1.0",
             f"Created: {self.generated_at}",
             "",
         ]
@@ -273,8 +271,8 @@ class SBOM:
                 f"PackageName: {c['name']}",
                 f"SPDXID: SPDXRef-Package-{i}",
                 f"PackageVersion: {c.get('version','')}",
-                f"PackageDownloadLocation: NOASSERTION",
-                f"FilesAnalyzed: false",
+                "PackageDownloadLocation: NOASSERTION",
+                "FilesAnalyzed: false",
                 "",
             ]
         return "\n".join(lines)
@@ -294,7 +292,7 @@ class SBOM:
         version = component.get("version", "")
         return f"pkg:{pkg_type}/{name}@{version}"
 
-    def diff(self, other: "SBOM") -> dict:
+    def diff(self, other: SBOM) -> dict:
         """
         Compara dos SBOMs y devuelve los cambios:
         paquetes añadidos, eliminados y actualizados.

@@ -15,9 +15,8 @@ import fnmatch
 import json
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional
 
 import aiosqlite
 
@@ -158,12 +157,12 @@ class UserRecord:
     password_hash: str
     role:          str = "viewer"
     created_at:    str = field(default_factory=lambda: _now())
-    last_login:    Optional[str] = None
+    last_login:    str | None = None
     active:        int = 1
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 class Database:
@@ -224,7 +223,7 @@ class Database:
         return scan_id
 
     async def complete_scan(
-        self, scan_id: int, findings: list[Finding], score: Optional[int] = None
+        self, scan_id: int, findings: list[Finding], score: int | None = None
     ) -> None:
         counts = {"critical": 0, "high": 0, "medium": 0, "low": 0}
         for f in findings:
@@ -287,7 +286,7 @@ class Database:
             await db.commit()
 
     async def get_scan_history(
-        self, scan_type: Optional[str] = None, limit: int = 50
+        self, scan_type: str | None = None, limit: int = 50
     ) -> list[dict]:
         q = "SELECT * FROM scans"
         p: list = []
@@ -436,7 +435,7 @@ class Database:
 
     async def add_suppression(
         self, pattern: str, reason: str, created_by: str,
-        expires_at: Optional[str] = None,
+        expires_at: str | None = None,
     ) -> None:
         async with aiosqlite.connect(str(self.path)) as db:
             await db.execute(
@@ -499,7 +498,7 @@ class Database:
             )
             await db.commit()
 
-    async def get_user(self, username: str) -> Optional[dict]:
+    async def get_user(self, username: str) -> dict | None:
         async with aiosqlite.connect(str(self.path)) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
@@ -539,7 +538,7 @@ class Database:
     # ── Notifications ─────────────────────────────────────────────────────────
 
     async def add_notification(
-        self, message: str, level: str = "info", scan_id: Optional[int] = None
+        self, message: str, level: str = "info", scan_id: int | None = None
     ) -> None:
         async with aiosqlite.connect(str(self.path)) as db:
             await db.execute(
@@ -620,6 +619,7 @@ class Database:
     ) -> None:
         """Guarda el secreto TOTP pendiente de verificación (2FA no activo aún)."""
         import json as _json
+
         from cyberhound.core.totp import hash_recovery_code
         hashes = [hash_recovery_code(c) for c in recovery_codes]
         async with aiosqlite.connect(str(self.path)) as db:
@@ -629,7 +629,7 @@ class Database:
             )
             await db.commit()
 
-    async def get_totp_pending(self, username: str) -> Optional[dict]:
+    async def get_totp_pending(self, username: str) -> dict | None:
         """Devuelve el secreto TOTP pendiente para verificar la activación."""
         async with aiosqlite.connect(str(self.path)) as db:
             db.row_factory = aiosqlite.Row

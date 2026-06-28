@@ -9,11 +9,9 @@ Principios:
 from __future__ import annotations
 
 import asyncio
-import os
 import shutil
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
-from typing import Optional
 
 from cyberhound.core.logging import get_logger
 
@@ -27,27 +25,31 @@ async def run_command(
     cmd: list[str],
     timeout: int = 60,
     check: bool = False,
-    input_data: Optional[str] = None,
-    env: Optional[dict] = None,
+    input_data: str | None = None,
+    env: dict | None = None,
 ) -> subprocess.CompletedProcess:
     """
     Ejecuta un comando de sistema de forma asíncrona.
     Nunca silencia errores: los loguea y relanza si check=True.
     """
     logger.debug("Ejecutando: %s", " ".join(cmd))
-    proc = await asyncio.create_subprocess_exec(
-        *cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        stdin=asyncio.subprocess.PIPE if input_data else None,
-        env=env,
-    )
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            stdin=asyncio.subprocess.PIPE if input_data else None,
+            env=env,
+        )
+    except FileNotFoundError:
+        logger.debug("Comando no encontrado (no disponible en este entorno): %s", cmd[0])
+        return subprocess.CompletedProcess(cmd, 127, "", f"{cmd[0]}: command not found")
     try:
         stdout, stderr = await asyncio.wait_for(
             proc.communicate(input_data.encode() if input_data else None),
             timeout=timeout,
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         proc.kill()
         logger.error("Comando agotó el timeout (%ds): %s", timeout, " ".join(cmd))
         raise
@@ -72,7 +74,7 @@ async def run_command(
     return result
 
 
-async def read_file_async(path: str, max_bytes: int = 10 * 1024 * 1024) -> Optional[str]:
+async def read_file_async(path: str, max_bytes: int = 10 * 1024 * 1024) -> str | None:
     """
     Lee un fichero de forma asíncrona usando aiofiles si está disponible,
     con fallback a ThreadPoolExecutor.
@@ -110,7 +112,7 @@ async def read_file_async(path: str, max_bytes: int = 10 * 1024 * 1024) -> Optio
 async def find_files_async(
     root: str,
     pattern: str = "*",
-    exclude_prefixes: Optional[list[str]] = None,
+    exclude_prefixes: list[str] | None = None,
     max_size_bytes: int = 50 * 1024 * 1024,
     timeout: int = 30,
 ) -> list[str]:
@@ -148,7 +150,7 @@ async def find_files_async(
             loop.run_in_executor(_pool, _find),
             timeout=timeout,
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.error("find_files_async agotó el timeout (%ds) en %s", timeout, root)
         return []
 
