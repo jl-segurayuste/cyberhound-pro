@@ -1678,6 +1678,48 @@ function runWebExposureScan() {
   }, 'Exposición de recursos web', '🕵️');
 }
 
+function runAPISecurityScan() {
+  S.findings.apisec = [];
+  document.getElementById('apisec-results').style.display = 'none';
+  document.getElementById('apisec-empty').style.display = '';
+  document.getElementById('apisec-tbody').innerHTML = '';
+
+  const raw = (document.getElementById('apisec-urls').value || '').trim();
+  const urls = raw ? raw.split('\n').map(s => s.trim()).filter(Boolean) : [];
+  if (!urls.length) { toast('Introduce al menos una URL'); return; }
+  btn('btn-apisec', true, '⏳ Analizando…');
+
+  wsRunWithActivity('api_security', { urls }, {
+    onFinding(f) {
+      S.findings.apisec.push(f);
+      const tbody = document.getElementById('apisec-tbody');
+      const tr = document.createElement('tr');
+      tr.dataset.sev = f.severity;
+      tr.onclick = () => openDrawer(f);
+      tr.innerHTML = `
+        <td>${sevBadge(f.severity)}</td>
+        <td style="font-size:.8rem">🔌 ${esc(f.source_host || '—')}</td>
+        <td><b>${esc(f.title)}</b></td>
+        <td style="font-size:.78rem;color:var(--text2)">${esc((f.remediation||'').substring(0,70))}</td>`;
+      tbody.appendChild(tr);
+    },
+    onDone() {
+      btn('btn-apisec', false, '▶ Analizar API/CORS');
+      if (S.findings.apisec.length) {
+        document.getElementById('apisec-results').style.display = '';
+        document.getElementById('apisec-empty').style.display = 'none';
+        renderSummary('apisec-summary-bar', S.findings.apisec);
+      } else {
+        const h3 = document.querySelector('#apisec-empty h3');
+        const p  = document.querySelector('#apisec-empty p');
+        if (h3) h3.textContent = '✅ API/CORS sin problemas detectados';
+        if (p)  p.textContent  = 'No se detectaron fallos de CORS ni documentación expuesta.';
+      }
+    },
+    onError() { btn('btn-apisec', false, '▶ Analizar API/CORS'); },
+  }, 'Seguridad de API / CORS', '🔌');
+}
+
 function runDNSScan() {
   S.findings.dnssec = [];
   document.getElementById('dnssec-results').style.display = 'none';
