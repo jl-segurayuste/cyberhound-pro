@@ -37,10 +37,14 @@ function showPanel(name) {
   document.getElementById('panel-' + name)?.classList.add('active');
   document.querySelector(`[data-panel="${name}"]`)?.classList.add('active');
   closeDrawer();
-  // Cargar datos al entrar a ciertas secciones
-  if (name === 'history')     loadHistory();
-  if (name === 'settings')    { loadKeys(); loadNotifications(); loadScheduler(); loadSuppresions(); loadUsers(); }
-  if (name === 'dashboard')   loadDashboard();
+  // ── Carga de datos — lista única y definitiva (sin monkey-patching) ─────────
+  const _panelLoaders = {
+    dashboard: () => loadDashboard(),
+    history:   () => { loadHistory(); loadAgentFilterOptions(); },
+    settings:  () => { loadKeys(); loadNotifications(); loadScheduler(); loadSuppressions(); loadUsers(); },
+    monitor:   () => { loadMonitorStatus(); loadMonitorHistory(); },
+  };
+  _panelLoaders[name]?.();
 }
 
 function showCfgTab(name) {
@@ -48,11 +52,20 @@ function showCfgTab(name) {
   document.querySelectorAll('.cfg-panel').forEach(p => p.classList.remove('active'));
   document.querySelector(`[data-cfg="${name}"]`)?.classList.add('active');
   document.getElementById('cfg-' + name)?.classList.add('active');
-  // Cargar datos al activar tabs que los necesitan
-  if (name === 'siem')         loadSIEM();
-  if (name === 'users')        loadUsers();
-  if (name === 'suppressions') loadSuppressions();
-  if (name === 'scheduler')    loadScheduler();
+  // ── Carga de datos — lista única y definitiva (sin monkey-patching) ─────────
+  const _cfgLoaders = {
+    siem:         () => loadSIEM(),
+    users:        () => loadUsers(),
+    suppressions: () => loadSuppressions(),
+    scheduler:    () => loadScheduler(),
+    '2fa':        () => load2FAStatus(),
+    yara:         () => loadYaraRules(),
+    agents:       () => loadAgents(),
+    license:      () => loadLicenseInfo(),
+    quarantine:   () => loadQuarantine(),
+    ansible:      () => loadAnsibleJobs(),
+  };
+  _cfgLoaders[name]?.();
 }
 
 // ── Status ────────────────────────────────────────────────────────────────
@@ -529,7 +542,8 @@ async function loadHistoryDetail(scanId) {
 }
 
 function closeHistoryDetail() {
-  document.getElementById('history-detail').style.display = 'none';
+  const el = document.getElementById('history-detail');
+  if (el) el.style.display = 'none';
 }
 
 // ── Fix local / remoto ────────────────────────────────────────────────────
@@ -974,11 +988,15 @@ const _sevBadge = sevBadge; // alias para compatibilidad
 // ── Init ──────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   setStatus('idle', 'Listo');
-  appendLog('info', 'CyberHound Pro v6.1 iniciado.');
+  appendLog('info', 'CyberHound Pro v6.3.0 iniciado.');
   loadDashboard();
   loadKeys();
-  // Actualizar dashboard cada 5 minutos
+  // Polling del dashboard cada 5 minutos (respaldo del WS push)
   setInterval(loadDashboard, 5 * 60 * 1000);
+  // Canal push WebSocket (sin polling)
+  setTimeout(initPushWebSocket, 2000);
+  // Monitoreo de nuevos dispositivos cada 15 minutos
+  setInterval(checkForNewDevices, 15 * 60 * 1000);
 });
 
 // ── Docker ────────────────────────────────────────────────────────────────────
@@ -1650,106 +1668,13 @@ async function loadYaraRules() {
 
 // ── Integrar carga de 2FA y YARA al activar tabs ──────────────────────────────
 // (showCfgTab ya llama a loadSIEM, loadUsers, etc. de forma centralizada)
-// Extendemos para los nuevos tabs
-const _showCfgTabWithNew = showCfgTab;
-showCfgTab = function(name) {
-  _showCfgTabWithNew(name);
-  if (name === '2fa')  load2FAStatus();
-  if (name === 'yara') loadYaraRules();
-};
 
 // ══════════════════════════════════════════════════════════════════════════════
 // HISTORIAL MEJORADO + AGENTES
 // ══════════════════════════════════════════════════════════════════════════════
 
-// ── Historial con tendencia interactiva ──────────────────────────────────────
-async function loadHistory() {
-  const type    = document.getElementById('hist-type')?.value || '';
-  const limit   = 50;
-  const params  = new URLSearchParams({ limit });
-  if (type) params.set('type', type);
 
-  try {
-    const [histResp, trendResp] = await Promise.all([
-      fetch(`/api/history?${params}`),
-      fetch(`/api/score/trend?type=${type || 'audit'}&days=60`),
-    ]);
 
-    if (!histResp.ok) return;
-    const history = await histResp.json();
-    const trend   = trendResp.ok ? await trendResp.json() : [];
-
-    // Renderizar gráfico de tendencia
-    const trendWrap = document.getElementById('history-trend-wrap');
-    if (trend.length >= 2) {
-      if (trendWrap) trendWrap.style.display = '';
-      renderTrendChart('history-trend-chart', trend);
-    }
-
-    // Renderizar tabla
-    const table  = document.getElementById('history-table');
-    const empty  = document.getElementById('history-empty');
-    const tbody  = document.getElementById('history-tbody');
-
-    if (!history.length) {
-      if (table) table.style.display = 'none';
-      if (empty) empty.style.display = '';
-      return;
-    }
-
-    if (table) table.style.display = '';
-    if (empty) empty.style.display = 'none';
-    if (!tbody) return;
-
-    const typeLabels = {
-      audit:'🔍 Seguridad', malware:'🦠 Malware', network:'📡 Red',
-      docker:'🐳 Docker', code:'📝 Código', services:'⚙️ Servicios',
-    };
-
-    tbody.innerHTML = history.map(scan => {
-      const dt = new Date(scan.started_at);
-      const dateStr = dt.toLocaleDateString('es', {day:'2-digit',month:'2-digit',year:'2-digit'});
-      const timeStr = dt.toLocaleTimeString('es', {hour:'2-digit',minute:'2-digit'});
-      const dur = scan.duration_s ? `${Math.round(scan.duration_s)}s` : '—';
-      const score = scan.score != null
-        ? `<span style="font-weight:700;color:${scan.score>=80?'var(--green)':scan.score>=50?'var(--yellow)':'var(--red)'}">${scan.score}</span>`
-        : '—';
-      const bars = `
-        <div style="display:flex;gap:3px;align-items:center;font-size:.72rem">
-          ${scan.critical > 0 ? `<span style="color:var(--critical)">🔴${scan.critical}</span>` : ''}
-          ${scan.high     > 0 ? `<span style="color:var(--high)">🟠${scan.high}</span>` : ''}
-          ${scan.medium   > 0 ? `<span style="color:var(--medium)">🟡${scan.medium}</span>` : ''}
-          ${scan.low      > 0 ? `<span style="color:var(--text2)">🔵${scan.low}</span>` : ''}
-          ${!scan.critical && !scan.high && !scan.medium && !scan.low
-            ? '<span style="color:var(--green)">✓</span>' : ''}
-        </div>`;
-      const origBadge = scan.triggered_by === 'scheduler'
-        ? '<span style="font-size:.7rem;background:var(--bg3);padding:1px 5px;border-radius:3px">⏰ Auto</span>'
-        : scan.triggered_by === 'agent'
-        ? `<span style="font-size:.7rem;background:var(--bg3);padding:1px 5px;border-radius:3px">🖧 ${esc(scan.target||'agente')}</span>`
-        : '<span style="font-size:.7rem;color:var(--text2)">Manual</span>';
-      const target = scan.target && scan.target !== 'localhost'
-        ? `<span style="font-size:.75rem;color:var(--text2)">${esc(scan.target)}</span>` : '';
-
-      return `<tr onclick="openHistoryDetail(${scan.id})" style="cursor:pointer">
-        <td><div style="font-size:.82rem">${dateStr} <span style="color:var(--text2)">${timeStr}</span></div></td>
-        <td style="font-size:.82rem">${typeLabels[scan.scan_type] || esc(scan.scan_type)}</td>
-        <td>${target || '<span style="color:var(--text2);font-size:.78rem">localhost</span>'}</td>
-        <td style="text-align:center">${score}</td>
-        <td>${bars}</td>
-        <td style="color:var(--text2);font-size:.78rem">${dur}</td>
-        <td>${origBadge}</td>
-        <td>
-          <button class="btn-secondary small" onclick="event.stopPropagation();openHistoryDetail(${scan.id})">Ver</button>
-          <button class="btn-secondary small" onclick="event.stopPropagation();compareHistory(${scan.id})">Comparar</button>
-        </td>
-      </tr>`;
-    }).join('');
-
-  } catch(e) {
-    appendLog('warn', 'Error cargando historial: ' + e.message);
-  }
-}
 
 async function openHistoryDetail(scanId) {
   const [findings, comparison] = await Promise.all([
@@ -1806,11 +1731,6 @@ function compareHistory(scanId) {
   openHistoryDetail(scanId);
 }
 
-function closeHistoryDetail() {
-  const el = document.getElementById('history-detail');
-  if (el) el.style.display = 'none';
-}
-
 // ── Agentes ───────────────────────────────────────────────────────────────────
 async function loadAgents() {
   try {
@@ -1861,19 +1781,6 @@ async function loadAgentFilterOptions() {
   } catch(e) { /* silencioso */ }
 }
 
-// Extender showCfgTab para agentes
-const _showCfgTabAgents = showCfgTab;
-showCfgTab = function(name) {
-  _showCfgTabAgents(name);
-  if (name === 'agents') { loadAgents(); }
-};
-
-// Integrar loadHistory cuando se activa el panel
-const _origShowPanel = showPanel;
-showPanel = function(name) {
-  _origShowPanel(name);
-  if (name === 'history') { loadHistory(); loadAgentFilterOptions(); }
-};
 
 // ══════════════════════════════════════════════════════════════════════════════
 // LICENCIAS + LDAP/AD + WEBSOCKET PUSH (sin polling)
@@ -2048,21 +1955,6 @@ async function runLDAPScan() {
   }
 }
 
-// ── Integrar en showCfgTab ────────────────────────────────────────────────────
-const _showCfgTabFull = showCfgTab;
-showCfgTab = function(name) {
-  _showCfgTabFull(name);
-  if (name === 'license') loadLicenseInfo();
-};
-
-// ── Inicializar push WS al cargar ─────────────────────────────────────────────
-// El DOMContentLoaded ya llama a loadDashboard() y loadKeys()
-// Aquí añadimos initPushWebSocket
-const _origDomReady = window._domReadyDone;
-document.addEventListener('DOMContentLoaded', () => {
-  // Iniciar el canal push WS
-  setTimeout(initPushWebSocket, 2000);  // Dar tiempo a que el servidor esté listo
-});
 
 // ══════════════════════════════════════════════════════════════════════════════
 // CUARENTENA + SBOM
@@ -2252,12 +2144,6 @@ async function loadSBOM() {
   renderSBOMTable(d.components || []);
 }
 
-// Integrar en showCfgTab
-const _showCfgTabQS = showCfgTab;
-showCfgTab = function(name) {
-  _showCfgTabQS(name);
-  if (name === 'quarantine') loadQuarantine();
-};
 
 // ══════════════════════════════════════════════════════════════════════════════
 // PDF + COMPLIANCE
@@ -2513,16 +2399,6 @@ async function runDockerImageScan() {
   }
 }
 
-// ── Integrar en showPanel ─────────────────────────────────────────────────────
-const _showPanelWithMonitor = showPanel;
-showPanel = function(name) {
-  _showPanelWithMonitor(name);
-  if (name === 'monitor') {
-    loadMonitorStatus();
-    loadMonitorHistory();
-  }
-};
-
 // ══════════════════════════════════════════════════════════════════════════════
 // ANSIBLE AWX/TOWER + RUNTIME SCAN + MULTI-TENANT
 // ══════════════════════════════════════════════════════════════════════════════
@@ -2650,9 +2526,225 @@ async function runRuntimeScan() {
   }
 }
 
-// ── Extender showCfgTab para Ansible ─────────────────────────────────────────
-const _showCfgTabAnsible = showCfgTab;
-showCfgTab = function(name) {
-  _showCfgTabAnsible(name);
-  if (name === 'ansible') loadAnsibleJobs();
+
+// ══════════════════════════════════════════════════════════════════════════════
+// BÚSQUEDA GLOBAL + EXPORTACIÓN CSV + ATAJOS DE TECLADO + UX MEJORADA
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ── Búsqueda global de hallazgos ──────────────────────────────────────────────
+let _searchTimer = null;
+
+async function globalSearch(query) {
+  const resultsEl = document.getElementById('global-search-results');
+  if (!query || query.length < 2) {
+    if (resultsEl) resultsEl.style.display = 'none';
+    return;
+  }
+
+  clearTimeout(_searchTimer);
+  _searchTimer = setTimeout(async () => {
+    try {
+      // Buscar en el historial de scans recientes
+      const r = await fetch('/api/history?limit=10');
+      if (!r.ok) return;
+      const history = await r.json();
+
+      const allFindings = [];
+      const q = query.toLowerCase();
+
+      // Buscar en findings en memoria (S.findings)
+      const sources = ['audit','malware','network','docker','services'];
+      for (const src of sources) {
+        if (S.findings[src]) {
+          for (const f of S.findings[src]) {
+            if ((f.title||'').toLowerCase().includes(q) ||
+                (f.category||'').toLowerCase().includes(q) ||
+                (f.description||'').toLowerCase().includes(q) ||
+                (f.evidence||'').toLowerCase().includes(q)) {
+              allFindings.push({ ...f, _source: src });
+            }
+          }
+        }
+      }
+
+      if (!resultsEl) return;
+
+      if (!allFindings.length) {
+        resultsEl.style.display = '';
+        resultsEl.innerHTML = '<div style="padding:12px;color:var(--text2);font-size:.82rem">Sin resultados para "' + esc(query) + '"</div>';
+        return;
+      }
+
+      resultsEl.style.display = '';
+      const sevColors = { critical:'var(--critical)', high:'var(--high)', medium:'var(--medium)', low:'var(--text2)' };
+      resultsEl.innerHTML = allFindings.slice(0, 8).map(f => {
+        const color = sevColors[f.severity] || 'var(--text2)';
+        return `<div style="padding:10px 14px;border-bottom:1px solid var(--border);cursor:pointer;hover:background:var(--bg3)"
+          onclick="openDrawer(${JSON.stringify(f).replace(/"/g,'&quot;')});closeGlobalSearch()"
+          onmouseover="this.style.background='var(--bg3)'"
+          onmouseout="this.style.background=''"
+        >
+          <div style="display:flex;gap:8px;align-items:center">
+            <span style="color:${color};font-size:.72rem;font-weight:700">${(f.severity||'').toUpperCase()}</span>
+            <span style="font-size:.8rem;font-weight:600;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(f.title||'')}</span>
+            <span style="font-size:.7rem;color:var(--text2);flex-shrink:0">${esc(f._source||'')}</span>
+          </div>
+          <div style="font-size:.72rem;color:var(--text2);margin-top:2px">${esc((f.category||'').substring(0,50))}</div>
+        </div>`;
+      }).join('') +
+      (allFindings.length > 8 ? `<div style="padding:8px 14px;color:var(--text2);font-size:.75rem">… y ${allFindings.length-8} más</div>` : '');
+
+    } catch(e) { /* silencioso */ }
+  }, 200);
+}
+
+function closeGlobalSearch() {
+  const input   = document.getElementById('global-search');
+  const results = document.getElementById('global-search-results');
+  if (input)   input.value = '';
+  if (results) results.style.display = 'none';
+}
+
+// Cerrar búsqueda al clic fuera
+document.addEventListener('click', e => {
+  const wrap = document.getElementById('global-search-wrap');
+  if (wrap && !wrap.contains(e.target)) closeGlobalSearch();
+});
+
+// ── Exportación CSV ────────────────────────────────────────────────────────────
+function exportCSV(source) {
+  const findings = S.findings[source];
+  if (!findings?.length) { toast('Sin datos para exportar'); return; }
+
+  const cols = ['severity', 'category', 'title', 'description', 'remediation', 'evidence', 'file_path'];
+  const header = cols.join(',');
+  const rows = findings.map(f =>
+    cols.map(c => {
+      const val = String(f[c] || '').replace(/"/g, '""').replace(/\n/g, ' ');
+      return `"${val}"`;
+    }).join(',')
+  );
+
+  const csv  = [header, ...rows].join('\r\n');
+  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });  // BOM para Excel
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url;
+  a.download = `cyberhound-${source}-${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+  toast(`✓ CSV exportado: ${findings.length} filas`);
+}
+
+// ── Atajos de teclado ─────────────────────────────────────────────────────────
+let _keyBuffer = '';
+let _keyTimer  = null;
+
+document.addEventListener('keydown', e => {
+  // No actuar si el usuario está escribiendo en un input/textarea
+  const tag = (e.target.tagName || '').toLowerCase();
+  if (['input','textarea','select'].includes(tag)) {
+    if (e.key === 'Escape') {
+      e.target.blur();
+      closeGlobalSearch();
+    }
+    return;
+  }
+
+  // Cerrar diálogos
+  if (e.key === 'Escape') {
+    closeDrawer();
+    document.getElementById('keyboard-help').style.display = 'none';
+    closeGlobalSearch();
+    return;
+  }
+
+  // Mostrar ayuda
+  if (e.key === '?') {
+    const help = document.getElementById('keyboard-help');
+    if (help) help.style.display = help.style.display === 'none' ? 'flex' : 'none';
+    return;
+  }
+
+  // Activar búsqueda
+  if (e.key === '/') {
+    e.preventDefault();
+    document.getElementById('global-search')?.focus();
+    return;
+  }
+
+  // Recargar dashboard
+  if (e.key === 'R' && !e.ctrlKey && !e.metaKey) {
+    loadDashboard();
+    toast('↻ Dashboard recargado');
+    return;
+  }
+
+  // Secuencias de 2 teclas (g + letra)
+  _keyBuffer += e.key;
+  clearTimeout(_keyTimer);
+  _keyTimer = setTimeout(() => { _keyBuffer = ''; }, 1000);
+
+  const nav = {
+    'gd': 'dashboard', 'ga': 'audit',   'gn': 'network',
+    'gm': 'malware',   'gr': 'history', 'gs': 'settings',
+    'gc': 'code',      'gk': 'docker',  'go': 'monitor',
+  };
+
+  if (_keyBuffer.length === 2) {
+    const dest = nav[_keyBuffer.toLowerCase()];
+    if (dest) {
+      showPanel(dest);
+      _keyBuffer = '';
+      toast(`→ ${dest.charAt(0).toUpperCase() + dest.slice(1)}`);
+    }
+  }
+});
+
+// ── Mejoras de UX — Toast mejorado ────────────────────────────────────────────
+// Sobreescribir toast con versión con tipos visuales
+const _origToast = window.toast || function(){};
+window.toast = function(msg, type = 'info') {
+  const el = document.getElementById('toast');
+  if (!el) return;
+  const icons = { info: 'ℹ', ok: '✓', error: '✗', warning: '⚠' };
+  const colors = {
+    info:    'var(--blue)',
+    ok:      'var(--green)',
+    error:   'var(--red)',
+    warning: 'var(--yellow)',
+  };
+  const icon  = icons[type]  || icons.info;
+  const color = colors[type] || colors.info;
+
+  el.style.borderLeft = `3px solid ${color}`;
+  el.innerHTML = `<span style="color:${color};margin-right:6px">${icon}</span>${esc(msg)}`;
+  el.classList.add('show');
+  clearTimeout(el._timer);
+  el._timer = setTimeout(() => el.classList.remove('show'), 3500);
+};
+
+// ── Dashboard: añadir mini-stats de compliance ────────────────────────────────
+async function loadDashboardCompliance() {
+  try {
+    const r = await fetch('/api/compliance?frameworks=ens,cis');
+    if (!r.ok) return;
+    const d = await r.json();
+    const el = document.getElementById('dash-compliance-mini');
+    if (!el) return;
+    el.innerHTML = Object.entries(d).map(([fw, res]) => {
+      const color = res.score_pct >= 90 ? 'var(--green)' : res.score_pct >= 70 ? 'var(--yellow)' : 'var(--red)';
+      return `<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:.78rem;border-bottom:1px solid var(--border)">
+        <span style="color:var(--text2)">${fw.toUpperCase()}</span>
+        <span style="color:${color};font-weight:600">${res.score_pct}%</span>
+      </div>`;
+    }).join('');
+  } catch(e) {}
+}
+
+// Integrar compliance mini en loadDashboard
+const _origLoadDashboard = loadDashboard;
+loadDashboard = async function() {
+  await _origLoadDashboard();
+  loadDashboardCompliance();
 };
