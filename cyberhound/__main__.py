@@ -36,7 +36,11 @@ def main() -> None:
     # web
     web_p = sub.add_parser("web", help="Lanza la interfaz web")
     web_p.add_argument("--port", type=int, default=8443)
-    web_p.add_argument("--host", default="0.0.0.0")
+    web_p.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="Interfaz de escucha (por defecto solo localhost). Usa 0.0.0.0 para exponer en la red.",
+    )
     web_p.add_argument("--config", default=str(Path.home() / ".cyberhound" / "config.yaml"))
     web_p.add_argument("--no-auth", action="store_true", help="Sin autenticación (solo localhost)")
     web_p.add_argument("--tls-cert", help="Ruta al certificado TLS")
