@@ -4,7 +4,6 @@ Fuentes (orden de precedencia): variables de entorno > config.yaml > defaults.
 """
 from __future__ import annotations
 
-import hashlib
 import os
 import secrets
 from dataclasses import dataclass, field
@@ -302,7 +301,9 @@ class CyberHoundConfig:
 
     @staticmethod
     def hash_password(password: str) -> str:
-        return hashlib.sha256(password.encode()).hexdigest()
+        # KDF salado (PBKDF2-HMAC-SHA256). Ver cyberhound.core.passwords.
+        from cyberhound.core import passwords
+        return passwords.hash_password(password)
 
     def validate(self) -> list[str]:
         """
