@@ -12,7 +12,6 @@ Integra:
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 import re
 import time
@@ -21,6 +20,7 @@ from pathlib import Path
 
 from aiohttp import web
 
+from cyberhound.core import passwords
 from cyberhound.core.auth import AuthConfig, auth_middleware, setup_auth_routes
 from cyberhound.core.config import CyberHoundConfig
 from cyberhound.core.database import AssetRecord, UserRecord
@@ -983,7 +983,7 @@ class CyberHoundServer:
                 return web.json_response({"error": "Contraseña mínimo 8 caracteres"}, status=400)
             if not re.match(r'^[a-zA-Z0-9_\-]{1,32}$', username):
                 return web.json_response({"error": "Username inválido"}, status=400)
-            pw_hash = hashlib.sha256(password.encode()).hexdigest()
+            pw_hash = passwords.hash_password(password)
             await self.db.create_user(UserRecord(
                 username=username, password_hash=pw_hash, role=role
             ))
@@ -1005,7 +1005,7 @@ class CyberHoundServer:
             if "password" in body:
                 if len(body["password"]) < 8:
                     return web.json_response({"error": "Contraseña mínimo 8 caracteres"}, status=400)
-                updates["password_hash"] = hashlib.sha256(body["password"].encode()).hexdigest()
+                updates["password_hash"] = passwords.hash_password(body["password"])
             if "active" in body:
                 updates["active"] = int(bool(body["active"]))
             if updates:
@@ -1902,7 +1902,7 @@ class CyberHoundServer:
         await self.db.init()
         await self.db.ensure_admin_exists(
             self.cfg.auth.username,
-            self.cfg.auth.password_hash or hashlib.sha256(b"cyberhound").hexdigest(),
+            self.cfg.auth.password_hash or passwords.hash_password("cyberhound"),
         )
 
         # Cargar licencia

@@ -11,14 +11,13 @@ NUNCA exponer sin autenticación en una red no aislada.
 from __future__ import annotations
 
 import base64
-import hashlib
-import hmac
 import secrets
 from datetime import datetime, timedelta
 
 import jwt  # PyJWT
 from aiohttp import web
 
+from cyberhound.core import passwords
 from cyberhound.core.logging import audit_log, get_logger
 from cyberhound.core.security import CsrfProtection, RateLimiter, _get_real_ip
 
@@ -64,11 +63,11 @@ class AuthConfig:
     @staticmethod
     def _default_hash() -> str:
         """Hash del password por defecto 'cyberhound' — CAMBIAR EN PRODUCCIÓN."""
-        return hashlib.sha256(b"cyberhound").hexdigest()
+        return passwords.hash_password("cyberhound")
 
     def verify_password(self, password: str) -> bool:
-        given_hash = hashlib.sha256(password.encode()).hexdigest()
-        return hmac.compare_digest(given_hash, self.password_hash)
+        # KDF salado (PBKDF2); verifica también hashes SHA-256 antiguos.
+        return passwords.verify_password(password, self.password_hash or "")
 
     def issue_jwt(self, username: str) -> str:
         payload = {
