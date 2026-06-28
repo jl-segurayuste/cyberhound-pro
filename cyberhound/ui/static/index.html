@@ -42,6 +42,7 @@
     <button class="nav-tab" data-panel="webexp"    onclick="showPanel('webexp')">🕵️ Exposición Web</button>
     <button class="nav-tab" data-panel="apisec"    onclick="showPanel('apisec')">🔌 API / CORS</button>
     <button class="nav-tab" data-panel="dnssec"    onclick="showPanel('dnssec')">📛 DNS Security</button>
+    <button class="nav-tab" data-panel="subenum"   onclick="showPanel('subenum')">🌐 Subdominios</button>
     <button class="nav-tab" data-panel="intel"    onclick="showPanel('intel')">🌐 Intel</button>
     <button class="nav-tab" data-panel="history"   onclick="showPanel('history')">📅 Historial</button>
     <button class="nav-tab" data-panel="monitor"   onclick="showPanel('monitor')">👁 Monitor</button>
@@ -572,6 +573,40 @@
       <div class="empty-icon">📛</div>
       <h3>Auditoría DNS no ejecutada</h3>
       <p>Comprueba la configuración de seguridad DNS de tus dominios (SPF/DMARC/DKIM/DNSSEC/CAA).</p>
+    </div>
+  </section>
+
+
+  <!-- ═══ SUBDOMINIOS ═══ -->
+  <section class="panel" id="panel-subenum">
+    <div class="page-header"><h1>🌐 Enumeración de subdominios</h1>
+      <p>Descubre subdominios publicados en Certificate Transparency (crt.sh) y cuáles resuelven — superficie de ataque.</p>
+    </div>
+    <div class="config-bar">
+      <div class="field">
+        <label>Dominios a analizar (uno por línea)</label>
+        <textarea id="subenum-domains" rows="3" placeholder="midominio.com&#10;otrodominio.es"></textarea>
+      </div>
+      <button class="btn-primary" id="btn-subenum" onclick="runSubdomainScan()">▶ Enumerar subdominios</button>
+    </div>
+    <div id="subenum-results" style="display:none">
+      <div id="subenum-summary-bar"></div>
+      <div class="toolbar">
+        <button class="filter active" onclick="filterTable('subenum','all',this)">Todos</button>
+        <button class="filter" data-sev="low" onclick="filterTable('subenum','low',this)">Activos</button>
+        <button class="filter" data-sev="info" onclick="filterTable('subenum','info',this)">Resumen</button>
+        <input type="text" placeholder="🔎 Buscar…" oninput="searchTable('subenum-tbody',this.value)">
+        <button class="btn-secondary small" onclick="exportJSON('subenum')">⬇ JSON</button>
+      </div>
+      <table>
+        <thead><tr><th>Severidad</th><th>Dominio</th><th>Hallazgo</th><th>Detalle</th></tr></thead>
+        <tbody id="subenum-tbody"></tbody>
+      </table>
+    </div>
+    <div class="empty-panel" id="subenum-empty">
+      <div class="empty-icon">🌐</div>
+      <h3>Enumeración no ejecutada</h3>
+      <p>Introduce tus dominios para descubrir qué subdominios tienes publicados.</p>
     </div>
   </section>
 

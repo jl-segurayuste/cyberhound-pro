@@ -457,6 +457,8 @@ class CyberHoundServer:
                 await self._run_web_exposure_scan(msg, ws_id, send, log, scan_id)
             elif task == "api_security":
                 await self._run_api_security_scan(msg, ws_id, send, log, scan_id)
+            elif task == "subdomain_enum":
+                await self._run_subdomain_enum_scan(msg, ws_id, send, log, scan_id)
             else:
                 await send({"type": "error", "text": f"Tarea desconocida: {task}"})
         except Exception as e:
@@ -638,6 +640,17 @@ class CyberHoundServer:
             return
         await log("section", f"Analizando seguridad de API/CORS: {', '.join(urls)}…")
         findings = await APISecurityScanner.full_scan(urls=urls)
+        await self._emit_findings(findings, ws_id, send, scan_id)
+
+    async def _run_subdomain_enum_scan(self, params, ws_id, send, log, scan_id):
+        from cyberhound.scanners.subdomain_enum import SubdomainEnumScanner
+        domains = params.get("domains") or []
+        if not domains:
+            await log("section", "No se indicaron dominios para enumerar")
+            await self._emit_findings([], ws_id, send, scan_id)
+            return
+        await log("section", f"Enumerando subdominios (CT logs): {', '.join(domains)}…")
+        findings = await SubdomainEnumScanner.full_scan(domains=domains)
         await self._emit_findings(findings, ws_id, send, scan_id)
 
     async def _run_malware_scan(self, params, ws_id, send, log, scan_id):
