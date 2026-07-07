@@ -130,11 +130,35 @@ def build_scheduler(app_ref, cfg) -> Scheduler:
 
     if getattr(cfg, "audit_enabled", True):
         async def _audit():
-            from cyberhound.scanners.hardening import HardeningAuditor
             db = app_ref.db
-            scan_id = await db.create_scan("audit", triggered_by="scheduler")
+            target = getattr(app_ref.cfg.scan, "audit_target_host", None)
+            scan_id = await db.create_scan("audit", target=target or "localhost",
+                                            triggered_by="scheduler")
             try:
-                findings = await HardeningAuditor.full_audit(cfg=app_ref.cfg)
+                if target:
+                    # Auditoría real vía SSH (RemoteAuditor) contra el host
+                    # configurado. Evita el desajuste de auditar "localhost"
+                    # desde dentro del propio contenedor sin visibilidad del
+                    # host real (sin ufw/systemctl/etc. del host).
+                    from cyberhound.scanners.ssh_audit import RemoteAuditor, SSHCredentials
+                    creds = SSHCredentials(
+                        username=app_ref.cfg.scan.ssh_default_user,
+                        port=app_ref.cfg.scan.ssh_default_port,
+                        key_path=app_ref.cfg.scan.ssh_key_path,
+                    )
+                    result = await RemoteAuditor(creds).audit_host(target)
+                    if result.status != "ok":
+                        logger.error("Audit remoto a %s falló: %s", target, result.error)
+                        await db.fail_scan(scan_id)
+                        await app_ref.notification_manager.send(
+                            f"⚠ Audit diario: no se pudo auditar {target} ({result.error})",
+                            level="critical", scan_id=scan_id,
+                        )
+                        return
+                    findings = result.findings
+                else:
+                    from cyberhound.scanners.hardening import HardeningAuditor
+                    findings = await HardeningAuditor.full_audit(cfg=app_ref.cfg)
                 findings = await db.filter_suppressed(findings)
                 await db.complete_scan(scan_id, findings)
                 critical = [f for f in findings if f.severity == "critical"]

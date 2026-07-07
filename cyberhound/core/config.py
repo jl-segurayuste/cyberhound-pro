@@ -48,6 +48,11 @@ class ScanSettings:
     ssh_concurrency:  int  = 5
     max_ww_files:     int  = 200
     hash_scan_max:    int  = 50
+    # Host real a auditar en el "daily_audit" programado, vía SSH (RemoteAuditor).
+    # Si es None, cae de vuelta al auditor local (HardeningAuditor.full_audit),
+    # que audita el propio contenedor y no el host real — solo útil para
+    # depurar el propio CyberHound, no como auditoría de seguridad real.
+    audit_target_host: str | None = None
 
 
 @dataclass
@@ -186,6 +191,7 @@ class CyberHoundConfig:
             ssh_concurrency=sr.get("ssh_concurrency", 5),
             max_ww_files=sr.get("max_ww_files", 200),
             hash_scan_max=sr.get("hash_scan_max", 50),
+            audit_target_host=sr.get("audit_target_host"),
         )
 
         # Server
