@@ -174,6 +174,15 @@ def build_scheduler(app_ref, cfg) -> Scheduler:
                         f"🆕 {len(new_crit)} nuevos hallazgos críticos detectados",
                         level="critical", scan_id=scan_id,
                     )
+                # Ticketing (Jira/ServiceNow): un ticket por hallazgo NUEVO (no en el scan
+                # anterior), no uno por hallazgo persistente en cada scan diario — evita
+                # abrir un ticket duplicado cada día mientras siga sin remediar. La propia
+                # integración filtra por severidad (`min_severity`, configurable).
+                new_ids = {n["id"] for n in comp.get("new", [])}
+                if new_ids:
+                    for f in findings:
+                        if f.id in new_ids:
+                            await app_ref.ticketing.create_ticket(f, scan_type="audit")
             except Exception:
                 await db.fail_scan(scan_id)
                 raise

@@ -437,6 +437,8 @@ siem:
 | `CH_WAZUH_PASS` | Contraseña API Wazuh |
 | `CH_ELK_API_KEY` | API key Elasticsearch |
 | `CH_SPLUNK_TOKEN` | Token Splunk HEC |
+| `CH_JIRA_TOKEN` | API token de Jira Cloud (no en YAML) |
+| `CH_SERVICENOW_PASS` | Contraseña de ServiceNow (no en YAML) |
 
 ---
 
@@ -516,14 +518,14 @@ pytest tests/ --cov=cyberhound --cov-report=term-missing
 | Ansible | `ansible_integration.py` | Playbooks auto + AWX/Tower API |
 | BD | `database.py` + `database_pg.py` | SQLite WAL + PostgreSQL asyncpg |
 | SIEM | `siem.py` + `wazuh/` | Wazuh (decoders+reglas), ELK, Splunk |
+| Ticketing | `ticketing.py` | Jira Cloud + ServiceNow, ticket por hallazgo nuevo (sin duplicar) |
 | Push | WS `/ws/push` | Notificaciones en tiempo real sin polling |
 | CSS | `style.css` | Responsive mobile/tablet/print |
-| Tests | `tests/` | **355 tests pytest** |
+| Tests | `tests/` | **603 tests pytest** |
 
 ### 🔜 Ideas para futuras versiones
 
 - **Compliance en tiempo real** — alertas cuando un check baja el score de un marco normativo
-- **Integración con ticketing** — Jira/ServiceNow automático desde hallazgos críticos
 - **ML scoring** — modelo entrenado con datos históricos para priorización más inteligente
 - **App móvil nativa** — iOS/Android con notificaciones push reales
 - **Marketplace de reglas YARA** — repositorio centralizado con actualización automática

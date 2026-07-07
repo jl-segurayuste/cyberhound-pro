@@ -276,6 +276,22 @@ class CyberHoundServer:
             splunk_hec_token=cfg.siem.splunk_hec_token,
             min_severity=cfg.siem.min_severity,
         ))
+        # Ticketing integration (Jira / ServiceNow)
+        from cyberhound.core.ticketing import TicketingConfig, TicketingIntegration
+        self.ticketing = TicketingIntegration(TicketingConfig(
+            jira_enabled=cfg.ticketing.jira_enabled,
+            jira_url=cfg.ticketing.jira_url,
+            jira_email=cfg.ticketing.jira_email,
+            jira_api_token=cfg.ticketing.jira_api_token,
+            jira_project_key=cfg.ticketing.jira_project_key,
+            jira_issue_type=cfg.ticketing.jira_issue_type,
+            servicenow_enabled=cfg.ticketing.servicenow_enabled,
+            servicenow_instance_url=cfg.ticketing.servicenow_instance_url,
+            servicenow_user=cfg.ticketing.servicenow_user,
+            servicenow_password=cfg.ticketing.servicenow_password,
+            servicenow_table=cfg.ticketing.servicenow_table,
+            min_severity=cfg.ticketing.min_severity,
+        ))
         self.scheduler: Scheduler | None = None
         self._sbom_cache: dict | None = None
         self._ansible_jobs: list = []
@@ -367,6 +383,9 @@ class CyberHoundServer:
         app.router.add_get ("/api/config/siem",         self.api_get_siem)
         app.router.add_post("/api/config/siem",         self.api_save_siem)
         app.router.add_post("/api/config/siem/test",    self.api_test_siem)
+        app.router.add_get ("/api/config/ticketing",      self.api_get_ticketing)
+        app.router.add_post("/api/config/ticketing",      self.api_save_ticketing)
+        app.router.add_post("/api/config/ticketing/test", self.api_test_ticketing)
 
         # ── Modo agente ───────────────────────────────────────────────────────
         app.router.add_get ("/api/config/agent",     self.api_get_agent_cfg)
@@ -1294,6 +1313,55 @@ class CyberHoundServer:
 
     async def api_test_siem(self, request: web.Request) -> web.Response:
         results = await self.siem.test()
+        return web.json_response(results)
+
+    async def api_get_ticketing(self, request: web.Request) -> web.Response:
+        t = self.cfg.ticketing
+        return web.json_response({
+            "jira_enabled":     t.jira_enabled,
+            "jira_url":         t.jira_url,
+            "jira_email":       t.jira_email,
+            "jira_project_key": t.jira_project_key,
+            "jira_issue_type":  t.jira_issue_type,
+            "servicenow_enabled":      t.servicenow_enabled,
+            "servicenow_instance_url": t.servicenow_instance_url,
+            "servicenow_user":         t.servicenow_user,
+            "servicenow_table":        t.servicenow_table,
+            "min_severity": t.min_severity,
+            # jira_api_token / servicenow_password nunca se devuelven
+        })
+
+    async def api_save_ticketing(self, request: web.Request) -> web.Response:
+        try:
+            body = await _read_json(request)
+            t = self.cfg.ticketing
+            for field in ("jira_enabled", "jira_url", "jira_email", "jira_project_key",
+                          "jira_issue_type", "servicenow_enabled", "servicenow_instance_url",
+                          "servicenow_user", "servicenow_table", "min_severity"):
+                if field in body:
+                    setattr(t, field, body[field])
+            # Secretos solo si no están vacíos (no se sobrescriben con "")
+            if body.get("jira_api_token"):
+                t.jira_api_token = body["jira_api_token"]
+            if body.get("servicenow_password"):
+                t.servicenow_password = body["servicenow_password"]
+            self.cfg.save()
+            # Reinicializar la integración en caliente
+            from cyberhound.core.ticketing import TicketingConfig, TicketingIntegration
+            self.ticketing = TicketingIntegration(TicketingConfig(
+                jira_enabled=t.jira_enabled, jira_url=t.jira_url, jira_email=t.jira_email,
+                jira_api_token=t.jira_api_token, jira_project_key=t.jira_project_key,
+                jira_issue_type=t.jira_issue_type,
+                servicenow_enabled=t.servicenow_enabled, servicenow_instance_url=t.servicenow_instance_url,
+                servicenow_user=t.servicenow_user, servicenow_password=t.servicenow_password,
+                servicenow_table=t.servicenow_table, min_severity=t.min_severity,
+            ))
+            return web.json_response({"ok": True})
+        except Exception as e:
+            return web.json_response({"ok": False, "error": str(e)}, status=500)
+
+    async def api_test_ticketing(self, request: web.Request) -> web.Response:
+        results = await self.ticketing.test()
         return web.json_response(results)
 
     # ── WebSocket push — notificaciones sin polling ───────────────────────────

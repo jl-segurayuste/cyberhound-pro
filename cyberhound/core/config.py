@@ -89,6 +89,22 @@ class SIEMSettings:
 
 
 @dataclass
+class TicketingSettings:
+    jira_enabled:     bool = False
+    jira_url:         str  = ""
+    jira_email:       str  = ""
+    jira_api_token:   str  = ""
+    jira_project_key: str  = ""
+    jira_issue_type:  str  = "Bug"
+    servicenow_enabled:      bool = False
+    servicenow_instance_url: str  = ""
+    servicenow_user:         str  = ""
+    servicenow_password:     str  = ""
+    servicenow_table:        str  = "incident"
+    min_severity: str = "critical"
+
+
+@dataclass
 class SchedulerSettings:
     enabled:         bool = True
     audit_enabled:   bool = True
@@ -140,6 +156,7 @@ class CyberHoundConfig:
     scheduler:     SchedulerSettings    = field(default_factory=SchedulerSettings)
     notifications: NotificationSettings = field(default_factory=NotificationSettings)
     siem:          SIEMSettings         = field(default_factory=SIEMSettings)
+    ticketing:     TicketingSettings    = field(default_factory=TicketingSettings)
     agent:         AgentSettings        = field(default_factory=AgentSettings)
     db_path:       str = field(default_factory=lambda: str(DEFAULT_DB_PATH))
 
@@ -259,6 +276,23 @@ class CyberHoundConfig:
             min_severity=sr.get("min_severity", "medium"),
         )
 
+        # Ticketing settings
+        tr = raw.get("ticketing", {})
+        cfg.ticketing = TicketingSettings(
+            jira_enabled=tr.get("jira_enabled", False),
+            jira_url=tr.get("jira_url", ""),
+            jira_email=tr.get("jira_email", ""),
+            jira_api_token=tr.get("jira_api_token", os.environ.get("CH_JIRA_TOKEN", "")),
+            jira_project_key=tr.get("jira_project_key", ""),
+            jira_issue_type=tr.get("jira_issue_type", "Bug"),
+            servicenow_enabled=tr.get("servicenow_enabled", False),
+            servicenow_instance_url=tr.get("servicenow_instance_url", ""),
+            servicenow_user=tr.get("servicenow_user", ""),
+            servicenow_password=tr.get("servicenow_password", os.environ.get("CH_SERVICENOW_PASS", "")),
+            servicenow_table=tr.get("servicenow_table", "incident"),
+            min_severity=tr.get("min_severity", "critical"),
+        )
+
         # Agent settings
         ag = raw.get("agent", {})
         import os as _os
@@ -301,6 +335,10 @@ class CyberHoundConfig:
             "siem": {
                 k: v for k, v in self.siem.__dict__.items()
                 if k not in ("wazuh_api_pass", "elk_pass", "splunk_hec_token")
+            },
+            "ticketing": {
+                k: v for k, v in self.ticketing.__dict__.items()
+                if k not in ("jira_api_token", "servicenow_password")
             },
         }
         with open(path, "w", encoding="utf-8") as f:
