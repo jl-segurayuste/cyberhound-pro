@@ -225,9 +225,17 @@ print(json.dumps(findings))
                     async with sftp.open(script_path, "w") as f:
                         await f.write(self.REMOTE_AUDIT_SCRIPT)
 
-                # Ejecutar
+                # Ejecutar con sudo -n (no interactivo): los checks necesitan
+                # visibilidad real de root (shadow, sudoers, servicios) — sin
+                # esto, conectar como usuario normal da una auditoría incompleta
+                # y potencialmente engañosa (igual que el problema original de
+                # auditar "localhost" sin visibilidad real del host).
+                # Si el usuario no tiene sudo sin contraseña, sudo -n falla
+                # limpiamente (no se queda colgado esperando un prompt) y el
+                # script cae de vuelta a ejecutar sin privilegios elevados.
                 run_cmd = (
-                    f"python3 {script_path} > {output_path} 2>/dev/null"
+                    f"sudo -n python3 {script_path} > {output_path} 2>/dev/null"
+                    f" || python3 {script_path} > {output_path} 2>/dev/null"
                     f" ; cat {output_path}"
                     f" ; rm -f {script_path} {output_path}"
                 )
