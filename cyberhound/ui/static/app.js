@@ -55,6 +55,7 @@ function showCfgTab(name) {
   // ── Carga de datos — lista única y definitiva (sin monkey-patching) ─────────
   const _cfgLoaders = {
     siem:         () => loadSIEM(),
+    ticketing:    () => loadTicketing(),
     users:        () => loadUsers(),
     suppressions: () => loadSuppressions(),
     scheduler:    () => loadScheduler(),
@@ -1157,6 +1158,60 @@ async function testSIEM() {
     `${ok ? '✓' : '✗'} ${k}`
   ).join(' · ');
   msg.textContent = results || 'Sin SIEMs configurados';
+  msg.style.color = Object.values(d).every(v=>v) ? 'var(--green)' : 'var(--yellow)';
+}
+
+// ── Ticketing config (Jira / ServiceNow) ────────────────────────────────────────
+async function loadTicketing() {
+  const r = await fetch('/api/config/ticketing');
+  const d = await r.json();
+  document.getElementById('tkt-jira-enabled').checked  = d.jira_enabled;
+  document.getElementById('tkt-jira-url').value        = d.jira_url || '';
+  document.getElementById('tkt-jira-email').value      = d.jira_email || '';
+  document.getElementById('tkt-jira-project').value    = d.jira_project_key || '';
+  document.getElementById('tkt-jira-issuetype').value  = d.jira_issue_type || 'Bug';
+  document.getElementById('tkt-snow-enabled').checked  = d.servicenow_enabled;
+  document.getElementById('tkt-snow-url').value        = d.servicenow_instance_url || '';
+  document.getElementById('tkt-snow-user').value       = d.servicenow_user || '';
+  document.getElementById('tkt-snow-table').value      = d.servicenow_table || 'incident';
+  document.getElementById('tkt-min-severity').value    = d.min_severity || 'critical';
+}
+
+async function saveTicketing() {
+  const body = {
+    jira_enabled:       document.getElementById('tkt-jira-enabled').checked,
+    jira_url:           document.getElementById('tkt-jira-url').value,
+    jira_email:         document.getElementById('tkt-jira-email').value,
+    jira_api_token:     document.getElementById('tkt-jira-token').value,
+    jira_project_key:   document.getElementById('tkt-jira-project').value,
+    jira_issue_type:    document.getElementById('tkt-jira-issuetype').value,
+    servicenow_enabled:      document.getElementById('tkt-snow-enabled').checked,
+    servicenow_instance_url: document.getElementById('tkt-snow-url').value,
+    servicenow_user:         document.getElementById('tkt-snow-user').value,
+    servicenow_password:     document.getElementById('tkt-snow-pass').value,
+    servicenow_table:        document.getElementById('tkt-snow-table').value,
+    min_severity: document.getElementById('tkt-min-severity').value,
+  };
+  const r = await fetch('/api/config/ticketing', {
+    method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body)
+  });
+  const d = await r.json();
+  const msg = document.getElementById('tkt-msg');
+  msg.textContent  = d.ok ? '✓ Configuración de ticketing guardada' : '✗ Error: ' + d.error;
+  msg.style.color  = d.ok ? 'var(--green)' : 'var(--red)';
+  toast(d.ok ? '✓ Ticketing guardado' : '✗ Error: ' + d.error);
+}
+
+async function testTicketing() {
+  const msg = document.getElementById('tkt-msg');
+  msg.textContent = 'Creando ticket de prueba…';
+  msg.style.color = 'var(--text2)';
+  const r = await fetch('/api/config/ticketing/test', { method: 'POST' });
+  const d = await r.json();
+  const results = Object.entries(d).map(([k,ok]) =>
+    `${ok ? '✓' : '✗'} ${k}`
+  ).join(' · ');
+  msg.textContent = results || 'Sin sistemas de ticketing configurados';
   msg.style.color = Object.values(d).every(v=>v) ? 'var(--green)' : 'var(--yellow)';
 }
 

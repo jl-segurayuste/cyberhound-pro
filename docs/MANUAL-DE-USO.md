@@ -102,6 +102,15 @@ en un host de producción, valídalos.
 Envía hallazgos a tu SIEM desde *Ajustes* o `config.yaml`: **Wazuh** (UDP/API),
 **Elasticsearch**, **Splunk HEC**. Útil para correlacionar con el resto de tu telemetría.
 
+## 6b. Ticketing (Jira / ServiceNow)
+
+Desde *Ajustes → Ticketing* (o `config.yaml`), abre un ticket automáticamente en
+**Jira Cloud** o **ServiceNow** cuando la auditoría diaria detecta un hallazgo **nuevo**
+por encima del umbral de severidad configurado (por defecto, solo *critical*). Solo se
+abre un ticket la primera vez que aparece: mientras el hallazgo siga sin remediar en
+días sucesivos no se duplica. Usa *«Crear ticket de prueba»* para verificar la conexión
+antes de dejarlo en producción.
+
 ## 7. Configuración
 
 ```bash
