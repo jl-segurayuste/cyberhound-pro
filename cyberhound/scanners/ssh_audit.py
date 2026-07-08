@@ -148,10 +148,13 @@ for scan_dir in ["/etc","/usr/bin","/usr/sbin","/bin","/sbin"]:
             add(fid,"filesystem","high",f"World-writable: {f}","",f"chmod o-w {f}",
                 auto_fix=True, file_path=f)
 
-# Servicios inseguros
-out,_,_ = run(["systemctl","list-units","--type=service","--state=active","--no-pager"])
+# Servicios inseguros (match exacto por nombre de unidad, no substring del
+# bloque completo: "nis" hacia substring coincidia con la palabra "finishes"
+# en la descripcion de plymouth-quit-wait.service - falso positivo puro)
+out,_,_ = run(["systemctl","list-units","--type=service","--state=active","--no-pager","--plain","--no-legend"])
+unit_names = {ln.split()[0].lower().removesuffix(".service") for ln in out.splitlines() if ln.strip()}
 for svc in ["telnet","rsh","nis","finger","tftp"]:
-    if svc in out.lower():
+    if any(name == svc or name.startswith(svc + "-") or name.startswith(svc + "@") for name in unit_names):
         add(f"svc_{svc}","services","high",f"Servicio inseguro: {svc}","",
             f"systemctl disable --now {svc}",auto_fix=True)
 
