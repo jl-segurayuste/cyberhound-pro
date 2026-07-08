@@ -183,6 +183,22 @@ def build_scheduler(app_ref, cfg) -> Scheduler:
                     for f in findings:
                         if f.id in new_ids:
                             await app_ref.ticketing.create_ticket(f, scan_type="audit")
+
+                # Compliance en tiempo real: alerta cuando un hallazgo nuevo tumba un
+                # control que antes pasaba y el score de un marco normativo (ENS/ISO
+                # 27001/PCI-DSS/CIS) baja respecto al audit anterior.
+                prev_scan_id = comp.get("previous_scan_id")
+                if prev_scan_id:
+                    from cyberhound.core.models import Finding as _Finding
+                    from cyberhound.scanners.compliance import FRAMEWORK_NAMES, detect_compliance_drops
+                    prev_findings = [_Finding.from_dict(d) for d in await db.get_scan_findings(prev_scan_id)]
+                    for drop in detect_compliance_drops(prev_findings, findings):
+                        name = FRAMEWORK_NAMES.get(drop.framework, drop.framework.upper())
+                        await app_ref.notification_manager.send(
+                            f"📉 Compliance {name}: {drop.previous_score}% → {drop.current_score}% "
+                            f"(-{drop.delta} pts)",
+                            level="warning", scan_id=scan_id,
+                        )
             except Exception:
                 await db.fail_scan(scan_id)
                 raise
