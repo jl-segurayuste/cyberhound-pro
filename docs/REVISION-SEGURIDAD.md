@@ -40,9 +40,9 @@
 
 | Prioridad | Recomendación |
 |---|---|
-| ~~Baja~~ ✅ | **HECHO**: CSP migrada a **nonce por petición** en `script-src` (bloquea `<script>` inyectados; verificado en navegador). Los `onclick` inline pasan a `script-src-attr 'unsafe-inline'`. Pendiente menor a futuro: eliminar también esos handlers de atributo. |
-| Baja | Rehash transparente al primer login para migrar el hash del admin de SHA-256 a PBKDF2 (hoy se migra al cambiar la contraseña). |
-| — | Limpieza menor: `id="history-trend-wrap"` duplicado en el panel de Historial. |
+| Baja | CSP migrada a **nonce por petición** en `script-src` (bloquea `<script>` inyectados; verificado en navegador). Los `onclick` inline siguen permitidos vía `script-src-attr 'unsafe-inline'` (**213** atributos `onclick`/`onchange`/`oninput`/etc. en `index.html`, muchos generados dinámicamente desde plantillas de `app.js` — eliminarlos exige refactorizar esos renderers a `data-*` + listeners delegados). Verificado 2026-07-08: sigue siendo el único pendiente real de esta tabla. Beneficio marginal (la defensa principal contra XSS ya es el nonce en `script-src`, que bloquea inyectar un `<script>`; `unsafe-inline` en `script-src-attr` solo permite que un atributo `on*` YA presente en el marcado dispare, lo que requiere que un atacante ya pueda inyectar atributos HTML — un escenario que de por sí ya es grave independientemente de esto). Deliberadamente diferido: coste de refactor desproporcionado al riesgo. |
+| ~~Baja~~ ✅ | **HECHO** (verificado 2026-07-08, `auth.py:269` `passwords.needs_rehash`): rehash transparente al login migra el hash del admin de SHA-256 a PBKDF2 sin esperar a un cambio de contraseña. |
+| ~~—~~ ✅ | **HECHO** (verificado 2026-07-08): ya no hay `id="history-trend-wrap"` duplicado; cubierto además por el test automático `test_no_duplicate_element_ids` (`tests/test_frontend_integrity.py`). |
 
 ## 5. Persistencia / despliegue
 
