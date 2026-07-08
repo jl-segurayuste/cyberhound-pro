@@ -36,6 +36,7 @@ scan:
   ssh_concurrency: 5
   max_ww_files: 200
   hash_scan_max: 50
+db_path: ${DATA_DIR}/cyberhound.db
 api_keys: {}
 EOF
 
