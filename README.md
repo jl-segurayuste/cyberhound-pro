@@ -506,7 +506,7 @@ pytest tests/ --cov=cyberhound --cov-report=term-missing
 | LDAP/AD | `ldap_audit.py` | 6 checks: AS-REP, domain admins, policy |
 | Scoring | `scoring.py` | 5 factores, grades A-F, exposición |
 | PDF | `pdf_report.py` | fpdf2 + compliance ENS/ISO en el informe |
-| Compliance | `compliance.py` | ENS, ISO 27001, PCI-DSS, CIS Controls v8 |
+| Compliance | `compliance.py` | ENS, ISO 27001, PCI-DSS, CIS Controls v8 + alertas en tiempo real cuando baja el score |
 | SBOM | `sbom.py` | CycloneDX 1.4, SPDX 2.3, diff entre scans |
 | Cuarentena | `quarantine.py` | XOR + restore con verificación SHA-256 |
 | Monitor | `ebpf_monitor.py` | eBPF/auditd: 12 patrones, 14 ficheros |
@@ -521,11 +521,10 @@ pytest tests/ --cov=cyberhound --cov-report=term-missing
 | Ticketing | `ticketing.py` | Jira Cloud + ServiceNow, ticket por hallazgo nuevo (sin duplicar) |
 | Push | WS `/ws/push` | Notificaciones en tiempo real sin polling |
 | CSS | `style.css` | Responsive mobile/tablet/print |
-| Tests | `tests/` | **603 tests pytest** |
+| Tests | `tests/` | **610 tests pytest** |
 
 ### 🔜 Ideas para futuras versiones
 
-- **Compliance en tiempo real** — alertas cuando un check baja el score de un marco normativo
 - **ML scoring** — modelo entrenado con datos históricos para priorización más inteligente
 - **App móvil nativa** — iOS/Android con notificaciones push reales
 - **Marketplace de reglas YARA** — repositorio centralizado con actualización automática

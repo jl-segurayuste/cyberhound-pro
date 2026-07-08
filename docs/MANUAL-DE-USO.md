@@ -111,6 +111,16 @@ abre un ticket la primera vez que aparece: mientras el hallazgo siga sin remedia
 días sucesivos no se duplica. Usa *«Crear ticket de prueba»* para verificar la conexión
 antes de dejarlo en producción.
 
+## 6c. Compliance en tiempo real
+
+Cada auditoría diaria compara tu cumplimiento normativo (**ENS, ISO 27001, PCI-DSS,
+CIS Controls**) con el del día anterior. Si un hallazgo nuevo tumba un control que
+antes pasaba y el porcentaje de cumplimiento de algún marco baja, te avisa por el
+mismo canal que las demás notificaciones (email/webhook, configurable en *Ajustes*).
+No hace falta configurar nada aparte: se activa solo en cuanto haya dos auditorías
+que comparar. El detalle por marco/control sigue disponible en **Informes → Informe
+de Compliance**.
+
 ## 7. Configuración
 
 ```bash

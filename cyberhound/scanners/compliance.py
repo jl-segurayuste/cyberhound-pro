@@ -295,6 +295,40 @@ def analyze_compliance(
     return results
 
 
+@dataclass
+class ComplianceDrop:
+    """Un marco normativo cuyo score bajó entre dos scans (compliance en
+    tiempo real — alerta cuando un hallazgo nuevo tumba un control que antes
+    pasaba)."""
+    framework:       str
+    previous_score:  float
+    current_score:   float
+
+    @property
+    def delta(self) -> float:
+        return round(self.previous_score - self.current_score, 1)
+
+
+def detect_compliance_drops(
+    previous_findings: list[Finding],
+    current_findings: list[Finding],
+    frameworks: list[str] | None = None,
+) -> list[ComplianceDrop]:
+    """Compara el cumplimiento normativo de dos scans (normalmente el de hoy
+    contra el anterior del mismo tipo) y devuelve un `ComplianceDrop` por cada
+    framework cuyo `score_pct` bajó. Un marco que no bajó (igual o mejoró) no
+    aparece. Determinista y sin efectos secundarios — pensado para llamarse
+    desde el scheduler tras cada auditoría."""
+    previous = analyze_compliance(previous_findings, frameworks)
+    current = analyze_compliance(current_findings, frameworks)
+    drops = []
+    for fw, curr in current.items():
+        prev = previous.get(fw)
+        if prev and curr.score_pct < prev.score_pct:
+            drops.append(ComplianceDrop(framework=fw, previous_score=prev.score_pct, current_score=curr.score_pct))
+    return drops
+
+
 def compliance_to_dict(results: dict[str, ComplianceResult]) -> dict:
     """Serializa los resultados de compliance a dict para la API."""
     return {
