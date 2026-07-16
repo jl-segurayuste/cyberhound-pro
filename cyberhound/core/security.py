@@ -803,12 +803,18 @@ class TLSManager:
             )
         import subprocess
         logger.info("Solicitando certificado Let's Encrypt para %s…", domain)
-        result = subprocess.run([
-            "certbot", "certonly", "--standalone",
-            "--non-interactive", "--agree-tos",
-            "--email", email,
-            "--domain", domain,
-        ], capture_output=True, text=True)
+        try:
+            result = subprocess.run([
+                "certbot", "certonly", "--standalone",
+                "--non-interactive", "--agree-tos",
+                "--email", email,
+                "--domain", domain,
+            ], capture_output=True, text=True, timeout=120)
+        except subprocess.TimeoutExpired:
+            raise RuntimeError(
+                f"certbot no respondió en 120s al solicitar el certificado para {domain} "
+                "(revisa conectividad de red y que el puerto 80 sea accesible)"
+            ) from None
 
         if result.returncode != 0:
             raise RuntimeError(f"certbot falló: {result.stderr}")
