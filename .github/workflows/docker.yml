@@ -102,7 +102,9 @@ jobs:
             -f txt || true
 
       - name: Verificar sintaxis de todos los módulos Python
-        run: python -m py_compile cyberhound/**/*.py cyberhound/*.py
+        run: |
+          shopt -s globstar
+          python -m py_compile cyberhound/**/*.py cyberhound/*.py
 
       - name: Verificar que no hay secretos hardcodeados
         run: |
