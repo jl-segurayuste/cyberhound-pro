@@ -124,8 +124,6 @@ jobs:
     permissions:
       contents: read
       packages: write
-    env:
-      HAS_DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN != '' }}
     outputs:
       image: ${{ env.REGISTRY_GHCR }}/${{ env.IMAGE_NAME }}
       digest: ${{ steps.build.outputs.digest }}
@@ -143,20 +141,12 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Login a Docker Hub
-        if: github.event_name != 'pull_request' && env.HAS_DOCKERHUB_TOKEN == 'true'
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
       - name: Extraer metadatos
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: |
             ${{ env.REGISTRY_GHCR }}/${{ env.IMAGE_NAME }}
-            jl-segurayuste/cyberhound-pro
           tags: |
             type=ref,event=branch
             type=semver,pattern={{version}}
