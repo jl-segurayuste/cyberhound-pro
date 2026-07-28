@@ -1,0 +1,4 @@
+# Fixtures de test que a proposito contienen valores con pinta de secreto
+# real (claves PEM, AWS keys) para probar la deteccion de secretos en
+# imagenes Docker -- no son fugas reales.
+tests/test_docker_image.py
