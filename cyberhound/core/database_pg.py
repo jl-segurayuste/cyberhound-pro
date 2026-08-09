@@ -95,7 +95,8 @@ CREATE TABLE IF NOT EXISTS users (
     totp_enabled       INTEGER DEFAULT 0,
     totp_secret        TEXT,
     totp_pending_secret TEXT,
-    recovery_codes_json TEXT DEFAULT '[]'
+    recovery_codes_json TEXT DEFAULT '[]',
+    totp_last_counter  INTEGER
 );
 CREATE TABLE IF NOT EXISTS notifications (
     id         SERIAL PRIMARY KEY,
@@ -145,6 +146,14 @@ class DatabasePG:
         )
         async with self._pool.acquire() as conn:
             await conn.execute(SCHEMA_PG)
+            # `CREATE TABLE IF NOT EXISTS` no altera una tabla `users` que ya
+            # existiera de un despliegue anterior a esta columna -- a
+            # diferencia de database.py (SQLite), este backend no tiene lista
+            # de migraciones incrementales. `ADD COLUMN IF NOT EXISTS` es
+            # idempotente y no requiere una.
+            await conn.execute(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_last_counter INTEGER"
+            )
             version = await conn.fetchval("SELECT MAX(version) FROM schema_version")
             if not version or version < DB_VERSION:
                 await conn.execute(
@@ -347,6 +356,54 @@ class DatabasePG:
         await self._exec(
             "INSERT INTO users (username,password_hash,role,created_at,active) VALUES ($1,$2,$3,$4,$5)",
             user.username, user.password_hash, user.role, user.created_at, user.active,
+        )
+
+    # ── TOTP / 2FA ────────────────────────────────────────────────────────────
+    # Bug real encontrado 2026-08-09: este backend no implementaba NINGUNO de
+    # estos métodos pese a que el docstring del módulo afirma "misma interfaz
+    # que database.py" -- cualquier despliegue con Postgres rompía con
+    # AttributeError en cuanto se tocaba /api/2fa/*.
+
+    async def set_totp_pending(self, username: str, secret: str, recovery_codes: list[str]) -> None:
+        from cyberhound.core.totp import hash_recovery_code
+        hashes = [hash_recovery_code(c) for c in recovery_codes]
+        await self._exec(
+            "UPDATE users SET totp_pending_secret=$1, recovery_codes_json=$2 WHERE username=$3",
+            secret, json.dumps(hashes), username,
+        )
+
+    async def get_totp_pending(self, username: str) -> dict | None:
+        secret = await self._fetchval(
+            "SELECT totp_pending_secret FROM users WHERE username=$1", username
+        )
+        return {"secret": secret} if secret else None
+
+    async def activate_totp(self, username: str) -> None:
+        await self._exec(
+            "UPDATE users SET totp_enabled=1, totp_secret=totp_pending_secret, "
+            "totp_pending_secret=NULL WHERE username=$1",
+            username,
+        )
+
+    async def disable_totp(self, username: str) -> None:
+        await self._exec(
+            "UPDATE users SET totp_enabled=0, totp_secret=NULL, "
+            "totp_pending_secret=NULL WHERE username=$1",
+            username,
+        )
+
+    async def update_totp_last_counter(self, username: str, counter: int) -> None:
+        """Registra el último paso (step) TOTP consumido -- impide reutilizar
+        el mismo código dos veces. Ver bug real corregido 2026-08-09 en
+        `TOTPManager.verify`/`activate_2fa`."""
+        await self._exec(
+            "UPDATE users SET totp_last_counter=$1 WHERE username=$2", counter, username
+        )
+
+    async def update_recovery_codes(self, username: str, hashes: list[str]) -> None:
+        await self._exec(
+            "UPDATE users SET recovery_codes_json=$1 WHERE username=$2",
+            json.dumps(hashes), username,
         )
 
     async def add_notification(self, message: str, level: str = "info", scan_id: int | None = None) -> None:

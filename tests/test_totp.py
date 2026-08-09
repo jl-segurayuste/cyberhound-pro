@@ -3,8 +3,11 @@ import time
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+import pytest_asyncio
 
 from cyberhound.core.totp import (
+    TOTPManager,
+    find_matching_step,
     generate_recovery_codes,
     generate_secret,
     generate_totp,
@@ -84,6 +87,27 @@ class TestTOTPCore:
         s2 = generate_secret()
         ts = time.time()
         assert generate_totp(s1, ts) != generate_totp(s2, ts) or True  # pueden coincidir raramente
+
+    def test_verify_totp_es_sin_estado_no_impide_reutilizar(self):
+        # `verify_totp()` por sí sola no lleva registro de qué códigos ya se
+        # usaron -- esa es la trampa exacta que causó el bug real corregido
+        # 2026-08-09: el mismo código válido se aceptaba un número ilimitado
+        # de veces. La protección anti-repetición vive en `TOTPManager`
+        # (ver TestTOTPManagerAntiReplay), que sí lleva estado persistente.
+        secret = generate_secret()
+        code = generate_totp(secret)
+        assert verify_totp(secret, code)
+        assert verify_totp(secret, code)
+
+    def test_find_matching_step_devuelve_el_step_que_coincidio(self):
+        secret = generate_secret()
+        at = 1_700_000_000.0
+        code = generate_totp(secret, at)
+        assert find_matching_step(secret, code, at) == int(at) // 30
+
+    def test_find_matching_step_sin_coincidencia_devuelve_none(self):
+        secret = generate_secret()
+        assert find_matching_step(secret, "000000") is None
 
 
 class TestRecoveryCodes:
@@ -166,3 +190,97 @@ class TestQRGeneration:
                 del sys.modules['segno']
             else:
                 sys.modules['segno'] = original
+
+
+class TestTOTPManagerAntiReplay:
+    """Bug real corregido 2026-08-09: `TOTPManager.verify()`/`activate_2fa()`
+    delegaban en `verify_totp()`, que es sin estado -- el mismo código válido
+    se podía reenviar un número ilimitado de veces y siempre se aceptaba,
+    anulando la garantía anti-repetición de TOTP. No existía NINGÚN test
+    para `TOTPManager` hasta ahora, pese a ser la pieza que de verdad se usa
+    en el flujo de login (ver tests/test_login_2fa.py)."""
+
+    @pytest_asyncio.fixture
+    async def db(self, tmp_path):
+        from cyberhound.core.database import Database, UserRecord
+        database = Database(tmp_path / "totp.db")
+        await database.init()
+        await database.create_user(UserRecord(username="admin", password_hash="x"))
+        return database
+
+    @pytest.mark.asyncio
+    async def test_activate_2fa_con_codigo_correcto(self, db):
+        secret = generate_secret()
+        await db.set_totp_pending("admin", secret, generate_recovery_codes())
+        assert await TOTPManager(db).activate_2fa("admin", generate_totp(secret)) is True
+
+    @pytest.mark.asyncio
+    async def test_activate_2fa_con_codigo_incorrecto(self, db):
+        secret = generate_secret()
+        await db.set_totp_pending("admin", secret, generate_recovery_codes())
+        assert await TOTPManager(db).activate_2fa("admin", "000000") is False
+
+    @pytest.mark.asyncio
+    async def test_verify_acepta_codigo_correcto(self, db):
+        secret = generate_secret()
+        await db.set_totp_pending("admin", secret, generate_recovery_codes())
+        await db.activate_totp("admin")
+        ok, _ = await TOTPManager(db).verify("admin", generate_totp(secret, time.time() + 30))
+        assert ok is True
+
+    @pytest.mark.asyncio
+    async def test_verify_no_deja_reutilizar_el_mismo_codigo(self, db):
+        secret = generate_secret()
+        await db.set_totp_pending("admin", secret, generate_recovery_codes())
+        await db.activate_totp("admin")
+        code = generate_totp(secret)
+
+        ok1, _ = await TOTPManager(db).verify("admin", code)
+        ok2, _ = await TOTPManager(db).verify("admin", code)
+        assert ok1 is True
+        assert ok2 is False
+
+    @pytest.mark.asyncio
+    async def test_activate_2fa_consume_el_codigo_para_verify(self, db):
+        # El código usado para activar 2FA no debe volver a servir para el
+        # login inmediatamente después -- comparten el mismo contador.
+        secret = generate_secret()
+        await db.set_totp_pending("admin", secret, generate_recovery_codes())
+        code = generate_totp(secret)
+        assert await TOTPManager(db).activate_2fa("admin", code) is True
+
+        ok, _ = await TOTPManager(db).verify("admin", code)
+        assert ok is False
+
+    @pytest.mark.asyncio
+    async def test_verify_permite_el_siguiente_paso_temporal(self, db):
+        # `TOTPManager.verify()` siempre valida contra "ahora" (es la función
+        # de login real, no admite marca de tiempo) -- por eso aquí se usan
+        # desplazamientos relativos a time.time(), no una marca fija.
+        secret = generate_secret()
+        await db.set_totp_pending("admin", secret, generate_recovery_codes())
+        await db.activate_totp("admin")
+
+        ok1, _ = await TOTPManager(db).verify("admin", generate_totp(secret))
+        ok2, _ = await TOTPManager(db).verify("admin", generate_totp(secret, time.time() + 30))
+        assert ok1 is True
+        assert ok2 is True
+
+    @pytest.mark.asyncio
+    async def test_verify_sin_2fa_activo_pasa_siempre(self, db):
+        ok, reason = await TOTPManager(db).verify("admin", "000000")
+        assert ok is True
+        assert "no activo" in reason
+
+    @pytest.mark.asyncio
+    async def test_verify_con_codigo_de_recuperacion_funciona_y_se_consume(self, db):
+        secret = generate_secret()
+        codes = generate_recovery_codes(3)
+        await db.set_totp_pending("admin", secret, codes)
+        await db.activate_totp("admin")
+
+        ok, _ = await TOTPManager(db).verify("admin", codes[0])
+        assert ok is True
+        # consumido: no debe volver a funcionar
+        ok2, _ = await TOTPManager(db).verify("admin", codes[0])
+        assert ok2 is False

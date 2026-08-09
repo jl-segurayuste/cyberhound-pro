@@ -26,6 +26,10 @@ logger = get_logger("auth")
 # Cabecera estándar
 AUTH_COOKIE = "ch_token"
 AUTH_HEADER = "Authorization"
+# Cookie del paso intermedio "contraseña OK, falta el código 2FA" -- separada
+# de AUTH_COOKIE para que un token pendiente nunca pueda usarse como sesión.
+PENDING_2FA_COOKIE = "ch_2fa_pending"
+_PENDING_2FA_TTL = timedelta(minutes=5)
 
 # Rutas que no requieren autenticación (incluye /metrics para que lo raspe
 # Prometheus; el bind por defecto es 127.0.0.1, no expuesto a Internet).
@@ -89,6 +93,30 @@ class AuthConfig:
         except jwt.InvalidTokenError as e:
             logger.warning("JWT inválido: %s", e)
             return None
+
+    def issue_pending_2fa_token(self, username: str) -> str:
+        """Token de corta duración (5 min) para el paso intermedio entre
+        contraseña correcta y código 2FA -- nunca sirve como sesión."""
+        payload = {
+            "sub": username,
+            "purpose": "pending_2fa",
+            "iat": datetime.utcnow(),
+            "exp": datetime.utcnow() + _PENDING_2FA_TTL,
+        }
+        return jwt.encode(payload, self.secret, algorithm="HS256")
+
+    def verify_pending_2fa_token(self, token: str) -> str | None:
+        """Devuelve el usuario si el token de "pendiente de 2FA" es válido, o
+        None. Comprueba `purpose` explícitamente para que este token de vida
+        corta nunca pueda confundirse con uno de sesión completa (que no
+        lleva ese campo)."""
+        try:
+            payload = jwt.decode(token, self.secret, algorithms=["HS256"])
+        except jwt.InvalidTokenError:
+            return None
+        if payload.get("purpose") != "pending_2fa":
+            return None
+        return payload.get("sub")
 
 
 def _is_localhost(request: web.Request) -> bool:
@@ -210,7 +238,11 @@ def setup_auth_routes(app: web.Application, cfg: AuthConfig) -> None:
         csrf_token = CsrfProtection.get_or_create_token(request)
         error = request.query.get("error", "")
         err_html = f'<p class="err">❌ {_h(error)}</p>' if error else ""
-        html = _LOGIN_HTML.replace("__ERROR__", err_html).replace("__CSRF__", csrf_token)
+        pending_token = request.cookies.get(PENDING_2FA_COOKIE)
+        # Contraseña ya verificada, falta el código -- muestra el paso 2 en
+        # vez del formulario de usuario/contraseña.
+        template = _CODE_HTML if pending_token and cfg.verify_pending_2fa_token(pending_token) else _LOGIN_HTML
+        html = template.replace("__ERROR__", err_html).replace("__CSRF__", csrf_token)
         response = web.Response(text=html, content_type="text/html")
         # Inyectar cookie con Secure correcto según si hay TLS
         CsrfProtection.inject_token(response, csrf_token, is_https=_is_https(request))
@@ -247,7 +279,54 @@ def setup_auth_routes(app: web.Application, cfg: AuthConfig) -> None:
             audit_log.auth_failure(ip, "CSRF mismatch en /login")
             raise web.HTTPFound("/login?error=Error+de+seguridad.+Recarga+la+página.")
 
-        # ── Verificar credenciales ─────────────────────────────────────────
+        https = _is_https(request)
+        server = request.app.get("server")
+
+        # ── Segundo paso: la contraseña ya se verificó, falta el código 2FA.
+        # Bug real encontrado 2026-08-09: este paso NO EXISTÍA -- totp_enabled
+        # se guardaba y se mostraba en la UI, pero login_post nunca lo
+        # consultaba, así que activar 2FA no protegía el login en absoluto.
+        pending_token = request.cookies.get(PENDING_2FA_COOKIE)
+        if pending_token:
+            pending_user = cfg.verify_pending_2fa_token(pending_token)
+            if not pending_user:
+                response = web.HTTPFound(
+                    "/login?error=Sesión+de+verificación+expirada.+Inicia+sesión+de+nuevo."
+                )
+                response.del_cookie(PENDING_2FA_COOKIE)
+                return response
+
+            code = str(data.get("code", "")).strip()
+            from cyberhound.core.totp import TOTPManager
+            ok, _reason = (
+                await TOTPManager(server.db).verify(pending_user, code)
+                if server else (False, "sin servidor")
+            )
+            if not ok:
+                blocked, block_time = await _login_rate_limiter.record_failure(ip)
+                audit_log.auth_failure(ip, f"2FA incorrecto para '{pending_user}'")
+                if blocked:
+                    response = web.HTTPFound(
+                        f"/login?error=Cuenta+bloqueada+{block_time}s+por+múltiples+intentos."
+                    )
+                    response.del_cookie(PENDING_2FA_COOKIE)
+                    return response
+                raise web.HTTPFound("/login?error=Código+de+verificación+incorrecto.")
+
+            await _login_rate_limiter.record_success(ip)
+            token = cfg.issue_jwt(pending_user)
+            audit_log.auth_success(ip, pending_user)
+            response = web.HTTPFound("/")
+            response.set_cookie(
+                AUTH_COOKIE, token,
+                httponly=True, samesite="Strict", secure=https,
+                max_age=int(cfg.token_ttl.total_seconds()),
+            )
+            response.del_cookie(PENDING_2FA_COOKIE)
+            response.del_cookie(CsrfProtection.COOKIE_NAME)
+            return response
+
+        # ── Primer paso: verificar usuario + contraseña ─────────────────────
         username = str(data.get("username", "")).strip()[:64]
         password = str(data.get("password", ""))
 
@@ -260,7 +339,7 @@ def setup_auth_routes(app: web.Application, cfg: AuthConfig) -> None:
                 )
             raise web.HTTPFound("/login?error=Credenciales+incorrectas")
 
-        # ── Login exitoso ──────────────────────────────────────────────────
+        # ── Contraseña correcta ──────────────────────────────────────────────
         await _login_rate_limiter.record_success(ip)
 
         # Rehash transparente: si el hash almacenado es del formato antiguo
@@ -270,7 +349,6 @@ def setup_auth_routes(app: web.Application, cfg: AuthConfig) -> None:
             try:
                 new_hash = passwords.hash_password(password)
                 cfg.password_hash = new_hash
-                server = request.app.get("server")
                 full_cfg = getattr(server, "cfg", None)
                 if full_cfg is not None and hasattr(full_cfg, "save"):
                     full_cfg.auth.password_hash = new_hash
@@ -279,10 +357,23 @@ def setup_auth_routes(app: web.Application, cfg: AuthConfig) -> None:
             except Exception as e:  # noqa: BLE001 — nunca romper el login por esto
                 logger.warning("No se pudo migrar el hash de contraseña: %s", e)
 
+        # ── ¿El usuario tiene 2FA activo? Si sí, aún no se le deja entrar ────
+        db_user = await server.db.get_user(username) if server else None
+        if db_user and db_user.get("totp_enabled"):
+            pending_token = cfg.issue_pending_2fa_token(username)
+            response = web.HTTPFound("/login")
+            response.set_cookie(
+                PENDING_2FA_COOKIE, pending_token,
+                httponly=True, samesite="Strict", secure=https,
+                max_age=int(_PENDING_2FA_TTL.total_seconds()),
+            )
+            response.del_cookie(CsrfProtection.COOKIE_NAME)
+            return response
+
+        # ── Login exitoso (sin 2FA) ──────────────────────────────────────────
         token = cfg.issue_jwt(username)
         audit_log.auth_success(ip, username)
 
-        https = _is_https(request)
         response = web.HTTPFound("/")
         response.set_cookie(
             AUTH_COOKIE, token,
@@ -298,6 +389,7 @@ def setup_auth_routes(app: web.Application, cfg: AuthConfig) -> None:
     async def logout(request: web.Request) -> web.Response:
         response = web.HTTPFound("/login")
         response.del_cookie(AUTH_COOKIE)
+        response.del_cookie(PENDING_2FA_COOKIE)
         response.del_cookie(CsrfProtection.COOKIE_NAME)
         return response
 
@@ -354,4 +446,41 @@ _LOGIN_HTML = """<!DOCTYPE html>
   </form>
   __ERROR__
   <p class="hint">Conexión cifrada con TLS</p>
+</div></body></html>"""
+
+_CODE_HTML = """<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="UTF-8"><title>CyberHound — Verificación en dos pasos</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  body{background:#0d1117;color:#e6edf3;font-family:system-ui,sans-serif;
+       display:flex;justify-content:center;align-items:center;height:100vh;margin:0}
+  .box{background:#161b22;border:1px solid #30363d;border-radius:12px;
+       padding:40px;width:320px;box-shadow:0 8px 32px rgba(0,0,0,.4)}
+  h2{text-align:center;color:#58a6ff;margin-bottom:24px;font-size:1.1rem}
+  .logo{text-align:center;font-size:2.2rem;margin-bottom:8px}
+  input[type=text]{
+    width:100%;background:#21262d;border:1px solid #30363d;color:#e6edf3;
+    padding:10px 12px;border-radius:6px;font-size:.9rem;letter-spacing:.2em;
+    text-align:center;box-sizing:border-box;margin-bottom:12px;outline:none}
+  input:focus{border-color:#58a6ff}
+  button{width:100%;background:#58a6ff;color:#0d1117;border:none;padding:11px;
+         border-radius:6px;font-weight:700;font-size:.95rem;cursor:pointer;
+         margin-top:4px;transition:opacity .15s}
+  button:hover{opacity:.85}
+  .err{color:#f85149;font-size:.82rem;margin-top:10px;text-align:center;
+       background:rgba(248,81,73,.1);padding:8px;border-radius:6px}
+  .hint{color:#8b949e;font-size:.72rem;text-align:center;margin-top:14px}
+</style></head>
+<body><div class="box">
+  <div class="logo">🐾</div>
+  <h2>Verificación en dos pasos</h2>
+  <form method="POST" action="/login">
+    <input type="hidden" name="_csrf" value="__CSRF__">
+    <input type="text" name="code" placeholder="Código de 6 dígitos"
+           inputmode="numeric" autocomplete="one-time-code" required autofocus>
+    <button type="submit">Verificar</button>
+  </form>
+  __ERROR__
+  <p class="hint">Introduce el código de tu app de autenticación</p>
 </div></body></html>"""
