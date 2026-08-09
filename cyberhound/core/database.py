@@ -43,6 +43,9 @@ MIGRATIONS: list[tuple[int, str]] = [
         ALTER TABLE users ADD COLUMN totp_pending_secret TEXT;
         ALTER TABLE users ADD COLUMN recovery_codes_json TEXT DEFAULT '[]';
     """),
+    (5, """
+        ALTER TABLE users ADD COLUMN totp_last_counter INTEGER;
+    """),
 ]
 DEFAULT_DB_PATH = Path.home() / ".cyberhound" / "cyberhound.db"
 
@@ -118,7 +121,8 @@ CREATE TABLE IF NOT EXISTS users (
     totp_enabled       INTEGER DEFAULT 0,
     totp_secret        TEXT,
     totp_pending_secret TEXT,
-    recovery_codes_json TEXT DEFAULT '[]'
+    recovery_codes_json TEXT DEFAULT '[]',
+    totp_last_counter  INTEGER
 );
 CREATE TABLE IF NOT EXISTS notifications (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -659,6 +663,17 @@ class Database:
                 "UPDATE users SET totp_enabled=0, totp_secret=NULL, "
                 "totp_pending_secret=NULL WHERE username=?",
                 (username,),
+            )
+            await db.commit()
+
+    async def update_totp_last_counter(self, username: str, counter: int) -> None:
+        """Registra el último paso (step) TOTP consumido -- impide reutilizar
+        el mismo código dos veces. Ver bug real corregido 2026-08-09 en
+        `TOTPManager.verify`/`activate_2fa`."""
+        async with aiosqlite.connect(str(self.path)) as db:
+            await db.execute(
+                "UPDATE users SET totp_last_counter=? WHERE username=?",
+                (counter, username),
             )
             await db.commit()
 

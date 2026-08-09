@@ -61,25 +61,45 @@ def generate_totp(secret: str, timestamp: float | None = None) -> str:
     return str(code).zfill(TOTP_DIGITS)
 
 
-def verify_totp(secret: str, code: str, timestamp: float | None = None) -> bool:
+def find_matching_step(secret: str, code: str, timestamp: float | None = None) -> int | None:
     """
-    Verifica un código TOTP con tolerancia de ±TOTP_WINDOW intervalos.
-    Devuelve True si el código es válido.
+    Como `verify_totp`, pero devuelve el número de paso (step, "epoch // 30s")
+    que coincidió, o None si ninguno lo hizo.
+
+    Se necesita por separado porque `verify_totp` es sin estado: no sabe si
+    ese código ya se usó antes. El llamador con estado persistente (ver
+    `TOTPManager`, que registra el último step consumido por usuario en BD)
+    puede comparar este step contra el último consumido para impedir
+    reutilizar el mismo código dos veces -- la garantía anti-repetición que
+    se supone que da TOTP frente a una contraseña estática, y que sin esto
+    no existía: el mismo código se podía reenviar un número ilimitado de
+    veces y siempre se aceptaba.
     """
     if not code or not isinstance(code, str):
-        return False
+        return None
     code = code.strip().replace(" ", "")
     if len(code) != TOTP_DIGITS or not code.isdigit():
-        return False
+        return None
 
     ts = timestamp or time.time()
     counter = int(ts) // TOTP_PERIOD
 
     for offset in range(-TOTP_WINDOW, TOTP_WINDOW + 1):
-        expected = str(_hotp(secret, counter + offset)).zfill(TOTP_DIGITS)
+        step = counter + offset
+        expected = str(_hotp(secret, step)).zfill(TOTP_DIGITS)
         if hmac.compare_digest(expected, code):
-            return True
-    return False
+            return step
+    return None
+
+
+def verify_totp(secret: str, code: str, timestamp: float | None = None) -> bool:
+    """
+    Verifica un código TOTP con tolerancia de ±TOTP_WINDOW intervalos.
+    Devuelve True si el código es válido. No protege contra reutilización
+    del mismo código -- para eso, usar `TOTPManager`, que sí registra el
+    último paso consumido.
+    """
+    return find_matching_step(secret, code, timestamp) is not None
 
 
 def get_totp_uri(secret: str, username: str) -> str:
@@ -204,11 +224,13 @@ class TOTPManager:
         if not pending:
             return False
 
-        if not verify_totp(pending["secret"], code):
+        step = find_matching_step(pending["secret"], code)
+        if step is None:
             logger.warning("2FA activación fallida para '%s': código incorrecto", username)
             return False
 
         await self.db.activate_totp(username)
+        await self.db.update_totp_last_counter(username, step)
         logger.info("2FA activado para usuario '%s'", username)
         return True
 
@@ -226,9 +248,15 @@ class TOTPManager:
         if not secret:
             return False, "2FA configurado pero sin secreto"
 
-        # Verificar TOTP primero
-        if verify_totp(secret, code):
-            return True, "TOTP válido"
+        # Verificar TOTP primero -- rechazando un step ya consumido (bug real
+        # corregido 2026-08-09: sin esto, el mismo código válido se podía
+        # reutilizar un número ilimitado de veces).
+        step = find_matching_step(secret, code)
+        if step is not None:
+            last = user.get("totp_last_counter")
+            if last is None or step > last:
+                await self.db.update_totp_last_counter(username, step)
+                return True, "TOTP válido"
 
         # Verificar código de recuperación
         recovery_hashes = user.get("recovery_codes_json", "[]")
