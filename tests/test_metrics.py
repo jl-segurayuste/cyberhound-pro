@@ -45,6 +45,6 @@ async def test_middleware_cuenta_error_http():
     assert METRICS._count == before + 1  # los errores también se contabilizan
 
 
-def test_metrics_es_ruta_publica():
-    from cyberhound.core.auth import PUBLIC_ROUTES
-    assert "/metrics" in PUBLIC_ROUTES
+def test_metrics_solo_publico_desde_el_propio_host():
+    from cyberhound.core.auth import LOOPBACK_ROUTES, PUBLIC_ROUTES
+    assert "/metrics" in LOOPBACK_ROUTES and "/metrics" not in PUBLIC_ROUTES

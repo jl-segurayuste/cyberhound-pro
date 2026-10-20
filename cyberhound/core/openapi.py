@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from cyberhound import __version__
+
 # ── Metadatos de endpoints ────────────────────────────────────────────────────
 
 ENDPOINT_DOCS: dict[str, dict] = {
@@ -29,12 +31,12 @@ ENDPOINT_DOCS: dict[str, dict] = {
             {"name": "limit", "in": "query", "schema": {"type": "integer", "default": 50}},
         ],
     },
-    "GET /api/history/{id}": {
+    "GET /api/history/{scan_id}": {
         "summary": "Findings de un scan",
         "tags": ["Scans"],
-        "parameters": [{"name": "id", "in": "path", "required": True, "schema": {"type": "integer"}}],
+        "parameters": [{"name": "scan_id", "in": "path", "required": True, "schema": {"type": "integer"}}],
     },
-    "GET /api/history/{id}/compare": {
+    "GET /api/history/{scan_id}/compare": {
         "summary": "Comparación con el scan anterior",
         "tags": ["Scans"],
         "description": "Devuelve hallazgos nuevos, resueltos y sin cambio respecto al scan previo del mismo tipo.",
@@ -79,7 +81,7 @@ ENDPOINT_DOCS: dict[str, dict] = {
             },
         },
     },
-    "DELETE /api/suppressions/{id}": {
+    "DELETE /api/suppressions/{pattern}": {
         "summary": "Eliminar supresión",
         "tags": ["Suppressions"],
     },
@@ -265,6 +267,71 @@ ENDPOINT_DOCS: dict[str, dict] = {
     "GET /api/ansible/jobs":   {"summary": "Listar jobs Ansible recientes", "tags": ["Ansible"]},
     "GET /api/tenants":        {"summary": "Listar tenants (modo multi-tenant)", "tags": ["MultiTenant"]},
     "POST /api/tenants":       {"summary": "Crear tenant", "tags": ["MultiTenant"]},
+
+    # ── Sesión y plataforma ──────────────────────────────────────────────────
+    "POST /login":             {"summary": "Iniciar sesión (formulario: username, password, _csrf; luego 2FA si está activo)",
+                                "tags": ["Auth"]},
+    "GET /logout":             {"summary": "Cerrar sesión", "tags": ["Auth"]},
+    "GET /api/me":             {"summary": "Usuario de la sesión, rol y permisos", "tags": ["Auth"]},
+    "GET /health":             {"summary": "Healthcheck (sin autenticación)", "tags": ["Monitor"]},
+    "GET /favicon.ico":        {"summary": "Icono (redirige a /static/favicon.svg)", "tags": ["Monitor"]},
+    "GET /metrics":            {"summary": "Métricas en formato Prometheus", "tags": ["Monitor"]},
+    "GET /api/openapi.json":   {"summary": "Esta especificación", "tags": ["Config"]},
+    "GET /api/docs":           {"summary": "Swagger UI", "tags": ["Config"]},
+    # ── Escaneos e historial ─────────────────────────────────────────────────
+    "GET /api/network/discover": {"summary": "Descubrimiento rápido de dispositivos", "tags": ["Assets"],
+                                  "parameters": [{"name": "networks", "in": "query", "description": "CIDRs separados por coma (máx. 5, mínimo /16)"}]},
+    "POST /api/scan/runtime":  {"summary": "Análisis en vivo de contenedores", "tags": ["Scans"],
+                                "requestBody": {"properties": {"containers": {"type": "array", "items": {"type": "string"}}}}},
+    "POST /api/findings/explain": {"summary": "Explicación del hallazgo con el LLM local (Ollama)", "tags": ["Remediation"],
+                                   "requestBody": {"required": True, "properties": {"finding_id": {"type": "string"}}}},
+    "POST /api/import/audit":  {"summary": "Importar auditoría externa (multipart: file, format, target)", "tags": ["Scans"]},
+    "GET /api/import/formats": {"summary": "Formatos de importación admitidos", "tags": ["Scans"]},
+    "POST /api/report/{fmt}":  {"summary": "Informe html | ansible | json", "tags": ["Reports"],
+                                "parameters": [{"name": "fmt", "in": "path", "required": True}],
+                                "requestBody": {"properties": {"source": {"type": "string"}, "findings": {"type": "array"}}}},
+    # ── Remediación ──────────────────────────────────────────────────────────
+    "GET /api/rollback":       {"summary": "Fixes locales que se pueden deshacer", "tags": ["Remediation"]},
+    "POST /api/rollback/local": {"summary": "Deshacer un fix local", "tags": ["Remediation"],
+                                 "requestBody": {"required": True, "properties": {"finding_id": {"type": "string"}}}},
+    # ── Usuarios ─────────────────────────────────────────────────────────────
+    "PATCH /api/users/{username}": {"summary": "Cambiar rol o activar/desactivar", "tags": ["Users"],
+                                    "requestBody": {"properties": {"role": {"type": "string", "enum": ["admin", "operator", "viewer"]},
+                                                                   "active": {"type": "boolean"}, "password": {"type": "string"}}}},
+    "DELETE /api/users/{username}": {"summary": "Desactivar usuario (borrado lógico)", "tags": ["Users"]},
+    # ── Scheduler ────────────────────────────────────────────────────────────
+    "GET /api/scheduler":      {"summary": "Tareas programadas", "tags": ["Config"]},
+    "POST /api/scheduler/{name}/run": {"summary": "Ejecutar una tarea ahora", "tags": ["Config"]},
+    "POST /api/scheduler/{name}/toggle": {"summary": "Activar o desactivar una tarea", "tags": ["Config"],
+                                          "requestBody": {"properties": {"enabled": {"type": "boolean"}}}},
+    # ── Configuración ────────────────────────────────────────────────────────
+    "GET /api/config/keys":    {"summary": "API keys configuradas (enmascaradas)", "tags": ["Config"]},
+    "POST /api/config/keys":   {"summary": "Guardar API keys (shodan, virustotal, abuseipdb, greynoise, otx, hibp)", "tags": ["Config"]},
+    "GET /api/config/notifications":  {"summary": "Configuración de email y webhook", "tags": ["Config"]},
+    "POST /api/config/notifications": {"summary": "Guardar email y webhook", "tags": ["Config"]},
+    "POST /api/config/notifications/test": {"summary": "Enviar notificación de prueba", "tags": ["Config"]},
+    "GET /api/config/siem":    {"summary": "Configuración SIEM", "tags": ["Config"]},
+    "POST /api/config/siem":   {"summary": "Guardar configuración SIEM", "tags": ["Config"]},
+    "GET /api/config/ticketing":  {"summary": "Configuración de Jira / ServiceNow", "tags": ["Config"]},
+    "POST /api/config/ticketing": {"summary": "Guardar Jira / ServiceNow", "tags": ["Config"]},
+    "POST /api/config/ticketing/test": {"summary": "Crear ticket de prueba", "tags": ["Config"]},
+    "GET /api/config/agent":   {"summary": "Modo agente (standalone | manager | agent)", "tags": ["Agent"]},
+    "POST /api/config/agent":  {"summary": "Guardar modo agente", "tags": ["Agent"],
+                                "requestBody": {"properties": {"mode": {"type": "string"}, "manager_url": {"type": "string"},
+                                                               "agent_key": {"type": "string"}, "agent_name": {"type": "string"}}}},
+    "GET /api/quarantine/stats": {"summary": "Estadísticas de la cuarentena", "tags": ["Quarantine"]},
+    "GET /api/ansible/templates": {"summary": "Plantillas de AWX/Tower", "tags": ["Ansible"]},
+    # ── Intel ────────────────────────────────────────────────────────────────
+    "POST /api/intel/scan":    {"summary": "Analizar IPs, dominios o hashes", "tags": ["Intel"],
+                                "requestBody": {"properties": {"targets": {"type": "array"}, "from_last_network_scan": {"type": "boolean"}}}},
+    "GET /api/intel/lookup":   {"summary": "Consulta rápida de un indicador", "tags": ["Intel"],
+                                "parameters": [{"name": "target", "in": "query", "required": True}]},
+    "GET /api/intel/history":  {"summary": "Consultas de intel anteriores", "tags": ["Intel"]},
+    "GET /api/intel/config":   {"summary": "Fuentes de intel con API key configurada", "tags": ["Intel"]},
+    # ── Multi-tenant ─────────────────────────────────────────────────────────
+    "GET /api/tenants/{slug}":    {"summary": "Detalle de un tenant", "tags": ["MultiTenant"]},
+    "PATCH /api/tenants/{slug}":  {"summary": "Modificar tenant", "tags": ["MultiTenant"]},
+    "DELETE /api/tenants/{slug}": {"summary": "Desactivar tenant", "tags": ["MultiTenant"]},
 }
 
 TAGS = [
@@ -287,6 +354,7 @@ TAGS = [
     {"name": "Config",       "description": "Configuración del servidor"},
     {"name": "WebSocket",    "description": "Canales WebSocket para streaming"},
     {"name": "Ansible",      "description": "Integración Ansible AWX/Tower"},
+    {"name": "Intel",        "description": "Threat intelligence (Shodan, VirusTotal, AbuseIPDB…)"},
     {"name": "MultiTenant",  "description": "Modo multi-tenant (SaaS)"},
 ]
 
@@ -349,13 +417,12 @@ def build_openapi_spec(server_url: str = "https://localhost:8443") -> dict:
                 "Enviar `{\"task\": \"audit\"}` para iniciar.\n\n"
                 "**Modo agente**: Los agentes usan `Authorization: AgentKey <key>` en `/api/agent/*`."
             ),
-            "version":     "6.2.0",
+            "version":     __version__,
             "contact": {
                 "name":  "CyberHound Pro",
                 "url":   "https://github.com/jl-segurayuste/cyberhound-pro",
-                "email": "security@cyberhound.local",
             },
-            "license": {"name": "MIT", "url": "https://opensource.org/licenses/MIT"},
+            "license": {"name": "AGPL-3.0", "url": "https://www.gnu.org/licenses/agpl-3.0.html"},
         },
         "servers": [{"url": server_url, "description": "Servidor CyberHound Pro"}],
         "tags": TAGS,
@@ -410,6 +477,7 @@ SWAGGER_UI_HTML = """<!DOCTYPE html>
 <html><head>
 <title>CyberHound Pro API Docs</title>
 <meta charset="utf-8">
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/static/vendor/swagger-ui/swagger-ui.css">
 <style>
   body { margin: 0; background: #0d1117; }

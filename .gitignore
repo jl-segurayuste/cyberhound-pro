@@ -37,3 +37,6 @@ reports/
 
 # artefacto temporal
 tmpfile
+
+# Certificados propios para nginx (docker-compose.production.yml)
+docker/nginx/certs/*.pem

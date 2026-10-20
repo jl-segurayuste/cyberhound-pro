@@ -1,6 +1,7 @@
 """Fixtures compartidas para todos los tests de CyberHound."""
 import asyncio
 import hashlib
+import os
 import tempfile
 from pathlib import Path
 
@@ -10,6 +11,26 @@ import pytest_asyncio
 from cyberhound.core.config import CyberHoundConfig
 from cyberhound.core.database import Database
 from cyberhound.core.models import Finding
+
+# ── PostgreSQL opcional ───────────────────────────────────────────────────────
+# CH_DB_URL=postgresql://… pytest  → toda la suite (servidor incluido) corre contra
+# PostgreSQL; cada test empieza con el esquema vacío.
+
+@pytest.fixture(autouse=True)
+def _postgres_limpio():
+    url = os.environ.get("CH_DB_URL", "")
+    if url.startswith("postgresql://"):
+        import asyncpg
+
+        async def reset():
+            conn = await asyncpg.connect(url)
+            try:
+                await conn.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
+            finally:
+                await conn.close()
+        asyncio.run(reset())
+    yield
+
 
 # ── Fixtures básicas ──────────────────────────────────────────────────────────
 

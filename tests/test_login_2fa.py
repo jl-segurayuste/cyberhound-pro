@@ -172,10 +172,10 @@ async def test_pending_2fa_token_no_sirve_como_sesion(client, db):
 
     cfg = AuthConfig(username="admin", password_hash="x", secret="x" * 32)
     pending = cfg.issue_pending_2fa_token("admin")
-    assert cfg.verify_jwt(pending) is not None  # el JWT en sí es válido...
-    # ...pero como token de sesión no tiene sentido de negocio: no es lo que
-    # protege esto. Lo que sí protege es que `verify_pending_2fa_token`
-    # rechace un JWT de sesión normal (sin `purpose`).
+    # Antes este assert comprobaba lo contrario (que el token SÍ pasaba verify_jwt):
+    # era el bypass del 2FA corregido el 2026-10-20 (ver tests/test_auth_tokens.py).
+    assert cfg.verify_jwt(pending) is None
     session_token = cfg.issue_jwt("admin")
+    assert cfg.verify_jwt(session_token)["sub"] == "admin"
     assert cfg.verify_pending_2fa_token(session_token) is None
     assert cfg.verify_pending_2fa_token(pending) == "admin"

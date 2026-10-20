@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
+import os
 import re
 import secrets
 import time
@@ -476,9 +477,11 @@ class InputValidator:
             sanitized["scan_k8s"]        = bool(msg.get("scan_k8s", True))
 
         elif task == "intel":
-            sanitized["target"] = InputValidator.ip_or_hostname(
-                msg.get("target", ""), "target"
-            )
+            from cyberhound.scanners.intel import indicator_kind
+            target = str(msg.get("target", "")).strip()
+            if indicator_kind(target) is None:
+                raise ValidationError("target", "Debe ser una IP, dominio, hash o email")
+            sanitized["target"] = target
             modules = msg.get("modules", [])
             sanitized["modules"] = InputValidator.modules_list(
                 modules, ALLOWED_INTEL_MODULES, "modules"
@@ -630,7 +633,8 @@ class TLSManager:
     de expirar.
     """
 
-    CERT_DIR = Path("/etc/cyberhound/tls")
+    # CH_TLS_DIR: en Docker apunta al volumen (/data/tls) para no regenerar el certificado al recrear
+    CERT_DIR = Path(os.environ.get("CH_TLS_DIR", "/etc/cyberhound/tls"))
     CERT_FILE = CERT_DIR / "cert.pem"
     KEY_FILE  = CERT_DIR / "key.pem"
     # Fallback en home si no hay permisos en /etc

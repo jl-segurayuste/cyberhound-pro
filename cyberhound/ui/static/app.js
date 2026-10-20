@@ -1,4 +1,4 @@
-/* CyberHound Pro v6.1 — app.js */
+/* CyberHound Pro — app.js */
 'use strict';
 
 // ── Estado global ──────────────────────────────────────────────────────────
@@ -37,12 +37,62 @@ function _dispatch(ev) {
     const name = el.getAttribute(`data-on-${ev.type}`);
     const fn = window[name];
     if (typeof fn !== 'function') { console.error(`Manejador no definido: ${name}`); continue; }
+    if (!canDo(name)) { toast(`Tu rol (${USER.role}) no permite esta acción`, 'error'); ev.stopPropagation(); break; }
     const raw = JSON.parse(el.getAttribute(`data-args-${ev.type}`) || '[]');
     fn(...raw.map(a => a === '$this' ? el : a === '$value' ? el.value : a === '$event' ? ev : a));
     if (el.hasAttribute('data-stop')) { ev.stopPropagation(); break; }
   }
 }
 _EVENT_TYPES.forEach(t => document.addEventListener(t, _dispatch, true));
+
+// ── Roles ─────────────────────────────────────────────────────────────────
+// Permiso de ROLE_PERMISSIONS (servidor) que exige cada acción de la interfaz. El
+// servidor es quien lo hace cumplir; aquí solo se desactiva lo que daría 403.
+// tests/test_frontend_integrity.py comprueba que coincide con _required_permission.
+const FN_PERMS = {
+  applyFix: 'fix', applyFixRemote: 'fix', fixAll: 'fix', deleteQuarantine: 'fix', restoreQuarantine: 'fix',
+  runAnsiblePlaybook: 'fix',
+  quickAudit: 'scan', quickDocker: 'scan', quickMalware: 'scan', quickNetwork: 'scan', runAudit: 'scan',
+  runAPISecurityScan: 'scan', runCode: 'scan', runDNSScan: 'scan', runDocker: 'scan', runDockerImageScan: 'scan',
+  runIntelScan: 'scan', runLDAPScan: 'scan', runMalware: 'scan', runNetworkScan: 'scan', runNucleiScan: 'scan',
+  runRuntimeScan: 'scan', runSchedulerNow: 'scan', runServicesAudit: 'scan', runSubdomainScan: 'scan',
+  runTLSScan: 'scan', runWebExposureScan: 'scan', runWebHeadersScan: 'scan', sshAuditOne: 'scan',
+  explainFinding: 'scan', downloadSBOM: 'scan', generateSBOM: 'scan', importAuditFile: 'scan', loadCompliance: 'scan',
+  addSuppression: 'config', removeSuppression: 'config', suppressFinding: 'config', toggleScheduler: 'config',
+  saveAgentConfig: 'config', saveKeys: 'config', saveNotifications: 'config', saveSIEM: 'config',
+  saveTicketing: 'config', testNotifications: 'config', testSIEM: 'config', testTicketing: 'config',
+  activateLicense: 'config', updateYaraRules: 'config',
+  discoverOnly: 'scan', changeUserRole: 'users', createUser: 'users', deleteUser: 'users', loadUsers: 'users',
+};
+let USER = { username: '', role: 'admin', permissions: ['scan', 'fix', 'config', 'users', 'view'] };
+
+function canDo(fn) { const p = FN_PERMS[fn]; return !p || USER.permissions.includes(p); }
+
+function applyRole(root = document) {
+  if (!root.querySelectorAll) return;
+  root.querySelectorAll('[data-on-click],[data-on-change]').forEach(el => {
+    const fn = el.getAttribute('data-on-click') || el.getAttribute('data-on-change');
+    if (canDo(fn)) return;
+    el.disabled = true;
+    el.classList.add('role-locked');
+    el.title = `Tu rol (${USER.role}) no permite esta acción`;
+  });
+  if (!USER.permissions.includes('users')) document.querySelectorAll('[data-cfg="users"]').forEach(el => el.hidden = true);
+}
+
+async function loadMe() {
+  try {
+    const r = await fetch('/api/me');
+    if (!r.ok) return;
+    USER = await r.json();
+  } catch { return; }
+  document.body.dataset.role = USER.role;
+  const who = document.getElementById('user-role-badge');
+  if (who) who.textContent = `${USER.username} · ${USER.role}`;
+  applyRole();
+  new MutationObserver(ms => ms.forEach(m => m.addedNodes.forEach(n => applyRole(n.parentNode || n))))
+    .observe(document.body, { childList: true, subtree: true });
+}
 
 function hideEl(id) { const el = document.getElementById(id); if (el) el.style.display = 'none'; }
 
@@ -840,6 +890,7 @@ async function runSchedulerNow(name, btnEl) {
 
 // ── Usuarios ──────────────────────────────────────────────────────────────
 async function loadUsers() {
+  if (!USER.permissions.includes('users')) return;   // solo admin: evita el 403 al abrir Ajustes
   try {
     const users = await fetch('/api/users').then(r => r.json());
     const tbody = document.getElementById('users-tbody');
@@ -1099,7 +1150,8 @@ const _sevBadge = sevBadge; // alias para compatibilidad
 // ── Init ──────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   setStatus('idle', 'Listo');
-  appendLog('info', 'CyberHound Pro v6.3.0 iniciado.');
+  appendLog('info', 'CyberHound Pro iniciado.');
+  loadMe();
   loadDashboard();
   loadKeys();
   // Polling del dashboard cada 5 minutos (respaldo del WS push)
@@ -3429,7 +3481,7 @@ async function runIntelLookup() {
   const modules = [...document.querySelectorAll('.intel-mod:checked')].map(c => c.value);
   const btnEl   = document.getElementById('btn-intel-lookup');
 
-  if (!target) { toast('Introduce una IP o dominio', 'warning'); return; }
+  if (!target) { toast('Introduce una IP, dominio, hash o email', 'warning'); return; }
 
   if (btnEl) { btnEl.disabled = true; btnEl.textContent = 'Consultando…'; }
   _showIntelLoading();
@@ -3530,8 +3582,7 @@ function _renderIntelResults(data) {
     const sevColors = { critical:'var(--critical)', high:'var(--high)', medium:'var(--medium)', low:'var(--text2)' };
     tbody.innerHTML = data.findings.map(f => {
       const cat = (f.category || '').split('/').pop();
-      const target = f.evidence?.match(/ip=([^\s]+)/)?.[1] ||
-                     f.evidence?.match(/domain=([^\s]+)/)?.[1] || '—';
+      const target = f.evidence?.match(/(?:ip|domain|hash|email)=([^\s]+)/)?.[1] || '—';
       return `<tr ${on('click', 'openDrawer', f)}>
         <td>${sevBadge(f.severity)}</td>
         <td style="font-size:.78rem;color:var(--text2)">${esc(cat)}</td>

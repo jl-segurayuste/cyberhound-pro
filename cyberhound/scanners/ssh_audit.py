@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import time
 from dataclasses import dataclass
 
@@ -25,8 +26,15 @@ from cyberhound.core.models import Finding, HostResult
 
 logger = get_logger("ssh_audit")
 
-REMOTE_SCRIPT = "/tmp/.ch_audit_{pid}.py"
-REMOTE_OUTPUT = "/tmp/.ch_result_{pid}.json"
+# Lo que se puede corregir en remoto. El comando se construye aquí a partir del id
+# del hallazgo: nunca se ejecuta la remediación que devuelve el host auditado.
+REMOTE_SSH_PARAMS = ("PermitRootLogin", "PasswordAuthentication", "PermitEmptyPasswords", "X11Forwarding")
+REMOTE_SYSCTL = {
+    "net.ipv4.ip_forward": "0", "net.ipv4.tcp_syncookies": "1",
+    "kernel.randomize_va_space": "2", "net.ipv4.conf.all.accept_source_route": "0",
+}
+REMOTE_SERVICES = ("telnet", "rsh", "nis", "finger", "tftp")
+REMOTE_WW_DIRS = ("/etc/", "/usr/bin/", "/usr/sbin/", "/bin/", "/sbin/")
 
 
 @dataclass
@@ -123,7 +131,7 @@ for param, expected in [
     ("net.ipv4.ip_forward","0"),("net.ipv4.tcp_syncookies","1"),
     ("kernel.randomize_va_space","2"),("net.ipv4.conf.all.accept_source_route","0"),
 ]:
-    p = Path("/proc/sys")/param.replace(".","/ ")
+    p = Path("/proc/sys")/param.replace(".","/")
     if p.exists():
         v = p.read_text().strip()
         if v != expected:
@@ -216,33 +224,11 @@ print(json.dumps(findings))
                     logger.warning("%s: %s", host, result.error)
                     return result
 
-                # Copiar script de audit inline (sin SCP, usa stdin)
-                import os as _os
-                pid = _os.getpid()
-                script_path = f"/tmp/.ch_audit_{pid}.py"
-                output_path = f"/tmp/.ch_result_{pid}.json"
-
-                # Escribir script via echo/cat para evitar SCP
-                # Usamos sftp (incluido en asyncssh) que es seguro y no expone datos en ps
-                async with conn.start_sftp_client() as sftp:
-                    async with sftp.open(script_path, "w") as f:
-                        await f.write(self.REMOTE_AUDIT_SCRIPT)
-
-                # Ejecutar con sudo -n (no interactivo): los checks necesitan
-                # visibilidad real de root (shadow, sudoers, servicios) — sin
-                # esto, conectar como usuario normal da una auditoría incompleta
-                # y potencialmente engañosa (igual que el problema original de
-                # auditar "localhost" sin visibilidad real del host).
-                # Si el usuario no tiene sudo sin contraseña, sudo -n falla
-                # limpiamente (no se queda colgado esperando un prompt) y el
-                # script cae de vuelta a ejecutar sin privilegios elevados.
-                run_cmd = (
-                    f"sudo -n python3 {script_path} > {output_path} 2>/dev/null"
-                    f" || python3 {script_path} > {output_path} 2>/dev/null"
-                    f" ; cat {output_path}"
-                    f" ; rm -f {script_path} {output_path}"
-                )
-                exec_result = await conn.run(run_cmd, timeout=120)
+                # El script va por stdin: nada en /tmp que otro usuario del host pueda
+                # sustituir antes de que se ejecute con sudo. Con sudo -n (no interactivo)
+                # los checks ven shadow, sudoers y servicios; sin sudo la auditoría es parcial.
+                exec_result = await conn.run(await self._python_cmd(conn), input=self.REMOTE_AUDIT_SCRIPT,
+                                             timeout=120)
 
                 # Parsear
                 stdout = exec_result.stdout.strip()
@@ -292,29 +278,98 @@ print(json.dumps(findings))
 
         return result
 
-    async def apply_fix_remote(self, host: str, remediation_cmd: str) -> tuple[bool, str]:
-        """
-        Aplica un comando de remediación en el host remoto.
-        Solo permite comandos de una lista blanca.
-        """
-        SAFE_PREFIXES = (
-            "chmod ", "chown ", "systemctl ", "sysctl -w ",
-            "sed -i ", "ufw ", "apt-get install ",
-        )
-        cmd = remediation_cmd.split("\n")[0].strip()
-        if not any(cmd.startswith(p) for p in SAFE_PREFIXES):
-            return False, f"Comando bloqueado por política de seguridad: {cmd}"
+    @staticmethod
+    async def _python_cmd(conn) -> str:
+        try:
+            ok = (await conn.run("sudo -n true", timeout=10)).exit_status == 0
+        except Exception:
+            ok = False
+        return "sudo -n python3 -" if ok else "python3 -"
 
+    @staticmethod
+    def remote_fix_action(finding: Finding) -> dict | None:
+        """Acción de corrección para un hallazgo de la auditoría remota (None si no hay)."""
+        fid = finding.id.split("::", 1)[-1]
+        if fid.startswith("ssh_") and fid[4:] in REMOTE_SSH_PARAMS:
+            return {"action": "ssh_param", "param": fid[4:], "value": "no"}
+        if fid == "fw_inactive":
+            return {"action": "ufw_enable"}
+        if fid.startswith("kernel_") and fid[7:] in REMOTE_SYSCTL:
+            return {"action": "sysctl", "param": fid[7:], "value": REMOTE_SYSCTL[fid[7:]]}
+        if fid.startswith("svc_") and fid[4:] in REMOTE_SERVICES:
+            return {"action": "svc_disable", "svc": fid[4:]}
+        path = finding.file_path or ""
+        if (fid.startswith("ww_") and path.startswith(REMOTE_WW_DIRS) and ".." not in path
+                and re.fullmatch(r"/[\w./+@-]+", path)):
+            return {"action": "chmod_ow", "path": path}
+        return None
+
+    REMOTE_FIX_SCRIPT = '''
+import json, os, re, shutil, stat, subprocess, sys
+def run(cmd):
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+    return r.returncode == 0, (r.stderr or r.stdout).strip()[:300]
+def done(ok, msg=""):
+    print(json.dumps({"ok": ok, "msg": msg})); sys.exit(0)
+act = A["action"]
+if act == "ssh_param":
+    path = "/etc/ssh/sshd_config"; old = open(path).read()
+    line = A["param"] + " " + A["value"]
+    pat = re.compile(r"^\\s*" + A["param"] + r"\\s+.*$", re.M | re.I)
+    new = pat.sub(line, old) if pat.search(old) else old.rstrip("\\n") + "\\n" + line + "\\n"
+    shutil.copy2(path, path + ".cyberhound.bak")
+    open(path, "w").write(new)
+    ok, err = run(["sshd", "-t"]) if shutil.which("sshd") else run(["/usr/sbin/sshd", "-t"])
+    if not ok:
+        open(path, "w").write(old); done(False, "sshd -t rechaza el cambio, restaurado: " + err)
+    for unit in ("ssh", "sshd"):
+        if run(["systemctl", "reload", unit])[0]:
+            done(True)
+    done(True, "aplicado; recarga sshd a mano")
+if act == "ufw_enable":
+    ports = re.findall(r"^\\s*Port\\s+(\\d+)", open("/etc/ssh/sshd_config").read(), re.M) or ["22"]
+    for p in ports:
+        run(["ufw", "allow", p + "/tcp"])
+    done(*run(["ufw", "--force", "enable"]))
+if act == "sysctl":
+    ok, err = run(["sysctl", "-w", A["param"] + "=" + A["value"]])
+    if ok:
+        conf = "/etc/sysctl.d/99-cyberhound.conf"
+        cur = open(conf).read() if os.path.exists(conf) else ""
+        if A["param"] not in cur:
+            open(conf, "a").write(A["param"] + " = " + A["value"] + "\\n")
+    done(ok, err)
+if act == "svc_disable":
+    done(*run(["systemctl", "disable", "--now", A["svc"]]))
+if act == "chmod_ow":
+    fd = os.open(A["path"], os.O_RDONLY | os.O_NOFOLLOW)
+    st = os.fstat(fd)
+    if not stat.S_ISREG(st.st_mode):
+        done(False, "no es un fichero regular")
+    os.fchmod(fd, stat.S_IMODE(st.st_mode) & ~0o002); done(True)
+done(False, "acción desconocida")
+'''
+
+    @classmethod
+    def _fix_payload(cls, action: dict) -> str:
+        # repr() de un str es un literal Python válido: la acción viaja como dato, no como código
+        return f"A = __import__('json').loads({json.dumps(action)!r})\n" + cls.REMOTE_FIX_SCRIPT
+
+    async def apply_fix_remote(self, host: str, finding: Finding) -> tuple[bool, str]:
+        """Aplica en el host remoto la corrección de un hallazgo de su auditoría."""
+        action = self.remote_fix_action(finding)
+        if action is None:
+            return False, f"Sin corrección remota automática para {finding.id}"
         try:
             async with asyncssh.connect(host, **self.creds.to_asyncssh_opts()) as conn:
-                r = await conn.run(cmd, timeout=60)
-                if r.exit_status == 0:
-                    logger.info("Fix remoto aplicado en %s: %s", host, cmd)
-                    return True, ""
+                r = await conn.run(await self._python_cmd(conn), input=self._fix_payload(action), timeout=90)
+                out = (r.stdout or "").strip().splitlines()
+                res = json.loads(out[-1]) if out else {"ok": False, "msg": (r.stderr or "")[:300]}
+                if res.get("ok"):
+                    logger.info("Fix remoto aplicado en %s: %s", host, action)
                 else:
-                    stderr = str(r.stderr) if r.stderr else ""
-                    logger.error("Fix remoto falló en %s: %s", host, stderr)
-                    return False, stderr[:300]
+                    logger.error("Fix remoto falló en %s: %s", host, res.get("msg"))
+                return bool(res.get("ok")), res.get("msg", "")
         except Exception as e:
             logger.error("Error aplicando fix remoto en %s: %s", host, e)
             return False, str(e)

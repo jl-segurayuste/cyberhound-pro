@@ -380,6 +380,7 @@ class CyberHoundServer:
         app.router.add_get("/api/score/trend",           self.api_score_trend)
         app.router.add_get("/api/score/detail",          self.api_score_detail)
         app.router.add_get("/api/dashboard",             self.api_dashboard)
+        app.router.add_get("/api/me",                    self.api_me)
 
         # ── Inventario de red ────────────────────────────────────────────────
         app.router.add_get ("/api/assets",              self.api_assets)
@@ -899,15 +900,12 @@ class CyberHoundServer:
     async def _run_intel_scan(self, params, ws_id, send, log, scan_id):
         from cyberhound.scanners.intel import IntelScanner
         target = params.get("target", "")
-        modules = params.get("modules", ["shodan", "virustotal", "abuseipdb"])
         await log("section", f"Intel scan: {target}")
         scanner = IntelScanner(self.cfg.api_keys)
-        results = await scanner.scan(target, modules)
-        for item in results:
-            await send({"type": "intel", "data": item.to_dict()})
-            await log("ok", f"✓ {item.source}: datos obtenidos")
-        await self.db.complete_scan(scan_id, [])
-        await send({"type": "done", "count": len(results), "scan_id": scan_id})
+        if not scanner.configured_modules():
+            await log("warn", "Sin API keys de threat intelligence configuradas")
+        findings = await scanner.scan_findings(target, params.get("modules") or None)
+        await self._emit_findings(findings, ws_id, send, scan_id)
 
     # ── Fix local ─────────────────────────────────────────────────────────────
 
@@ -919,10 +917,16 @@ class CyberHoundServer:
             user  = request.get("auth_user", "unknown")
             finding = self._find_cached(fid)
             if not finding:
-                return web.json_response({"ok": False, "error": "Finding no encontrado"})
+                return web.json_response({"ok": False, "error": "Finding no encontrado"}, status=404)
+            if finding.source_host and finding.source_host not in ("localhost", "127.0.0.1"):
+                # Sin esto el fix de un hallazgo remoto se aplicaba en este servidor
+                return web.json_response({"ok": False, "error": "Hallazgo de otro host: usa el fix remoto"},
+                                         status=400)
             from cyberhound.scanners.hardening import HardeningFixer
-            fixer = HardeningFixer(dry_run=dry)
+            fixer = HardeningFixer(dry_run=dry, keep_open_ports=(self.cfg.server.port,))
             ok, msg = await fixer.fix(finding)
+            if not ok:
+                return web.json_response({"ok": False, "error": msg or "El fix no se pudo aplicar"}, status=422)
             audit_log.fix_applied(fid, user, "localhost", dry)
             # Marcar como corregido en BD si tenemos el scan_id
             if ok and not dry:
@@ -951,11 +955,14 @@ class CyberHoundServer:
         try:
             body = await _read_json(request)
             fid  = body.get("finding_id")
-            host = body.get("host", "")
             user = request.get("auth_user", "unknown")
             finding = self._find_cached(fid)
             if not finding:
-                return web.json_response({"ok": False, "error": "Finding no encontrado"})
+                return web.json_response({"ok": False, "error": "Finding no encontrado"}, status=404)
+            # El fix se aplica en el host donde se encontró el hallazgo, no en el que diga la petición
+            host = finding.source_host or body.get("host", "")
+            if not host or host in ("localhost", "127.0.0.1"):
+                return web.json_response({"ok": False, "error": "El hallazgo no es de un host remoto"}, status=400)
             from cyberhound.scanners.ssh_audit import RemoteAuditor, SSHCredentials
             creds = SSHCredentials(
                 username=body.get("ssh_user", self.cfg.scan.ssh_default_user),
@@ -963,9 +970,10 @@ class CyberHoundServer:
                 key_path=body.get("ssh_key") or self.cfg.scan.ssh_key_path,
                 password=body.get("ssh_password") or None,
             )
-            ok, msg = await RemoteAuditor(creds).apply_fix_remote(host, finding.remediation)
+            ok, msg = await RemoteAuditor(creds).apply_fix_remote(host, finding)
             audit_log.fix_applied(fid, user, host, False)
-            return web.json_response({"ok": ok, "message": msg})
+            return web.json_response({"ok": ok, "message": msg, **({} if ok else {"error": msg or "El fix no se pudo aplicar"})},
+                                     status=200 if ok else 422)
         except Exception as e:
             logger.error("api_fix_remote: %s", e, exc_info=True)
             return web.json_response({"ok": False, "error": str(e)}, status=500)
@@ -1008,7 +1016,7 @@ class CyberHoundServer:
     # ── Observabilidad ─────────────────────────────────────────────────────────
 
     async def api_metrics(self, request: web.Request) -> web.Response:
-        """Métricas en formato Prometheus (texto). Ruta pública (PUBLIC_ROUTES)."""
+        """Métricas en formato Prometheus (texto). Sin sesión solo desde el propio host (LOOPBACK_ROUTES)."""
         return web.Response(text=METRICS.render(), content_type="text/plain")
 
     # ── Explicación de hallazgos (LLM local) ───────────────────────────────────
@@ -1223,12 +1231,18 @@ class CyberHoundServer:
             return web.json_response([])
         return web.json_response(self.scheduler.list_entries())
 
+    async def api_me(self, request: web.Request) -> web.Response:
+        """Usuario de la sesión, su rol y permisos (la UI desactiva lo que daría 403)."""
+        role = request.get("user_role", "admin")   # sin auth (localhost) todo está permitido
+        return web.json_response({"username": request.get("auth_user", ""), "role": role,
+                                  "permissions": sorted(ROLE_PERMISSIONS.get(role, set()))})
+
     async def api_scheduler_run(self, request: web.Request) -> web.Response:
         name = request.match_info["name"]
         if not self.scheduler:
             return web.json_response({"error": "Scheduler no activo"}, status=503)
         ok = await self.scheduler.run_now(name)
-        return web.json_response({"ok": ok, "error": "Tarea no encontrada" if not ok else None})
+        return web.json_response({"ok": ok, "error": "Tarea no encontrada" if not ok else None}, status=200 if ok else 404)
 
     async def api_scheduler_toggle(self, request: web.Request) -> web.Response:
         try:
@@ -2061,7 +2075,7 @@ class CyberHoundServer:
         ok = await TOTPManager(self.db).activate_2fa(user, code)
         if ok:
             logger.info("2FA activado para '%s'", user)
-        return web.json_response({"ok": ok, "error": None if ok else "Código incorrecto"})
+        return web.json_response({"ok": ok, "error": None if ok else "Código incorrecto"}, status=200 if ok else 400)
 
     async def api_2fa_disable(self, request: web.Request) -> web.Response:
         """Desactiva el 2FA del usuario actual."""
@@ -2157,7 +2171,7 @@ class CyberHoundServer:
 
         # Persistir el secreto JWT si aún no estaba guardado en config
         # (evita invalidar sesiones en cada reinicio del servidor)
-        config_path = Path(self.cfg.db_path).parent / "config.yaml"
+        config_path = Path(self.cfg.config_path)
         if not self.cfg.auth.secret:
             import secrets as _sec
             self.cfg.auth.secret = _sec.token_hex(32)
@@ -2176,7 +2190,8 @@ class CyberHoundServer:
         await self.db.init()
         await self.db.ensure_admin_exists(
             self.cfg.auth.username,
-            self.cfg.auth.password_hash or passwords.hash_password("cyberhound"),
+            # sin contraseña configurada la fila de la BD lleva un hash inutilizable (nunca "cyberhound")
+            self.cfg.auth.password_hash or passwords.hash_password(secrets.token_urlsafe(32)),
         )
 
         # Cargar licencia

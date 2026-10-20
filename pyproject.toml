@@ -4,8 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cyberhound-pro"
-version = "6.1.0"
+dynamic = ["version"]
 description = "Plataforma de auditoría y seguridad para PYMEs"
+readme = "README.md"
+license = {text = "AGPL-3.0-only"}
 requires-python = ">=3.11"
 dependencies = [
     "aiohttp>=3.9",
@@ -32,16 +34,22 @@ test = [
 dev = [
     "ruff>=0.6",
 ]
+postgres = [
+    "asyncpg>=0.29",
+]
 
 [project.scripts]
 cyberhound = "cyberhound.__main__:main"
+
+[tool.setuptools.dynamic]
+version = {attr = "cyberhound.__version__"}
 
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["cyberhound*"]
 
 [tool.setuptools.package-data]
-"cyberhound.ui.static" = ["*.html", "*.css", "*.js"]
+"cyberhound.ui.static" = ["*.html", "*.css", "*.js", "*.svg", "vendor/**/*"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

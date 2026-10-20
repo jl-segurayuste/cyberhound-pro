@@ -904,8 +904,11 @@ class HardeningAuditor:
 # ──────────────────────────────────────────────────────────────────────────────
 
 class HardeningFixer:
-    def __init__(self, dry_run: bool = False) -> None:
+    def __init__(self, dry_run: bool = False, keep_open_ports: tuple[int, ...] = ()) -> None:
         self.dry_run = dry_run
+        # Puertos que se abren antes de activar el firewall (p. ej. el de la propia web),
+        # además de los de sshd: activar ufw no debe dejar fuera a quien está administrando.
+        self.keep_open_ports = keep_open_ports
         # Acciones de reversión acumuladas durante el último fix() aplicado.
         # Quien invoca el fix las persiste en el journal de rollback.
         self.rollback_actions: list[Action] = []
@@ -935,6 +938,9 @@ class HardeningFixer:
 
         # Routing por categoría/id
         try:
+            if fid.startswith(("ssh_hostkey_perm_", "passwd_perm_")):
+                return await self._fix_mode(finding, 0o600 if fid.startswith("ssh_hostkey") else
+                                            (0o640 if finding.file_path == "/etc/shadow" else 0o644))
             if fid.startswith("ssh_"):
                 return await self._fix_ssh(fid, finding)
             if fid.startswith("fw_"):
@@ -945,6 +951,8 @@ class HardeningFixer:
                 return await self._fix_world_writable(finding)
             if fid.startswith("log_perm_"):
                 return await self._fix_log_perm(finding)
+            if fid.startswith("svc_listen_all_"):
+                return False, "Requiere cambiar la configuración del servicio (bind) a mano"
             if fid.startswith("svc_"):
                 return await self._fix_service(fid)
             if fid.startswith("login_defs_"):
@@ -1032,6 +1040,8 @@ class HardeningFixer:
         if command_exists("ufw"):
             # Reversión: volver al estado previo del firewall (estaba inactivo).
             self._record(command_undo(["ufw", "--force", "disable"], "desactivar ufw"))
+            for port in sorted(set(self._sshd_ports()) | set(self.keep_open_ports)):
+                await self._run(["ufw", "allow", f"{port}/tcp"])
             return await self._run(["ufw", "--force", "enable"])
         await self._record_service("firewalld")
         return await self._run(["systemctl", "enable", "--now", "firewalld"])
@@ -1062,6 +1072,20 @@ class HardeningFixer:
             return False, "file_path vacío"
         self._record(snapshot_chmod(finding.file_path))
         return await self._run(["chmod", "o-w", finding.file_path])
+
+    @staticmethod
+    def _sshd_ports() -> list[int]:
+        try:
+            text = Path("/etc/ssh/sshd_config").read_text()
+        except OSError:
+            return [22]
+        return [int(p) for p in re.findall(r"^\s*Port\s+(\d+)", text, re.M | re.I)] or [22]
+
+    async def _fix_mode(self, finding: Finding, mode: int) -> tuple[bool, str]:
+        if not finding.file_path:
+            return False, "file_path vacío"
+        self._record(snapshot_chmod(finding.file_path))
+        return await self._run(["chmod", f"{mode:o}", finding.file_path])
 
     async def _fix_log_perm(self, finding: Finding) -> tuple[bool, str]:
         if not finding.file_path:

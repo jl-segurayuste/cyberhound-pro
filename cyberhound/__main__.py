@@ -9,6 +9,8 @@ import asyncio
 import sys
 from pathlib import Path
 
+from cyberhound import __version__
+
 
 def _check_dependencies() -> list[str]:
     """Verifica dependencias sin instalar nada."""
@@ -29,17 +31,17 @@ def _check_dependencies() -> list[str]:
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="cyberhound",
-        description="CyberHound Pro v6.0 — Plataforma de seguridad para PYMEs",
+        description=f"CyberHound Pro v{__version__} — Plataforma de seguridad para PYMEs",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
     # web
     web_p = sub.add_parser("web", help="Lanza la interfaz web")
-    web_p.add_argument("--port", type=int, default=8443)
+    # Sin default: si no se pasan, mandan server.port / server.host de config.yaml (8443 / 127.0.0.1)
+    web_p.add_argument("--port", type=int, help="Puerto (por defecto server.port, 8443)")
     web_p.add_argument(
         "--host",
-        default="127.0.0.1",
-        help="Interfaz de escucha (por defecto solo localhost). Usa 0.0.0.0 para exponer en la red.",
+        help="Interfaz de escucha (por defecto server.host: solo localhost). Usa 0.0.0.0 para exponer en la red.",
     )
     web_p.add_argument("--config", default=str(Path.home() / ".cyberhound" / "config.yaml"))
     web_p.add_argument("--no-auth", action="store_true", help="Sin autenticación (solo localhost)")
@@ -56,7 +58,7 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.command == "version":
-        print("CyberHound Pro v6.0.0")
+        print(f"CyberHound Pro v{__version__}")
         return
 
     # Verificar dependencias antes de importar nada más
@@ -86,9 +88,9 @@ def main() -> None:
     setup_logging(structured=(cfg.server.log_dir != ""))
 
     # Sobrescribir con flags de CLI
-    if hasattr(args, "port"):
+    if getattr(args, "port", None):
         cfg.server.port = args.port
-    if hasattr(args, "host"):
+    if getattr(args, "host", None):
         cfg.server.host = args.host
     if getattr(args, "no_auth", False):
         cfg.auth.mode = "none"

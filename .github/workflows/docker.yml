@@ -77,6 +77,36 @@ jobs:
           file: coverage.xml
           fail_ci_if_error: false
 
+  # ── Misma suite contra PostgreSQL ───────────────────────────────────────────
+  test-postgres:
+    name: Tests (PostgreSQL 16)
+    runs-on: ubuntu-latest
+    needs: lint
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ch
+          POSTGRES_PASSWORD: ch-ci
+          POSTGRES_DB: ch
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U ch -d ch" --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Instalar dependencias del sistema
+        run: sudo apt-get install -y --no-install-recommends nmap shellcheck
+      - name: Instalar paquete con soporte PostgreSQL
+        run: pip install -e ".[test,postgres]"
+      - name: Ejecutar tests contra PostgreSQL
+        env:
+          CH_DB_URL: postgresql://ch:ch-ci@127.0.0.1:5432/ch
+        run: pytest tests/ --tb=short --timeout=60 -q
+
   # ── Análisis de seguridad estático ─────────────────────────────────────────
   security:
     name: Análisis de seguridad
@@ -120,7 +150,7 @@ jobs:
   docker:
     name: Build & Push Docker
     runs-on: ubuntu-latest
-    needs: [test, security]
+    needs: [test, test-postgres, security]
     permissions:
       contents: read
       packages: write

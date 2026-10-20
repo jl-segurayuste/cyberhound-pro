@@ -4,7 +4,8 @@
 
 > Analiza tu red, servidores, contenedores y código. Detecta vulnerabilidades, malware y configuraciones inseguras. Corrige automáticamente. Monitoriza en tiempo real.
 
-[![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://python.org)
+[![Versión](https://img.shields.io/badge/versión-v6.4.0-blue.svg)](cyberhound/__init__.py)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://python.org)
 [![Tests](https://img.shields.io/badge/tests-645%20passed-green.svg)](#tests)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
 

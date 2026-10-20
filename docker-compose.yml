@@ -1,73 +1,57 @@
-version: "3.9"
-
-# ─────────────────────────────────────────────────────────────────────────────
-# CyberHound Pro — Docker Compose
+# CyberHound Pro — un solo contenedor con SQLite (homelab / PYME pequeña)
 #
-# Uso rápido:
+#   cp .env.example .env     # opcional: CH_PASSWORD, API keys…
 #   docker compose up -d
+#   docker compose logs cyberhound | grep -i contraseña   # si no definiste CH_PASSWORD
 #
-# Con contraseña personalizada:
-#   CH_PASSWORD=mipassword docker compose up -d
-#
-# Con API keys:
-#   SHODAN_API_KEY=xxx VT_API_KEY=yyy docker compose up -d
-# ─────────────────────────────────────────────────────────────────────────────
+# Abre https://localhost:8443 (certificado autofirmado). Con network_mode: host el
+# panel escucha en 127.0.0.1 del host; CH_HOST=0.0.0.0 lo expone a la red local.
+# Para PostgreSQL + nginx usa docker-compose.production.yml.
 
 services:
   cyberhound:
-    image: ${CYBERHOUND_IMAGE:-ghcr.io/qjossyx/cyberhound-pro:latest}
+    image: ${CYBERHOUND_IMAGE:-ghcr.io/jl-segurayuste/cyberhound-pro:latest}
+    build: .                 # docker compose build: imagen local con el código del repo
     container_name: cyberhound
     restart: unless-stopped
 
-    ports:
-      - "${CH_PORT:-8443}:8443"
-
-    # Capacidades necesarias para nmap y análisis de red
+    # Red del host: necesario para descubrir la LAN (nmap, arp-scan) desde el contenedor
+    network_mode: host
     cap_add:
-      - NET_ADMIN      # Modificar configuración de red
-      - NET_RAW        # Sockets raw para nmap/ping
-      - SYS_PTRACE     # Para análisis de procesos
-    # Necesario para nmap OS detection
-    network_mode: host   # comentar si no se necesita scan de red local
+      - NET_ADMIN
+      - NET_RAW
 
     environment:
-      # Credenciales (cambiar en producción)
       CH_USERNAME: ${CH_USERNAME:-admin}
-      CH_PASSWORD: ${CH_PASSWORD:-cyberhound}
+      CH_PASSWORD: ${CH_PASSWORD:-}        # vacía = se genera una y se muestra en el log
+      CH_HOST: ${CH_HOST:-127.0.0.1}
       CH_PORT: ${CH_PORT:-8443}
-
-      # API Keys para inteligencia externa (todas opcionales)
-      SHODAN_API_KEY:   ${SHODAN_API_KEY:-}
-      VT_API_KEY:       ${VT_API_KEY:-}
-      ABUSEIPDB_KEY:    ${ABUSEIPDB_KEY:-}
-      GREYNOISE_KEY:    ${GREYNOISE_KEY:-}
-      OTX_KEY:          ${OTX_KEY:-}
-      HIBP_API_KEY:     ${HIBP_API_KEY:-}
-
-      # Clave SSH privada para análisis de hosts remotos (contenido en base64)
-      # CH_SSH_KEY: ${CH_SSH_KEY:-}
+      CH_TLS_DIR: /data/tls
+      SHODAN_API_KEY: ${SHODAN_API_KEY:-}
+      VT_API_KEY: ${VT_API_KEY:-}
+      ABUSEIPDB_KEY: ${ABUSEIPDB_KEY:-}
+      GREYNOISE_KEY: ${GREYNOISE_KEY:-}
+      OTX_KEY: ${OTX_KEY:-}
+      HIBP_API_KEY: ${HIBP_API_KEY:-}
 
     volumes:
-      # Configuración y logs persistentes
-      - cyberhound-data:/data
-      # Clave SSH del host (solo lectura)
-      - ${HOME}/.ssh:/root/.ssh:ro
-      # Socket Docker para análisis de contenedores (opcional)
+      - cyberhound-data:/data              # config.yaml, BD, logs y certificado
+      - ${HOME}/.ssh:/root/.ssh:ro         # claves para la auditoría SSH de otros hosts
+      # Análisis de contenedores Docker (opcional):
       # - /var/run/docker.sock:/var/run/docker.sock:ro
 
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:8443/health"]
+      test: ["CMD-SHELL", "curl -fsk https://127.0.0.1:$${CH_PORT:-8443}/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 20s
+      start_period: 30s
 
     logging:
-      driver: "json-file"
+      driver: json-file
       options:
         max-size: "50m"
         max-file: "5"
 
 volumes:
   cyberhound-data:
-    driver: local

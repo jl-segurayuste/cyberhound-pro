@@ -19,7 +19,7 @@ from __future__ import annotations
 import fnmatch
 import json
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from cyberhound.core.logging import get_logger
 from cyberhound.core.models import Finding
@@ -118,6 +118,10 @@ DB_VERSION = 3
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _days_ago(days: int) -> str:
+    return (datetime.now(UTC) - timedelta(days=days)).isoformat()
 
 
 class DatabasePG:
@@ -253,8 +257,8 @@ class DatabasePG:
         return await self._fetch(
             "SELECT started_at,score,total_findings,critical,high FROM scans "
             "WHERE scan_type=$1 AND status='completed' "
-            "AND started_at >= NOW() - ($2 * INTERVAL '1 day') ORDER BY started_at ASC",
-            scan_type, days,
+            "AND started_at >= $2 ORDER BY started_at ASC",
+            scan_type, _days_ago(days),
         )
 
     # ── Assets / Suppressions / Users — misma interfaz ───────────────────────
@@ -463,9 +467,11 @@ class DatabasePG:
         total_assets = await self._fetchval("SELECT COUNT(*) FROM assets") or 0
         unauthorized = await self._fetchval("SELECT COUNT(*) FROM assets WHERE is_authorized=0") or 0
         score_trend_rows = await self._fetch(
-            "SELECT DATE(started_at) as day, AVG(score) as avg_score FROM scans "
+            # Fechas ISO en TEXT (igual que SQLite): se compara como texto y AVG va a float
+            # para que la respuesta sea JSON serializable
+            "SELECT LEFT(started_at, 10) as day, AVG(score)::float as avg_score FROM scans "
             "WHERE scan_type='audit' AND status='completed' "
-            "AND started_at >= NOW() - INTERVAL '30 days' GROUP BY day ORDER BY day ASC"
+            "AND started_at >= $1 GROUP BY day ORDER BY day ASC", _days_ago(30),
         )
         critical_findings: list[dict] = []
         if last_scans.get("audit"):

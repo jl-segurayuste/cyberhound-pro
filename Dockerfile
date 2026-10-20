@@ -31,15 +31,16 @@ RUN python -m venv /opt/venv && \
 
 # Copiar el código fuente e instalar el paquete
 COPY cyberhound/ ./cyberhound/
-RUN /opt/venv/bin/pip install --quiet . && \
+RUN /opt/venv/bin/pip install --quiet ".[postgres]" && \
     /opt/venv/bin/pip install --quiet yara-python || true
 
 # ── Stage 2: Runtime ──────────────────────────────────────────────────────────
 FROM python:3.12-slim AS runtime
 
-LABEL maintainer="CyberHound Pro" \
-      version="6.1.0" \
-      description="Plataforma de auditoría y seguridad para PYMEs"
+LABEL org.opencontainers.image.title="CyberHound Pro" \
+      org.opencontainers.image.description="Plataforma de auditoría y seguridad para PYMEs" \
+      org.opencontainers.image.licenses="AGPL-3.0-only" \
+      org.opencontainers.image.source="https://github.com/jl-segurayuste/cyberhound-pro"
 
 # Herramientas de sistema necesarias en runtime
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -75,11 +76,7 @@ COPY pyproject.toml ./
 # Variables de entorno
 ENV PATH="/opt/venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    # CyberHound busca el config aquí
-    CH_CONFIG_PATH="/data/config.yaml" \
-    # Log estructurado en JSON
-    CH_LOG_DIR="/data/logs"
+    PYTHONDONTWRITEBYTECODE=1
 
 # Volumen para configuración persistente y logs
 VOLUME ["/data"]

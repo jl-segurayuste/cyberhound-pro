@@ -844,3 +844,9 @@ kbd {
 #global-search:focus { border-color: var(--blue) !important; }
 .gsearch-item:hover { background: var(--bg3); }
 [role="button"] { cursor: pointer; }
+
+/* Acciones que el rol del usuario no permite (ver FN_PERMS en app.js) */
+.role-locked, .role-locked:hover { opacity: .45; cursor: not-allowed; filter: grayscale(.6); }
+.user-role-badge { font-size: .72rem; color: var(--text2); white-space: nowrap; }
+.user-role-badge:empty { display: none; }
+@media (max-width: 640px) { .user-role-badge { display: none; } }

@@ -1,6 +1,7 @@
 """Tests de la capa de persistencia SQLite."""
 import hashlib
 import json
+import os
 import tempfile
 from pathlib import Path
 
@@ -13,9 +14,13 @@ from cyberhound.core.models import Finding
 
 @pytest_asyncio.fixture
 async def database(tmp_path):
-    db = Database(tmp_path / "test.db")
+    # Con CH_DB_URL=postgresql://… la misma batería se ejecuta contra PostgreSQL
+    from cyberhound.core.database_pg import create_database
+    db = create_database(db_url=os.environ.get("CH_DB_URL", ""), db_path=str(tmp_path / "test.db"))
     await db.init()
-    return db
+    yield db
+    if hasattr(db, "close"):
+        await db.close()
 
 
 def make_finding(id, severity="high", category="ssh", auto_fix=True):

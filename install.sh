@@ -3,7 +3,7 @@
 # Uso: sudo bash install.sh [--postgres] [--port 8443] [--user admin]
 set -e
 
-VERSION="6.1.0"
+VERSION="$(sed -n 's/^__version__ = "\(.*\)"/\1/p' "$(dirname "$0")/cyberhound/__init__.py")"
 INSTALL_DIR="/opt/cyberhound"
 VENV_DIR="/opt/cyberhound/venv"
 CONFIG_DIR="/root/.cyberhound"

@@ -69,8 +69,23 @@ async def api_intel_scan(request: web.Request) -> web.Response:
     server = request.app["server"]
     try:
         body    = await _read_json(request)
-        targets = body.get("targets", [])
-        modules = body.get("modules", [])
+        targets = body.get("targets") or []
+        modules = body.get("modules") or []
+        if not isinstance(targets, list) or not isinstance(modules, list):
+            return web.json_response({"error": "'targets' y 'modules' deben ser listas"}, status=400)
+
+        from cyberhound.scanners.intel import ALL_MODULES, IntelScanner, indicator_kind
+        bad = [t for t in targets if not isinstance(t, str) or indicator_kind(t) is None]
+        if bad:
+            return web.json_response({"error": f"Indicador no válido: {bad[0]!r}"}, status=400)
+        if any(m not in ALL_MODULES for m in modules):
+            return web.json_response({"error": f"Módulos admitidos: {', '.join(ALL_MODULES)}"}, status=400)
+        scanner = IntelScanner(server.cfg.api_keys)
+        if not scanner.configured_modules():
+            return web.json_response(
+                {"error": "No hay ninguna API key de threat intelligence configurada (Configuración › API Keys)."},
+                status=400,
+            )
 
         if not targets:
             targets = await _targets_from_last_network_scan(server.db)
@@ -81,13 +96,9 @@ async def api_intel_scan(request: web.Request) -> web.Response:
                 status=400,
             )
 
-        from cyberhound.scanners.intel import IntelScanner
-        scanner = IntelScanner(server.cfg.api_keys)
-
         all_findings: list[Finding] = []
         for target in targets[:10]:  # máximo 10 targets por petición
-            findings = await scanner.scan(target, modules or [])
-            all_findings.extend(findings)
+            all_findings.extend(await scanner.scan_findings(target, modules))
 
         # Guardar en BD
         if all_findings:
@@ -124,9 +135,19 @@ async def api_intel_lookup(request: web.Request) -> web.Response:
         if not target:
             return web.json_response({"error": "Parámetro 'target' requerido"}, status=400)
 
-        from cyberhound.scanners.intel import IntelScanner
-        scanner  = IntelScanner(server.cfg.api_keys)
-        findings = await scanner.scan(target, modules)
+        from cyberhound.scanners.intel import ALL_MODULES, IntelScanner, indicator_kind
+        if indicator_kind(target) is None:
+            return web.json_response({"error": "Introduce una IP, dominio, hash (MD5/SHA1/SHA256) o email"},
+                                     status=400)
+        if any(m not in ALL_MODULES for m in modules):
+            return web.json_response({"error": f"Módulos admitidos: {', '.join(ALL_MODULES)}"}, status=400)
+        scanner = IntelScanner(server.cfg.api_keys)
+        if not scanner.configured_modules():
+            return web.json_response(
+                {"error": "No hay ninguna API key de threat intelligence configurada (Configuración › API Keys)."},
+                status=400,
+            )
+        findings = await scanner.scan_findings(target, modules)
 
         return web.json_response({
             "target":   target,
@@ -143,7 +164,10 @@ async def api_intel_lookup(request: web.Request) -> web.Response:
 async def api_intel_history(request: web.Request) -> web.Response:
     """GET /api/intel/history — historial de scans de intel."""
     server = request.app["server"]
-    limit  = int(request.rel_url.query.get("limit", "20"))
+    try:
+        limit = max(1, min(int(request.rel_url.query.get("limit", "20")), 200))
+    except ValueError:
+        return web.json_response({"error": "limit debe ser un entero"}, status=400)
     history = await server.db.get_scan_history("intel", limit=limit)
     return web.json_response(history)
 
@@ -152,17 +176,9 @@ async def api_intel_config(request: web.Request) -> web.Response:
     """GET /api/intel/config — qué módulos están disponibles (tienen API key)."""
     server = request.app["server"]
     keys = server.cfg.api_keys
-    return web.json_response({
-        "shodan":    bool(getattr(keys, "shodan", None)),
-        "virustotal":bool(getattr(keys, "virustotal", None)),
-        "abuseipdb": bool(getattr(keys, "abuseipdb", None)),
-        "greynoise": bool(getattr(keys, "greynoise", None)),
-        "hibp":      bool(getattr(keys, "hibp", None)),
-        "configured_count": sum([
-            bool(getattr(keys, k, None))
-            for k in ["shodan", "virustotal", "abuseipdb", "greynoise", "hibp"]
-        ]),
-    })
+    from cyberhound.scanners.intel import ALL_MODULES
+    status = {m: bool(getattr(keys, m, None)) for m in ALL_MODULES}
+    return web.json_response({**status, "configured_count": sum(status.values())})
 
 
 def _build_intel_summary(findings: list[Finding]) -> dict:

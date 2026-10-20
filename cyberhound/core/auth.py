@@ -31,9 +31,11 @@ AUTH_HEADER = "Authorization"
 PENDING_2FA_COOKIE = "ch_2fa_pending"
 _PENDING_2FA_TTL = timedelta(minutes=5)
 
-# Rutas que no requieren autenticación (incluye /metrics para que lo raspe
-# Prometheus; el bind por defecto es 127.0.0.1, no expuesto a Internet).
-PUBLIC_ROUTES = {"/health", "/login", "/static", "/metrics"}
+# Rutas que no requieren autenticación (exactas, salvo los estáticos). /metrics solo es
+# público desde el propio host (Prometheus local): detrás de un proxy pide sesión.
+PUBLIC_ROUTES = {"/health", "/login", "/favicon.ico"}
+PUBLIC_PREFIXES = ("/static/",)
+LOOPBACK_ROUTES = {"/metrics"}
 
 # Endpoints de agentes remotos: no usan JWT sino "Authorization: AgentKey <clave>",
 # que verifica el propio handler contra la clave configurada.
@@ -74,8 +76,8 @@ class AuthConfig:
 
     @staticmethod
     def _default_hash() -> str:
-        """Hash del password por defecto 'cyberhound' — CAMBIAR EN PRODUCCIÓN."""
-        return passwords.hash_password("cyberhound")
+        """Sin contraseña configurada nadie puede entrar como admin (antes valía 'cyberhound')."""
+        return passwords.hash_password(secrets.token_urlsafe(32))
 
     def verify_password(self, password: str) -> bool:
         # KDF salado (PBKDF2); verifica también hashes SHA-256 antiguos.
@@ -92,8 +94,15 @@ class AuthConfig:
         return jwt.encode(payload, self.secret, algorithm="HS256")
 
     def verify_jwt(self, token: str) -> dict | None:
+        """Payload de un token de SESIÓN válido. Los de propósito especial (pending_2fa)
+        se firman con el mismo secreto pero nunca valen como sesión: antes sí, y con la
+        cookie del paso intermedio se entraba sin el código 2FA."""
         try:
-            return jwt.decode(token, self.secret, algorithms=["HS256"])
+            payload = jwt.decode(token, self.secret, algorithms=["HS256"], options={"require": ["exp", "sub"]})
+            if payload.get("purpose"):
+                logger.warning("Token de propósito '%s' usado como sesión", payload.get("purpose"))
+                return None
+            return payload
         except jwt.ExpiredSignatureError:
             logger.warning("JWT expirado")
             return None
@@ -124,6 +133,11 @@ class AuthConfig:
         if payload.get("purpose") != "pending_2fa":
             return None
         return payload.get("sub")
+
+
+def _via_proxy(request: web.Request) -> bool:
+    """Un proxy local (nginx, Caddy) llega desde 127.0.0.1 pero en nombre de otro cliente."""
+    return bool(request.headers.get("X-Forwarded-For") or request.headers.get("X-Real-IP"))
 
 
 def _is_localhost(request: web.Request) -> bool:
@@ -174,7 +188,9 @@ async def auth_middleware(request: web.Request, handler):
     cfg: AuthConfig = request.app["auth_config"]
 
     # Rutas públicas siempre pasan
-    if any(request.path.startswith(p) for p in PUBLIC_ROUTES):
+    if request.path in PUBLIC_ROUTES or request.path.startswith(PUBLIC_PREFIXES):
+        return await handler(request)
+    if request.path in LOOPBACK_ROUTES and _is_localhost(request) and not _via_proxy(request):
         return await handler(request)
 
     if request.path in AGENT_ROUTES and request.headers.get(AUTH_HEADER, "").startswith("AgentKey "):
@@ -419,12 +435,17 @@ def setup_auth_routes(app: web.Application, cfg: AuthConfig) -> None:
         return response
 
     async def health(request: web.Request) -> web.Response:
-        return web.json_response({"status": "ok", "version": "6.1.0"})
+        from cyberhound import __version__
+        return web.json_response({"status": "ok", "version": __version__})
 
     app.router.add_get("/login",  login_page)
     app.router.add_post("/login", login_post)
     app.router.add_get("/logout", logout)
     app.router.add_get("/health", health)
+
+    async def favicon(request: web.Request) -> web.Response:
+        raise web.HTTPMovedPermanently("/static/favicon.svg")
+    app.router.add_get("/favicon.ico", favicon)
 
 
 def _h(s: str) -> str:
@@ -436,7 +457,7 @@ import asyncio  # noqa: E402 — import al final para evitar circular
 
 _LOGIN_HTML = """<!DOCTYPE html>
 <html lang="es">
-<head><meta charset="UTF-8"><title>CyberHound — Login</title>
+<head><meta charset="UTF-8"><link rel="icon" href="/static/favicon.svg" type="image/svg+xml"><title>CyberHound — Login</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
   body{background:#0d1117;color:#e6edf3;font-family:system-ui,sans-serif;
@@ -475,7 +496,7 @@ _LOGIN_HTML = """<!DOCTYPE html>
 
 _CODE_HTML = """<!DOCTYPE html>
 <html lang="es">
-<head><meta charset="UTF-8"><title>CyberHound — Verificación en dos pasos</title>
+<head><meta charset="UTF-8"><link rel="icon" href="/static/favicon.svg" type="image/svg+xml"><title>CyberHound — Verificación en dos pasos</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
   body{background:#0d1117;color:#e6edf3;font-family:system-ui,sans-serif;

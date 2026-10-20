@@ -17,6 +17,8 @@ logger = get_logger("config")
 
 DEFAULT_CONFIG_PATH = Path.home() / ".cyberhound" / "config.yaml"
 DEFAULT_DB_PATH     = Path.home() / ".cyberhound" / "cyberhound.db"
+_API_KEY_ENV = {"shodan": "SHODAN_API_KEY", "virustotal": "VT_API_KEY", "abuseipdb": "ABUSEIPDB_KEY",
+                "greynoise": "GREYNOISE_KEY", "otx": "OTX_KEY", "hibp": "HIBP_API_KEY"}
 
 
 @dataclass
@@ -163,10 +165,16 @@ class CyberHoundConfig:
     ticketing:     TicketingSettings    = field(default_factory=TicketingSettings)
     agent:         AgentSettings        = field(default_factory=AgentSettings)
     db_path:       str = field(default_factory=lambda: str(DEFAULT_DB_PATH))
+    # PostgreSQL opcional (postgresql://usuario:clave@host:5432/bd). Vacío = SQLite en db_path.
+    db_url:        str = field(default_factory=lambda: os.environ.get("CH_DB_URL", ""))
+    # Fichero del que se cargó: save() escribe ahí (antes iba siempre a ~/.cyberhound,
+    # así que en Docker, con --config /data/config.yaml, lo guardado desde la UI se perdía)
+    config_path:   Path = field(default=DEFAULT_CONFIG_PATH, repr=False, compare=False)
 
     @classmethod
     def load(cls, path: Path = DEFAULT_CONFIG_PATH) -> CyberHoundConfig:
         cfg = cls()
+        cfg.config_path = Path(path)
         raw: dict = {}
         if path.exists():
             try:
@@ -183,11 +191,7 @@ class CyberHoundConfig:
             abuseipdb=kr.get("abuseipdb"), greynoise=kr.get("greynoise"),
             otx=kr.get("otx"), hibp=kr.get("hibp"),
         )
-        for env, attr in [
-            ("SHODAN_API_KEY","shodan"), ("VT_API_KEY","virustotal"),
-            ("ABUSEIPDB_KEY","abuseipdb"), ("GREYNOISE_KEY","greynoise"),
-            ("OTX_KEY","otx"), ("HIBP_API_KEY","hibp"),
-        ]:
+        for attr, env in _API_KEY_ENV.items():
             if v := os.environ.get(env):
                 setattr(cfg.api_keys, attr, v)
 
@@ -197,7 +201,7 @@ class CyberHoundConfig:
             mode=ar.get("mode", "jwt"),
             username=ar.get("username", "admin"),
             password_hash=ar.get("password_hash"),
-            secret=ar.get("secret") or os.environ.get("CH_SECRET"),
+            secret=os.environ.get("CH_SECRET") or ar.get("secret"),
             token_ttl_hours=ar.get("token_ttl_hours", 8),
             localhost_only=ar.get("localhost_only", False),
         )
@@ -223,7 +227,8 @@ class CyberHoundConfig:
             tls_cert=svr.get("tls_cert"),
             tls_key=svr.get("tls_key"),
             log_dir=svr.get("log_dir", "/var/log/cyberhound"),
-            trusted_proxies=[str(p) for p in (svr.get("trusted_proxies") or [])],
+            trusted_proxies=[p.strip() for p in os.environ["CH_TRUSTED_PROXIES"].split(",") if p.strip()]
+            if os.environ.get("CH_TRUSTED_PROXIES") else [str(p) for p in (svr.get("trusted_proxies") or [])],
         )
 
         # Scheduler
@@ -249,15 +254,16 @@ class CyberHoundConfig:
             smtp_host=nr.get("smtp_host", "smtp.gmail.com"),
             smtp_port=nr.get("smtp_port", 587),
             smtp_user=nr.get("smtp_user", ""),
-            smtp_password=nr.get("smtp_password", os.environ.get("CH_SMTP_PASSWORD", "")),
+            smtp_password=os.environ.get("CH_SMTP_PASSWORD") or nr.get("smtp_password", ""),
             email_from=nr.get("email_from", ""),
             email_to=nr.get("email_to", []),
             webhook_enabled=nr.get("webhook_enabled", False),
-            webhook_url=nr.get("webhook_url", os.environ.get("CH_WEBHOOK_URL", "")),
+            webhook_url=os.environ.get("CH_WEBHOOK_URL") or nr.get("webhook_url", ""),
             min_level=nr.get("min_level", "warning"),
         )
 
         cfg.db_path = raw.get("db_path", str(DEFAULT_DB_PATH))
+        cfg.db_url = os.environ.get("CH_DB_URL") or raw.get("db_url", "") or ""
 
         # SIEM
         sr = raw.get("siem", {})
@@ -265,18 +271,18 @@ class CyberHoundConfig:
             wazuh_enabled=sr.get("wazuh_enabled", False),
             wazuh_host=sr.get("wazuh_host", "localhost"),
             wazuh_port=sr.get("wazuh_port", 1514),
-            wazuh_api_url=sr.get("wazuh_api_url", ""),
-            wazuh_api_user=sr.get("wazuh_api_user", ""),
-            wazuh_api_pass=sr.get("wazuh_api_pass", os.environ.get("CH_WAZUH_PASS", "")),
+            wazuh_api_url=os.environ.get("CH_WAZUH_URL") or sr.get("wazuh_api_url", ""),
+            wazuh_api_user=os.environ.get("CH_WAZUH_USER") or sr.get("wazuh_api_user", ""),
+            wazuh_api_pass=os.environ.get("CH_WAZUH_PASS") or sr.get("wazuh_api_pass", ""),
             elk_enabled=sr.get("elk_enabled", False),
             elk_url=sr.get("elk_url", "http://localhost:9200"),
             elk_index=sr.get("elk_index", "cyberhound-findings"),
             elk_user=sr.get("elk_user", ""),
-            elk_pass=sr.get("elk_pass", os.environ.get("CH_ELK_PASS", "")),
-            elk_api_key=sr.get("elk_api_key", os.environ.get("CH_ELK_API_KEY", "")),
+            elk_pass=os.environ.get("CH_ELK_PASS") or sr.get("elk_pass", ""),
+            elk_api_key=os.environ.get("CH_ELK_API_KEY") or sr.get("elk_api_key", ""),
             splunk_enabled=sr.get("splunk_enabled", False),
             splunk_hec_url=sr.get("splunk_hec_url", "https://localhost:8088/services/collector"),
-            splunk_hec_token=sr.get("splunk_hec_token", os.environ.get("CH_SPLUNK_TOKEN", "")),
+            splunk_hec_token=os.environ.get("CH_SPLUNK_TOKEN") or sr.get("splunk_hec_token", ""),
             splunk_index=sr.get("splunk_index", "cyberhound"),
             min_severity=sr.get("min_severity", "medium"),
         )
@@ -287,13 +293,13 @@ class CyberHoundConfig:
             jira_enabled=tr.get("jira_enabled", False),
             jira_url=tr.get("jira_url", ""),
             jira_email=tr.get("jira_email", ""),
-            jira_api_token=tr.get("jira_api_token", os.environ.get("CH_JIRA_TOKEN", "")),
+            jira_api_token=os.environ.get("CH_JIRA_TOKEN") or tr.get("jira_api_token", ""),
             jira_project_key=tr.get("jira_project_key", ""),
             jira_issue_type=tr.get("jira_issue_type", "Bug"),
             servicenow_enabled=tr.get("servicenow_enabled", False),
             servicenow_instance_url=tr.get("servicenow_instance_url", ""),
             servicenow_user=tr.get("servicenow_user", ""),
-            servicenow_password=tr.get("servicenow_password", os.environ.get("CH_SERVICENOW_PASS", "")),
+            servicenow_password=os.environ.get("CH_SERVICENOW_PASS") or tr.get("servicenow_password", ""),
             servicenow_table=tr.get("servicenow_table", "incident"),
             min_severity=tr.get("min_severity", "critical"),
         )
@@ -304,50 +310,62 @@ class CyberHoundConfig:
         cfg.agent = AgentSettings(
             mode=ag.get("mode", "standalone"),
             manager_url=ag.get("manager_url", ""),
-            agent_key=ag.get("agent_key", _os.environ.get("CH_AGENT_KEY", "")),
+            agent_key=_os.environ.get("CH_AGENT_KEY") or ag.get("agent_key", ""),
             agent_name=ag.get("agent_name", ""),
         )
 
         return cfg
 
-    def save(self, path: Path = DEFAULT_CONFIG_PATH) -> None:
+    def save(self, path: Path | None = None) -> None:
+        path = Path(path or self.config_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         if not self.auth.secret:
             self.auth.secret = secrets.token_hex(32)
+
+        def own(value, env: str):
+            # Los secretos que vienen del entorno no se copian al fichero
+            return None if value and os.environ.get(env) == value else value
+
+        def section(obj, secrets_env: dict[str, str] | None = None) -> dict:
+            out = dict(obj.__dict__)
+            for k, env in (secrets_env or {}).items():
+                out[k] = own(out.get(k), env)
+            return out
+
         data = {
-            "api_keys": {k: v for k, v in self.api_keys.__dict__.items() if v},
+            "api_keys": {k: v for k, v in self.api_keys.__dict__.items()
+                         if own(v, _API_KEY_ENV.get(k, "")) },
             "auth": {
                 "mode": self.auth.mode,
                 "username": self.auth.username,
                 "password_hash": self.auth.password_hash,
-                "secret": self.auth.secret,
+                "secret": own(self.auth.secret, "CH_SECRET"),
                 "token_ttl_hours": self.auth.token_ttl_hours,
+                "localhost_only": self.auth.localhost_only,
             },
-            "scan": {k: v for k, v in self.scan.__dict__.items()},
-            "server": {k: v for k, v in self.server.__dict__.items()},
-            "scheduler": {k: v for k, v in self.scheduler.__dict__.items()},
-            "notifications": {
-                k: v for k, v in self.notifications.__dict__.items()
-                if k != "smtp_password"  # no guardar contraseña SMTP en YAML
-            },
+            "scan": section(self.scan),
+            "server": section(self.server),
+            "scheduler": section(self.scheduler),
+            "notifications": section(self.notifications, {"smtp_password": "CH_SMTP_PASSWORD",
+                                                          "webhook_url": "CH_WEBHOOK_URL"}),
             "db_path": self.db_path,
             "agent": {
                 "mode": self.agent.mode,
                 "manager_url": self.agent.manager_url,
                 "agent_name": self.agent.agent_name,
-                # agent_key desde env var CH_AGENT_KEY, no en YAML
+                "agent_key": own(self.agent.agent_key, "CH_AGENT_KEY"),
             },
-            "siem": {
-                k: v for k, v in self.siem.__dict__.items()
-                if k not in ("wazuh_api_pass", "elk_pass", "splunk_hec_token")
-            },
-            "ticketing": {
-                k: v for k, v in self.ticketing.__dict__.items()
-                if k not in ("jira_api_token", "servicenow_password")
-            },
+            "siem": section(self.siem, {"wazuh_api_pass": "CH_WAZUH_PASS", "elk_pass": "CH_ELK_PASS",
+                                        "elk_api_key": "CH_ELK_API_KEY", "splunk_hec_token": "CH_SPLUNK_TOKEN"}),
+            "ticketing": section(self.ticketing, {"jira_api_token": "CH_JIRA_TOKEN",
+                                                  "servicenow_password": "CH_SERVICENOW_PASS"}),
         }
-        with open(path, "w", encoding="utf-8") as f:
-            yaml.dump(data, f, default_flow_style=False, allow_unicode=True)
+        if self.db_url and os.environ.get("CH_DB_URL") != self.db_url:
+            data["db_url"] = self.db_url
+        # Se crea ya con 0600: el fichero guarda el secreto JWT y credenciales
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            yaml.safe_dump(data, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
         path.chmod(0o600)
         logger.info("Configuración guardada en %s", path)
 
@@ -369,6 +387,8 @@ class CyberHoundConfig:
             errors.append(f"auth.mode inválido: '{self.auth.mode}'. Valores: jwt, basic, none")
         if not self.auth.username:
             errors.append("auth.username no puede estar vacío")
+        if self.auth.mode in ("jwt", "basic") and not self.auth.password_hash:
+            errors.append("auth.password_hash vacío: define la contraseña con 'cyberhound setup'")
         if self.auth.token_ttl_hours < 1 or self.auth.token_ttl_hours > 168:
             errors.append(f"auth.token_ttl_hours fuera de rango: {self.auth.token_ttl_hours} (1-168)")
 
