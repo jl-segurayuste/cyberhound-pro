@@ -163,10 +163,7 @@ function _wsConnect(task, params, handlers) {
 // ── Dashboard ─────────────────────────────────────────────────────────────
 async function loadDashboard() {
   try {
-    const [statsResp, trendResp] = await Promise.all([
-      fetch('/api/dashboard'),
-      fetch('/api/score/trend?type=audit&days=30'),
-    ]);
+    const statsResp = await fetch('/api/dashboard');
     // Si la sesión expiró, redirigir al login
     if (statsResp.status === 401 || statsResp.redirected) {
       window.location.href = '/login?error=Sesión+expirada';
@@ -178,8 +175,8 @@ async function loadDashboard() {
       return;
     }
     const stats = await statsResp.json();
-    const trend = trendResp.ok ? await trendResp.json() : [];
-    _renderDashboard(stats, trend);
+    // score_trend ya viene agregado por día ({day, avg_score}), que es lo que pinta el gráfico
+    _renderDashboard(stats, stats.score_trend || []);
   } catch (e) {
     // Error silencioso en el polling — no saturar el log
     if (e.message && !e.message.includes('JSON')) {

@@ -275,6 +275,8 @@ thead th {
   border-bottom: 1px solid var(--border); white-space: nowrap;
   position: sticky; top: 56px;
 }
+/* .table-area es contenedor de scroll: ahí el sticky se mide contra él, no contra la página */
+.table-area thead th { top: 0; }
 tbody tr { border-bottom: 1px solid var(--border); cursor: pointer; transition: background .1s; }
 tbody tr:hover { background: var(--bg3); }
 tbody td { padding: 10px 12px; font-size: .85rem; vertical-align: top; }
@@ -360,6 +362,8 @@ tbody td { padding: 10px 12px; font-size: .85rem; vertical-align: top; }
 .settings-card .hint { font-size: .82rem; color: var(--text2); margin-bottom: 14px; }
 .settings-card .field { margin-bottom: 10px; }
 .settings-card .field input { width: 100%; }
+/* los checkbox/radio dentro de .field no heredan el ancho de los inputs de texto */
+.field input[type=checkbox], .field input[type=radio] { min-width: 0; width: auto; padding: 0; }
 .settings-card p { font-size: .85rem; margin-bottom: 6px; }
 .settings-card code { background: var(--bg3); padding: 2px 6px; border-radius: 4px; font-size: .82rem; }
 
