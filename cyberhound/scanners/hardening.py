@@ -708,7 +708,7 @@ async def check_sticky_bit_tmp() -> list[Finding]:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Nuevos checks v6.3
+# Checks de claves de host, passwd, at/cron, GRUB e IPv6
 # ──────────────────────────────────────────────────────────────────────────────
 
 async def check_ssh_host_keys() -> list[Finding]:
@@ -863,7 +863,7 @@ class HardeningAuditor:
         check_log_permissions,
         check_unattended_upgrades,
         check_aide,
-        # v6.1
+        # NTP, banners, contraseñas vacías, UID 0, /tmp
         check_umask,
         check_ntp,
         check_login_banners,
@@ -873,7 +873,7 @@ class HardeningAuditor:
         check_sticky_bit_tmp,
         check_services_listening_all,
         check_openssh_version,
-        # v6.3
+        # Claves de host, passwd, at/cron, GRUB, IPv6
         check_ssh_host_keys,
         check_passwd_integrity,
         check_at_cron_allow,
@@ -980,7 +980,6 @@ class HardeningFixer:
                 "no_unattended_upgrades":self._fix_unattended,
                 "no_aide":               self._fix_aide,
                 "aide_db_missing":       self._fix_aide_db,
-                # Nuevos v6.1
                 "no_ntp":                self._fix_ntp,
                 "tmp_no_sticky_bit":     self._fix_sticky_bit,
                 "openssh_cve_cve_2024_6387": self._fix_openssh,

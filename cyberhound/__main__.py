@@ -89,8 +89,10 @@ def main() -> None:
 
     # Sobrescribir con flags de CLI
     if getattr(args, "port", None):
+        cfg.file_server.setdefault("port", cfg.server.port)
         cfg.server.port = args.port
     if getattr(args, "host", None):
+        cfg.file_server.setdefault("host", cfg.server.host)
         cfg.server.host = args.host
     if getattr(args, "no_auth", False):
         cfg.auth.mode = "none"

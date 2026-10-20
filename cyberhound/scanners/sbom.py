@@ -20,6 +20,7 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
+from cyberhound import __version__
 from cyberhound.core.executor import command_exists, run_command
 from cyberhound.core.logging import get_logger
 
@@ -237,7 +238,7 @@ class SBOM:
             "version":     1,
             "metadata": {
                 "timestamp": self.generated_at,
-                "tools": [{"vendor": "CyberHound", "name": "CyberHound Pro", "version": "6.1.0"}],
+                "tools": [{"vendor": "CyberHound", "name": "CyberHound Pro", "version": __version__}],
             },
             "components": [
                 {
@@ -262,7 +263,7 @@ class SBOM:
             "SPDXID: SPDXRef-DOCUMENT",
             "DocumentName: CyberHound-SBOM",
             f"DocumentNamespace: https://cyberhound.local/sbom/{self.generated_at}",
-            "Creator: Tool: CyberHound Pro 6.1.0",
+            f"Creator: Tool: CyberHound Pro {__version__}",
             f"Created: {self.generated_at}",
             "",
         ]

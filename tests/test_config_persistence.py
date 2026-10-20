@@ -91,3 +91,17 @@ def test_cli_sin_flags_respeta_host_y_puerto_del_yaml(tmp_path, monkeypatch):
     monkeypatch.setattr(sys, "argv", ["cyberhound", "web", "--config", str(path), "--host", "127.0.0.1"])
     cli.main()
     assert seen["host"] == "127.0.0.1" and seen["port"] == 9443
+
+
+def test_host_de_la_cli_no_se_queda_guardado(tmp_path, monkeypatch):
+    from cyberhound import __main__ as cli
+    from cyberhound.api import server as srv_mod
+    path = _write(tmp_path / "c.yaml", {"server": {"host": "127.0.0.1", "port": 8443}})
+
+    async def fake_start(self):
+        self.cfg.save()            # como hace start() al persistir el secreto JWT
+    monkeypatch.setattr(srv_mod.CyberHoundServer, "start", fake_start)
+    monkeypatch.setattr(sys, "argv", ["cyberhound", "web", "--config", str(path), "--host", "0.0.0.0", "--port", "9000"])
+    cli.main()
+    assert yaml.safe_load(path.read_text())["server"]["host"] == "127.0.0.1"
+    assert yaml.safe_load(path.read_text())["server"]["port"] == 8443

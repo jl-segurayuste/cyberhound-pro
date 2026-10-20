@@ -40,11 +40,12 @@ def test_openapi_lleva_la_version_y_licencia_del_proyecto():
 def test_una_sola_version_en_todo_el_proyecto():
     """Las versiones a mano (6.0, 6.1.0, 6.2.0, 6.3.0…) no deben volver."""
     files = ["Dockerfile", "install.sh", "docker-compose.yml", "docker-compose.production.yml",
-             "docker/entrypoint.sh", "cyberhound/__main__.py", "cyberhound/core/auth.py",
-             "cyberhound/core/openapi.py", "cyberhound/ui/static/app.js", "cyberhound/ui/static/index.html"]
+             "docker/entrypoint.sh", "cyberhound/ui/static/app.js", "cyberhound/ui/static/index.html"]
+    files += [str(p.relative_to(ROOT)) for p in (ROOT / "cyberhound").rglob("*.py")]
     for f in files:
         text = (ROOT / f).read_text()
-        assert not re.search(r"(?:\bv|[Vv][Ee][Rr][Ss][Ii][Oo][Nn]\W{1,4})6\.\d", text), f"versión a mano en {f}"
+        assert not re.search(r"(?:\bv|[Vv][Ee][Rr][Ss][Ii][Oo][Nn]\W{1,4}|CyberHound Pro )6\.\d", text), \
+            f"versión a mano en {f}"
     readme = (ROOT / "README.md").read_text()
     assert f"v{__version__}" in readme
 

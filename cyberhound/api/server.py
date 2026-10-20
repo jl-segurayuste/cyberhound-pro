@@ -1,5 +1,5 @@
 """
-Servidor web de CyberHound Pro v6.1
+Servidor web de CyberHound Pro
 ====================================
 Integra:
 - Base de datos SQLite (histórico, inventario, usuarios, supresiones)
@@ -21,6 +21,7 @@ from pathlib import Path
 
 from aiohttp import web
 
+from cyberhound import __version__
 from cyberhound.api.routes.intel_routes import register_routes as register_intel_routes
 from cyberhound.core import passwords
 from cyberhound.core.auth import AGENT_ROUTES, AuthConfig, auth_middleware, setup_auth_routes
@@ -2253,10 +2254,10 @@ class CyberHoundServer:
             cert_path, _ = TLSManager.cert_paths()
             cert_info = f"\n   Certificado : {cert_path} (auto-firmado)"
 
-        logger.info("CyberHound Pro v6.1 en %s://%s:%d",
-                    proto, self.cfg.server.host, self.cfg.server.port)
+        logger.info("CyberHound Pro v%s en %s://%s:%d",
+                    __version__, proto, self.cfg.server.host, self.cfg.server.port)
         print(
-            f"\n🐾 CyberHound Pro v6.1 listo en "
+            f"\n🐾 CyberHound Pro v{__version__} listo en "
             f"{proto}://{self.cfg.server.host}:{self.cfg.server.port}"
             f"{cert_info}"
             f"\n   Login: '{self.cfg.auth.username}'"

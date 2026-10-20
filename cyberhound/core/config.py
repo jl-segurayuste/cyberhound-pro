@@ -170,6 +170,9 @@ class CyberHoundConfig:
     # Fichero del que se cargó: save() escribe ahí (antes iba siempre a ~/.cyberhound,
     # así que en Docker, con --config /data/config.yaml, lo guardado desde la UI se perdía)
     config_path:   Path = field(default=DEFAULT_CONFIG_PATH, repr=False, compare=False)
+    # Valores de server.* que la CLI (--host/--port, CH_HOST/CH_PORT) sobrescribe solo en esta
+    # ejecución: save() escribe los del fichero, no los temporales
+    file_server:   dict = field(default_factory=dict, repr=False, compare=False)
 
     @classmethod
     def load(cls, path: Path = DEFAULT_CONFIG_PATH) -> CyberHoundConfig:
@@ -344,7 +347,7 @@ class CyberHoundConfig:
                 "localhost_only": self.auth.localhost_only,
             },
             "scan": section(self.scan),
-            "server": section(self.server),
+            "server": {**section(self.server), **self.file_server},
             "scheduler": section(self.scheduler),
             "notifications": section(self.notifications, {"smtp_password": "CH_SMTP_PASSWORD",
                                                           "webhook_url": "CH_WEBHOOK_URL"}),

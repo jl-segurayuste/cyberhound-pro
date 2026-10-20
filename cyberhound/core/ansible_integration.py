@@ -17,6 +17,7 @@ import json
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
+from cyberhound import __version__
 from cyberhound.core.executor import command_exists, run_command
 from cyberhound.core.logging import get_logger
 from cyberhound.core.models import Finding
@@ -80,7 +81,7 @@ def generate_playbook(findings: list[Finding], target: str = "localhost") -> str
   gather_facts: yes
 
   vars:
-    cyberhound_version: "6.2.0"
+    cyberhound_version: "{__version__}"
     cyberhound_target: "{target}"
 
   tasks:
