@@ -21,7 +21,7 @@ import hmac
 import secrets
 import struct
 import time
-from base64 import b32decode, b32encode
+from base64 import b32decode, b32encode, urlsafe_b64encode
 from urllib.parse import quote
 
 from cyberhound.core.logging import get_logger
@@ -183,6 +183,40 @@ def verify_recovery_code(code: str, hashed_codes: list[str]) -> str | None:
     return None
 
 
+# ── Cifrado del secreto en la BD ──────────────────────────────────────────────
+# El secreto TOTP se guarda cifrado (Fernet) con una clave derivada (HKDF) del
+# secreto de la instancia (auth.secret). Antes iba en claro: quien leyera la BD
+# podía generar los códigos 2FA de cualquiera. Los valores antiguos en claro se
+# siguen aceptando y se cifran en el siguiente login correcto.
+_SEALED = "enc:v1:"
+
+
+def _fernet(key: str):
+    from cryptography.fernet import Fernet
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+    raw = HKDF(algorithm=hashes.SHA256(), length=32, salt=None, info=b"cyberhound-totp-v1").derive(key.encode())
+    return Fernet(urlsafe_b64encode(raw))
+
+
+def seal_secret(secret: str, key: str | None) -> str:
+    return _SEALED + _fernet(key).encrypt(secret.encode()).decode() if key else secret
+
+
+def unseal_secret(value: str | None, key: str | None) -> str | None:
+    """Secreto en claro, o None si está cifrado con otra clave (auth.secret cambiado)."""
+    if not value or not value.startswith(_SEALED):
+        return value
+    if not key:
+        return None
+    from cryptography.fernet import InvalidToken
+    try:
+        return _fernet(key).decrypt(value[len(_SEALED):].encode()).decode()
+    except InvalidToken:
+        logger.error("Secreto 2FA cifrado con otra clave: ¿ha cambiado auth.secret? Solo valen los códigos de recuperación")
+        return None
+
+
 # ── Gestión de 2FA en DB ──────────────────────────────────────────────────────
 
 class TOTPManager:
@@ -191,8 +225,9 @@ class TOTPManager:
     Requiere que la tabla `users` tenga columnas totp_secret y recovery_codes.
     """
 
-    def __init__(self, db) -> None:
+    def __init__(self, db, key: str | None = None) -> None:
         self.db = db
+        self.key = key   # auth.secret: cifra el secreto TOTP en la BD
 
     async def setup_2fa(self, username: str) -> dict:
         """
@@ -206,7 +241,7 @@ class TOTPManager:
         recovery_codes = generate_recovery_codes()
 
         # Guardar en BD como pendiente de verificación (no activado aún)
-        await self.db.set_totp_pending(username, secret, recovery_codes)
+        await self.db.set_totp_pending(username, seal_secret(secret, self.key), recovery_codes)
         logger.info("2FA setup iniciado para usuario '%s'", username)
 
         return {
@@ -224,7 +259,7 @@ class TOTPManager:
         if not pending:
             return False
 
-        step = find_matching_step(pending["secret"], code)
+        step = find_matching_step(unseal_secret(pending["secret"], self.key) or "", code)
         if step is None:
             logger.warning("2FA activación fallida para '%s': código incorrecto", username)
             return False
@@ -244,18 +279,21 @@ class TOTPManager:
         if not user or not user.get("totp_enabled"):
             return True, "2FA no activo"  # sin 2FA, pasa siempre
 
-        secret = user.get("totp_secret")
-        if not secret:
+        stored = user.get("totp_secret")
+        if not stored:
             return False, "2FA configurado pero sin secreto"
+        secret = unseal_secret(stored, self.key)
 
         # Verificar TOTP primero -- rechazando un step ya consumido (bug real
         # corregido 2026-08-09: sin esto, el mismo código válido se podía
         # reutilizar un número ilimitado de veces).
-        step = find_matching_step(secret, code)
+        step = find_matching_step(secret, code) if secret else None
         if step is not None:
             last = user.get("totp_last_counter")
             if last is None or step > last:
                 await self.db.update_totp_last_counter(username, step)
+                if self.key and not stored.startswith(_SEALED):
+                    await self.db.update_user(username, totp_secret=seal_secret(secret, self.key))
                 return True, "TOTP válido"
 
         # Verificar código de recuperación

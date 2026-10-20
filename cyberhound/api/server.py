@@ -27,7 +27,6 @@ from cyberhound.core import passwords
 from cyberhound.core.auth import AGENT_ROUTES, TENANT_COOKIE, AuthConfig, auth_middleware, setup_auth_routes
 from cyberhound.core.config import CyberHoundConfig
 from cyberhound.core.database import AssetRecord, UserRecord
-from cyberhound.core.licensing import license_manager
 from cyberhound.core.logging import audit_log, get_logger
 from cyberhound.core.models import Finding, ScanReport
 from cyberhound.core.multitenancy import (
@@ -38,6 +37,7 @@ from cyberhound.core.multitenancy import (
     current_tenant,
 )
 from cyberhound.core.notifications import NotificationConfig, NotificationManager
+from cyberhound.core.paths import YARA_DIR
 from cyberhound.core.scheduler import Scheduler, build_scheduler
 from cyberhound.core.security import (
     CsrfProtection,
@@ -93,7 +93,7 @@ YARA_SOURCES = {
 async def _update_yara_rules(sources: list[str]) -> dict:
     """Descarga reglas YARA de repositorios públicos."""
     import aiohttp
-    yara_dir = Path.home() / ".cyberhound" / "yara"
+    yara_dir = YARA_DIR
     yara_dir.mkdir(parents=True, exist_ok=True)
 
     results: dict[str, list] = {"updated": [], "errors": [], "skipped": []}
@@ -148,7 +148,7 @@ def _required_permission(method: str, path: str) -> str:
     )) or (write and (path == "/api/compliance" or (path.startswith("/api/scheduler/") and path.endswith("/run")))):
         return "scan"
     if write and path.startswith((
-        "/api/config/", "/api/suppressions", "/api/scheduler/", "/api/license/", "/api/yara/",
+        "/api/config/", "/api/suppressions", "/api/scheduler/", "/api/yara/",
     )):
         return "config"
     return "view"
@@ -161,7 +161,7 @@ HOST_TASKS = {"audit", "malware", "docker", "services", "code"}
 _PLATFORM_PREFIXES = (
     "/api/tenants", "/api/fix/local", "/api/rollback", "/api/quarantine", "/api/scan/runtime",
     "/api/scan/docker-image", "/api/sbom", "/api/yara", "/api/monitor", "/api/ansible",
-    "/api/license/activate", "/api/config/", "/api/scheduler", "/metrics",
+    "/api/config/", "/api/scheduler", "/metrics",
 )
 
 
@@ -542,9 +542,6 @@ class CyberHoundServer:
         app.router.add_post("/api/sbom/generate",           self.api_sbom_generate)
         app.router.add_get ("/api/sbom/latest",             self.api_sbom_latest)
 
-        # ── Licencias ─────────────────────────────────────────────────────────
-        app.router.add_get ("/api/license",            self.api_license_info)
-        app.router.add_post("/api/license/activate",   self.api_license_activate)
 
         # ── LDAP / AD ─────────────────────────────────────────────────────────
         app.router.add_post("/api/scan/ldap",          self.api_ldap_scan)
@@ -1935,13 +1932,11 @@ class CyberHoundServer:
                 findings = [Finding.from_dict(f) for f in findings_raw]
                 score = body.get("score")
 
-            from cyberhound.core.licensing import license_manager
             from cyberhound.scanners.pdf_report import generate_pdf
-            lic = license_manager.get()
-
+            tenant = self.tenants.get(current_tenant.get())
             pdf_bytes = generate_pdf(
                 findings, target=target, scan_type=scan_type,
-                score=score, licensee=lic.licensee,
+                score=score, organization=tenant.name if tenant else "",
             )
 
             # Determinar tipo de contenido
@@ -2077,22 +2072,6 @@ class CyberHoundServer:
             return web.json_response(self._sbom_cache)
         return web.json_response({"error": "Sin SBOM generado — ejecuta /api/sbom/generate"}, status=404)
 
-    # ── Licencias ─────────────────────────────────────────────────────────────
-
-    async def api_license_info(self, request: web.Request) -> web.Response:
-        return web.json_response(license_manager.get().to_dict())
-
-    async def api_license_activate(self, request: web.Request) -> web.Response:
-        try:
-            body = await _read_json(request)
-            key  = str(body.get("key", "")).strip()
-            if not key:
-                return web.json_response({"ok": False, "error": "Clave vacía"}, status=400)
-            ok, msg = license_manager.activate(key)
-            return web.json_response({"ok": ok, "message": msg})
-        except Exception as e:
-            return web.json_response({"ok": False, "error": str(e)}, status=500)
-
     # ── LDAP / AD ─────────────────────────────────────────────────────────────
 
     async def api_ldap_scan(self, request: web.Request) -> web.Response:
@@ -2188,7 +2167,7 @@ class CyberHoundServer:
         if not user:
             return web.json_response({"error": "Sin sesión"}, status=401)
         from cyberhound.core.totp import TOTPManager
-        mgr = TOTPManager(self.db)
+        mgr = TOTPManager(self.db, request.app["auth_config"].secret)
         data = await mgr.setup_2fa(user)
         return web.json_response({
             "secret":         data["secret"],
@@ -2206,7 +2185,7 @@ class CyberHoundServer:
         except Exception:
             return web.json_response({"ok": False, "error": "Body inválido"}, status=400)
         from cyberhound.core.totp import TOTPManager
-        ok = await TOTPManager(self.db).activate_2fa(user, code)
+        ok = await TOTPManager(self.db, request.app["auth_config"].secret).activate_2fa(user, code)
         if ok:
             logger.info("2FA activado para '%s'", user)
         return web.json_response({"ok": ok, "error": None if ok else "Código incorrecto"}, status=200 if ok else 400)
@@ -2241,8 +2220,8 @@ class CyberHoundServer:
 
     async def api_yara_list(self, request: web.Request) -> web.Response:
         """Lista las reglas YARA disponibles."""
-        yara_dir = Path.home() / ".cyberhound" / "yara"
-        yara_dir.mkdir(exist_ok=True)
+        yara_dir = YARA_DIR
+        yara_dir.mkdir(parents=True, exist_ok=True)
         rules = []
         for f in sorted(yara_dir.glob("*.yar")) + sorted(yara_dir.glob("*.yara")):
             try:
@@ -2344,9 +2323,6 @@ class CyberHoundServer:
             self.cfg.auth.password_hash or passwords.hash_password(secrets.token_urlsafe(32)),
         )
 
-        # Cargar licencia
-        lic = license_manager.load()
-        logger.info("Licencia: %s (%s)", lic.tier, lic.licensee)
 
         # 2. Construir app
         app = self.build_app()

@@ -31,7 +31,7 @@ class ReportGenerator:
         stats_html = "".join(
             f'<span style="background:{_SEV_COLOR.get(s,"#666")};color:white;'
             f'padding:6px 14px;border-radius:8px;font-weight:700;margin:4px">'
-            f'{s.upper()}: {c}</span>'
+            f'{_h(s.upper())}: {c}</span>'
             for s, c in sorted(
                 report.statistics.items(),
                 key=lambda x: sev_order.get(x[0], 5),
@@ -43,8 +43,8 @@ class ReportGenerator:
             color = _SEV_COLOR.get(f.severity, "#666")
             rows += (
                 f"<tr>"
-                f"<td><span style='color:{color};font-weight:700'>{f.severity.upper()}</span></td>"
-                f"<td style='color:#888'>{f.category}</td>"
+                f"<td><span style='color:{color};font-weight:700'>{_h(f.severity.upper())}</span></td>"
+                f"<td style='color:#888'>{_h(f.category)}</td>"
                 f"<td>{_h(f.title)}</td>"
                 f"<td style='font-family:monospace;font-size:.8em'>{_h(f.remediation[:200])}</td>"
                 f"<td>{'⚡' if f.auto_fix else ''}</td>"

@@ -374,7 +374,7 @@ def setup_auth_routes(app: web.Application, cfg: AuthConfig) -> None:
             ctx = current_tenant.set(pending_tenant)
             try:
                 ok, _reason = (
-                    await TOTPManager(server.db).verify(pending_user, code)
+                    await TOTPManager(server.db, cfg.secret).verify(pending_user, code)
                     if server else (False, "sin servidor")
                 )
             finally:

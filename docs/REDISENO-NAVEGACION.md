@@ -42,7 +42,8 @@ Detalles de diseño:
   los submenús se muestran en línea.
 - Garantía dura anti-desbordamiento: `html, body { overflow-x: hidden }`.
 - Se conserva intacto el contrato con `app.js`: cada función mantiene su
-  `data-panel` y `onclick="showPanel('…')"`.
+  `data-panel` y llama a `showPanel('…')` (hoy con `data-on-click`, sin JS en línea; ver
+  REVISION-SEGURIDAD.md §4).
 
 ## 3. QA (navegador headless, Chrome)
 

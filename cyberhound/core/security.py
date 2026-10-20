@@ -29,6 +29,7 @@ from pathlib import Path
 from aiohttp import web
 
 from cyberhound.core.logging import audit_log, get_logger
+from cyberhound.core.paths import DATA_DIR
 
 logger = get_logger("security")
 
@@ -665,7 +666,7 @@ class TLSManager:
     CERT_FILE = CERT_DIR / "cert.pem"
     KEY_FILE  = CERT_DIR / "key.pem"
     # Fallback en home si no hay permisos en /etc
-    CERT_DIR_HOME = Path.home() / ".cyberhound" / "tls"
+    CERT_DIR_HOME = DATA_DIR / "tls"
 
     @classmethod
     def get_cert_dir(cls) -> Path:

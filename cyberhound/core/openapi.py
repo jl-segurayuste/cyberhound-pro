@@ -218,15 +218,6 @@ ENDPOINT_DOCS: dict[str, dict] = {
         "summary": "Eliminar permanentemente de cuarentena",
         "tags": ["Quarantine"],
     },
-    "GET /api/license": {"summary": "Información de licencia", "tags": ["License"]},
-    "POST /api/license/activate": {
-        "summary": "Activar licencia",
-        "tags": ["License"],
-        "requestBody": {
-            "required": True,
-            "properties": {"key": {"type": "string"}},
-        },
-    },
     "POST /api/auth/2fa/setup":    {"summary": "Iniciar configuración 2FA", "tags": ["Auth"]},
     "POST /api/auth/2fa/activate": {
         "summary": "Activar 2FA",
@@ -254,8 +245,9 @@ ENDPOINT_DOCS: dict[str, dict] = {
     "GET /ws": {
         "summary": "WebSocket de escaneo",
         "tags": ["WebSocket"],
-        "description": "Conectar para lanzar y monitorear scans en tiempo real. "
-                       "Enviar {task: 'audit'|'malware'|'network'|'ssh'|'docker'|'code'|'intel'|'services'}",
+        "description": "Lanza un análisis y recibe los hallazgos en tiempo real. Enviar {task: 'audit'|"
+                       "'malware'|'network'|'ssh'|'docker'|'code'|'services'|'intel'|'tls'|'web_headers'|"
+                       "'web_exposure'|'api_security'|'nuclei'|'dns'|'subdomain_enum', …parámetros}",
     },
     "GET /ws/push": {
         "summary": "WebSocket de notificaciones push",
@@ -354,7 +346,6 @@ TAGS = [
     {"name": "Compliance",   "description": "ENS, ISO 27001, PCI-DSS, CIS Controls"},
     {"name": "SBOM",         "description": "Software Bill of Materials (CycloneDX/SPDX)"},
     {"name": "Quarantine",   "description": "Cuarentena de ficheros maliciosos"},
-    {"name": "License",      "description": "Gestión de licencias"},
     {"name": "Auth",         "description": "Autenticación y 2FA TOTP"},
     {"name": "Agent",        "description": "Modo agente multi-servidor"},
     {"name": "Monitor",      "description": "Monitor eBPF/auditd en tiempo real"},
@@ -419,10 +410,12 @@ def build_openapi_spec(server_url: str = "https://localhost:8443") -> dict:
             "title":       "CyberHound Pro API",
             "description": (
                 "API REST de CyberHound Pro — Plataforma de auditoría y seguridad para PYMEs.\n\n"
-                "**Autenticación**: JWT Bearer en cabecera `Authorization: Bearer <token>` "
-                "obtenido en `POST /login`.\n\n"
-                "**WebSocket**: Conectar a `/ws` para lanzar scans en tiempo real. "
-                "Enviar `{\"task\": \"audit\"}` para iniciar.\n\n"
+                "**Autenticación**: `POST /login` (formulario con `username`, `password` y el `_csrf` "
+                "de la cookie `ch_csrf`) devuelve la sesión en la cookie `ch_token`; su valor sirve "
+                "también como `Authorization: Bearer <token>`. Desde esta página se usa la sesión del "
+                "navegador.\n\n"
+                "**WebSocket**: conectar a `/ws` y enviar una tarea, p. ej. `{\"task\": \"audit\"}` "
+                "(lista completa en el README).\n\n"
                 "**Modo agente**: Los agentes usan `Authorization: AgentKey <key>` en `/api/agent/*`."
             ),
             "version":     __version__,

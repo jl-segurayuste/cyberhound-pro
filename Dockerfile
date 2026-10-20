@@ -6,7 +6,7 @@
 #
 # Build:  docker build -t cyberhound-pro:latest .
 # Run:    docker run -d -p 8443:8443 --cap-add NET_ADMIN --cap-add NET_RAW \
-#           -v cyberhound-data:/root/.cyberhound cyberhound-pro:latest
+#           -e CH_HOST=0.0.0.0 -v cyberhound-data:/data cyberhound-pro:latest
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── Stage 1: Builder ──────────────────────────────────────────────────────────
@@ -76,7 +76,9 @@ COPY pyproject.toml ./
 # Variables de entorno
 ENV PATH="/opt/venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1
+    PYTHONDONTWRITEBYTECODE=1 \
+    # Licencia, cuarentena, reglas YARA, cachés y certificado van al volumen
+    CH_DATA_DIR=/data
 
 # Volumen para configuración persistente y logs
 VOLUME ["/data"]

@@ -1,98 +1,80 @@
-# 🧪 Cuaderno de pruebas — CyberHound Pro
+# Cuaderno de pruebas — CyberHound Pro
 
-Plan de pruebas de aceptación (manual/E2E) que **complementa** la suite automática
-(`pytest`, 542 tests). Pensado como checklist de release: ejecutar antes de publicar
-una versión.
+Checklist de aceptación que **complementa** la suite automática. Se ejecuta antes de publicar una
+versión; casi todo está automatizado en [`scripts/e2e/`](../scripts/e2e/README.md).
 
-- **Última ejecución:** 2026-06-11 · build `master`
-- **Entorno:** Ubuntu 24.04, Python 3.12, venv del proyecto, SQLite, auth `none` (localhost)
-- **Resultado global:** ✅ Apto (1 defecto encontrado y corregido — ver TC-WS-02)
+- **Última ejecución:** 2026-10-20 · v6.4.0 · `master`
+- **Entorno:** Ubuntu 24.04, Python 3.12, Chromium (Playwright), SQLite y PostgreSQL 16; Docker 27 para el stack de producción
+- **Resultado global:** ✅ Apto — ver la [revisión de seguridad](REVISION-SEGURIDAD.md#7-revisión-de-2026-10-20-qa-de-extremo-a-extremo--seguridad) para lo encontrado y corregido en esta ronda
 
-## Cómo levantar el entorno de pruebas
-```bash
-python -m cyberhound web --port 18443 --host 127.0.0.1 --no-auth
-# UI: https://127.0.0.1:18443  (cert autofirmado; el navegador avisará)
-```
-Leyenda de estado: ✅ pasa · ⚠️ pasa con observación · ❌ falla
+Leyenda: ✅ pasa · ⚠️ pasa con observación · ❌ falla
 
----
+## 1. Suite automática
 
-## 1. Arranque e infraestructura
+| ID | Qué | Cómo | Resultado | Estado |
+|----|-----|------|-----------|--------|
+| TC-AUTO-01 | Tests unitarios, de integración y de coherencia (SQLite) | `pytest tests/` | 690 pasan | ✅ |
+| TC-AUTO-02 | La misma suite contra PostgreSQL 16 | `CH_DB_URL=postgresql://… pytest tests/` | 690 pasan | ✅ |
+| TC-AUTO-03 | Lint | `ruff check cyberhound` | sin avisos | ✅ |
+| TC-AUTO-04 | CI | GitHub Actions: lint, Python 3.11 y 3.12, PostgreSQL, análisis de seguridad, imagen | verde | ✅ |
 
-| ID | Caso | Pasos | Resultado esperado | Estado |
-|----|------|-------|--------------------|--------|
-| TC-BOOT-01 | Arranque limpio | `cyberhound web --no-auth` | Server escucha; BD SQLite inicializada; scheduler y monitor activos | ✅ |
-| TC-BOOT-02 | TLS automático | Arrancar con permisos correctos en `~/.cyberhound` | Genera cert y sirve **HTTPS** (TLS 1.2+) | ✅ |
-| TC-BOOT-03 | Degradación de TLS | Dir TLS no escribible | Avisa y cae a HTTP con WARNING claro (no crashea) | ✅ |
-| TC-BOOT-04 | Sin permisos de log | `/var/log/cyberhound` no escribible | WARNING y log solo a consola; el server sigue | ✅ |
+## 2. Interfaz (navegador real) — `scripts/e2e/ui.py`
 
-## 2. Autenticación y acceso
+| ID | Caso | Resultado esperado | Estado |
+|----|------|--------------------|--------|
+| TC-UI-01 | Los 19 paneles en escritorio (1440×900), tablet (1024×768) y móvil (390×844) | Sin desbordamiento horizontal; scroll vertical cuando el contenido lo pide | ✅ 57 paneles×viewport |
+| TC-UI-02 | Menú: cada entrada abre su panel; botón ☰ en móvil | Panel activo correcto | ✅ |
+| TC-UI-03 | Un clic en cada botón, selector, fila y pestaña de Configuración | Sin errores JS ni de consola, sin 5xx ni peticiones fallidas | ✅ 177 controles |
+| TC-UI-04 | Cabecera: búsqueda global, Log, API (Swagger), Salir | Funcionan; tras salir la API pide sesión | ✅ |
+| TC-UI-05 | Incidencias esperadas | Intel sin API keys (400 claro), el admin no puede quitarse su rol (400), SBOM aún no generado (404) | ✅ |
 
-| ID | Caso | Pasos | Resultado esperado | Estado |
-|----|------|-------|--------------------|--------|
-| TC-AUTH-01 | Modo `none` solo localhost | Petición desde 127.0.0.1 | Acceso permitido sin login | ✅ |
-| TC-AUTH-02 | Modo `none` deniega remoto | Petición desde IP no-local | `403 Solo acceso desde localhost` | ✅ (por diseño) |
-| TC-AUTH-03 | Modo `jwt` exige login | Acceso sin sesión | Redirige a `/login` | ✅ |
-| TC-AUTH-04 | Sesión expirada | Token caducado en una llamada API | Redirección a `/login?error=Sesión+expirada` | ✅ |
+## 3. Roles — `scripts/e2e/roles.py`
 
-## 3. Frontend (SPA)
+| ID | Caso | Resultado esperado | Estado |
+|----|------|--------------------|--------|
+| TC-ROL-01 | Lector recorre y pulsa todo | Ningún 403; lo no permitido aparece bloqueado y solo avisa | ✅ |
+| TC-ROL-02 | Operador | Solo bloqueado lo de configuración | ✅ |
+| TC-ROL-03 | Pestaña Usuarios | Oculta para quien no es admin | ✅ |
 
-| ID | Caso | Pasos | Resultado esperado | Estado |
-|----|------|-------|--------------------|--------|
-| TC-UI-01 | Carga del SPA | GET `/` | `<title>CyberHound Pro</title>`, HTTP 200 | ✅ |
-| TC-UI-02 | Assets estáticos | GET `/static/app.js`, `/static/style.css` | HTTP 200 | ✅ |
-| TC-UI-03 | Render del dashboard | Abrir la UI en navegador | Tema oscuro, tarjetas (score, problemas, acciones, estado), sin errores de consola | ✅ |
-| TC-UI-04 | Pestaña Nuclei presente | Inspeccionar la barra de navegación | Aparece la pestaña **☢️ Nuclei** y su panel (`data-panel="nuclei"`) | ✅ |
-| TC-UI-05 | Estados vacíos | Dashboard sin escaneos previos | Muestra estados vacíos coherentes | ⚠️ Las tarjetas score/dispositivos quedan en «Cargando…» sin datos — mejorar a «Sin análisis» (cosmético) |
+## 4. Multi-tenant — `scripts/e2e/multitenant.py` + `tests/test_multitenancy_isolation.py`
 
-## 4. Scanners (E2E vía WebSocket)
+| ID | Caso | Resultado esperado | Estado |
+|----|------|--------------------|--------|
+| TC-MT-01 | El superadmin crea una organización desde la UI | Aparece en la tabla y en el selector; se muestra su clave de agente | ✅ |
+| TC-MT-02 | Cambiar de organización con el selector | Ve sus datos (vacíos) y al volver los de la plataforma | ✅ |
+| TC-MT-03 | La admin de la organización entra con el campo Organización | Sin menú Sistema ni Monitor ni pestañas de plataforma; ve su clave de agente | ✅ |
+| TC-MT-04 | Pulsar todo como admin de la organización | Ningún 401/403/500 ni error JS | ✅ |
+| TC-MT-05 | Baja desde la UI | Corta su sesión al instante | ✅ |
+| TC-MT-06 | Aislamiento (datos, usuarios, supresiones, agentes, caché, push, rutas de plataforma, WS, reutilización del identificador, 2FA) | Nada cruza de una organización a otra, en SQLite y PostgreSQL | ✅ 15 escenarios |
 
-Validados contra objetivos **reales en modo solo-lectura** (homelab del autor).
+## 5. Funcional contra el backend — `scripts/e2e/functional.py`
 
-| ID | Scanner (tarea) | Objetivo de prueba | Resultado esperado | Obtenido | Estado |
-|----|-----------------|--------------------|--------------------|----------|--------|
-| TC-SCAN-01 | `audit` (hardening) | localhost | Hallazgos + score | 60 hallazgos, score 2 (incl. CVE-2024-6387) | ✅ |
-| TC-SCAN-02 | `web_headers` | URLs HTTP | Detecta cabeceras de seguridad ausentes | 9 hallazgos (HSTS/X-CTO ausentes) | ✅ |
-| TC-SCAN-03 | `web_exposure` | URL HTTP | Detecta recursos sensibles expuestos | 1 hallazgo (web.config) | ✅ |
-| TC-SCAN-04 | `api_security` | URL HTTP | CORS/headers de API | 0 (objetivo limpio) | ✅ |
-| TC-SCAN-05 | `tls` | host:443 | Evalúa certificado/protocolos | 0 (objetivo limpio) | ✅ |
-| TC-SCAN-06 | `dns` | dominio | SPF/DMARC/DNSSEC/CAA | 4 hallazgos (sin SPF/DMARC/DNSSEC) | ✅ |
-| TC-SCAN-07 | `subdomain_enum` | dominio | Subdominios vía CT logs | 2 (subdominio activo + resumen) | ✅ |
-| TC-SCAN-08 | `nuclei` | URL | Ejecuta motor o degrada | 0 + degradación elegante (binario ausente) | ✅ |
-| TC-SCAN-09 | `network` | CIDR LAN | Descubrimiento nmap | (requiere nmap + privilegios) | ⏭️ no ejecutado en este entorno |
-| TC-SCAN-10 | `docker` / `code` / `malware` / `ssh` / `services` | local/remoto | Hallazgos por módulo | cubierto por suite automática | ✅ (unit) |
+Análisis reales sobre **objetivos controlados** que se generan en cada ejecución (`targets.py`: una
+webshell, secretos falsos, `shell=True` y una web local con `.git`/`.env` expuestos).
 
-## 5. WebSocket / API y validación de entrada
+| ID | Área | Casos | Estado |
+|----|------|-------|--------|
+| TC-F-01 | Seguridad web | Cabeceras (CSP, X-Frame-Options, nosniff), CSRF del login, cookie HttpOnly+Secure+SameSite, `/metrics` | ✅ |
+| TC-F-02 | Autenticación | Contraseña errónea, login, usuario creado entra, logout, rate limit con IP real tras proxy | ✅ |
+| TC-F-03 | RBAC | El lector no configura ni crea usuarios pero sí lee; el admin no se quita su rol | ✅ |
+| TC-F-04 | WebSocket | Tarea no permitida e inyección en URLs rechazadas | ✅ |
+| TC-F-05 | Análisis | Hardening, malware (encuentra la webshell), código (encuentra los secretos), Docker sin Docker, servicios, TLS (autofirmado), cabeceras y exposición web (encuentra `.git`/`.env`), API/CORS, Nuclei sin binario, DNS, subdominios, red, intel | ✅ |
+| TC-F-06 | API | Historial, comparación, score, panel, activos, supresiones, usuarios, scheduler, configuración, agentes (clave buena y mala), informes (HTML, Ansible, **PDF real**), compliance, OpenAPI y Swagger, Ansible, organizaciones, importación, SBOM, YARA, rollback, monitor | ✅ |
+| TC-F-07 | Cuarentena | Aislar (el original desaparece), listar, restaurar íntegro, borrar | ✅ |
+| TC-F-08 | 2FA de principio a fin | Setup, código erróneo, activar, solo contraseña no entra, contraseña+código sí, desactivar | ✅ |
+| TC-F-09 | Robustez | Ninguna respuesta 5xx en toda la API | ✅ |
 
-| ID | Caso | Pasos | Resultado esperado | Estado |
-|----|------|-------|--------------------|--------|
-| TC-WS-01 | Dispatch de tarea válida | Enviar `{"task":"audit"}` | Emite `finding`* y `done{score}` | ✅ |
-| TC-WS-02 | **Tareas web habilitadas** (regresión) | Enviar `web_exposure`/`nuclei`/… con `urls` | Ejecuta el scanner (NO «Tarea no permitida») | ✅ **Defecto encontrado y corregido**: faltaban en `ALLOWED_TASKS` y se descartaban sus parámetros. Fix + 20 tests de regresión |
-| TC-WS-03 | Tarea desconocida | Enviar `{"task":"xxx"}` | Error «Tarea no permitida» y cierre limpio | ✅ |
-| TC-WS-04 | Endpoints API | GET `/api/dashboard`, `/api/history`, `/api/score/trend` | HTTP 200 | ✅ |
+Resultado: **126/126** pruebas.
 
-## 6. Seguridad / robustez
+## 6. Despliegue
 
-| ID | Caso | Pasos | Resultado esperado | Estado |
-|----|------|-------|--------------------|--------|
-| TC-SEC-01 | Anti-inyección en objetivos | `urls=["a.com; rm -rf /"]`, `` `whoami`.com `` , `$(id).com` | `ValidationError` (rechazado) | ✅ |
-| TC-SEC-02 | Límite de objetivos | Lista > 50 URLs | `ValidationError` (máximo 50) | ✅ |
-| TC-SEC-03 | Severidades Nuclei | `severities=["bogus"]` | Rechazado; solo info/low/medium/high/critical | ✅ |
-| TC-SEC-04 | Secretos no en repo | Auditoría de working tree e historial | `.env` ignorado y nunca commiteado; sin claves | ✅ |
-
-## 7. Degradación elegante
-
-| ID | Caso | Condición | Resultado esperado | Estado |
-|----|------|-----------|--------------------|--------|
-| TC-DEG-01 | Nuclei sin binario | `nuclei` no instalado | Lista vacía + WARNING, no crashea | ✅ |
-| TC-DEG-02 | Objetivo inalcanzable | Host caído/timeout | Scanner devuelve sin abortar el resto | ✅ |
+| ID | Caso | Resultado esperado | Estado |
+|----|------|--------------------|--------|
+| TC-DEP-01 | Imagen Docker, volumen nuevo y sin `CH_PASSWORD` | Arranca sana, genera la contraseña (solo en el log), PBKDF2, certificado en `/data/tls` | ✅ |
+| TC-DEP-02 | `docker-compose.production.yml` completo | postgres, app, certs, nginx y backup sanos; login y análisis por WebSocket a través de nginx; datos en PostgreSQL; copia creada; HTTP→HTTPS conserva el puerto | ✅ |
+| TC-DEP-03 | `install.sh` en Ubuntu 24.04 y Debian 12 (contenedores limpios) | Instala, la contraseña mostrada entra, sin `.git` en `/opt` | ✅ |
+| TC-DEP-04 | Actualización de una instancia existente (homelab) | Conserva configuración y datos; versión nueva en `/health`; detrás de Caddy, `/metrics` pide sesión | ✅ |
 
 ---
 
-## Resumen
-- **542/542** tests automáticos en verde.
-- **8 scanners** validados E2E contra objetivos reales; **1 defecto** (TC-WS-02) encontrado y **corregido con regresión**.
-- Observación menor abierta: TC-UI-05 (estado «Cargando…» cosmético).
-
-> Este cuaderno es una checklist de aceptación estable; los detalles de bajo nivel
-> viven en la suite `pytest`. Actualizar al añadir scanners o cambiar el protocolo WS.
+> Al añadir un análisis, una pestaña o cambiar el protocolo WS, actualiza `scripts/e2e/` y este cuaderno.

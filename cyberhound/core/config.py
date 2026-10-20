@@ -12,11 +12,12 @@ from pathlib import Path
 import yaml
 
 from cyberhound.core.logging import get_logger
+from cyberhound.core.paths import DATA_DIR
 
 logger = get_logger("config")
 
-DEFAULT_CONFIG_PATH = Path.home() / ".cyberhound" / "config.yaml"
-DEFAULT_DB_PATH     = Path.home() / ".cyberhound" / "cyberhound.db"
+DEFAULT_CONFIG_PATH = DATA_DIR / "config.yaml"
+DEFAULT_DB_PATH     = DATA_DIR / "cyberhound.db"
 _API_KEY_ENV = {"shodan": "SHODAN_API_KEY", "virustotal": "VT_API_KEY", "abuseipdb": "ABUSEIPDB_KEY",
                 "greynoise": "GREYNOISE_KEY", "otx": "OTX_KEY", "hibp": "HIBP_API_KEY"}
 

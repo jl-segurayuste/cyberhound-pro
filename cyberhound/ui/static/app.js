@@ -61,7 +61,7 @@ const FN_PERMS = {
   addSuppression: 'config', removeSuppression: 'config', suppressFinding: 'config', toggleScheduler: 'config',
   saveAgentConfig: 'config', saveKeys: 'config', saveNotifications: 'config', saveSIEM: 'config',
   saveTicketing: 'config', testNotifications: 'config', testSIEM: 'config', testTicketing: 'config',
-  activateLicense: 'config', updateYaraRules: 'config',
+  updateYaraRules: 'config',
   discoverOnly: 'scan', createTenant: 'users', deleteTenant: 'users', rotateTenantKey: 'users',
   changeUserRole: 'users', createUser: 'users', deleteUser: 'users', loadUsers: 'users',
 };
@@ -70,13 +70,13 @@ const FN_PERMS = {
 const HOST_FNS = new Set([
   'applyFix', 'fixAll', 'quickAudit', 'quickMalware', 'quickDocker', 'runAudit', 'runMalware', 'runDocker',
   'runCode', 'runServicesAudit', 'runRuntimeScan', 'runDockerImageScan', 'generateSBOM', 'downloadSBOM',
-  'deleteQuarantine', 'restoreQuarantine', 'runAnsiblePlaybook', 'updateYaraRules', 'activateLicense',
+  'deleteQuarantine', 'restoreQuarantine', 'runAnsiblePlaybook', 'updateYaraRules',
   'saveKeys', 'saveNotifications', 'testNotifications', 'saveSIEM', 'testSIEM', 'saveTicketing', 'testTicketing',
   'toggleScheduler', 'runSchedulerNow', 'saveAgentConfig',
   'loadKeys', 'loadMonitorStatus', 'loadSBOM', 'loadScheduler', 'loadYaraRules',   // botones "↻ Cargar"
 ]);
 const HOST_PANELS = ['audit', 'malware', 'docker', 'code', 'services', 'monitor'];
-const HOST_CFG_TABS = ['keys', 'notifications', 'siem', 'ticketing', 'scheduler', 'yara', 'license', 'quarantine',
+const HOST_CFG_TABS = ['keys', 'notifications', 'siem', 'ticketing', 'scheduler', 'yara', 'quarantine',
                        'sbom', 'ansible'];
 let USER = { username: '', role: 'admin', permissions: ['scan', 'fix', 'config', 'users', 'view'],
              host_access: true, superadmin: true, multi_tenant: false, tenant: 'default' };
@@ -185,7 +185,6 @@ function showCfgTab(name) {
     yara:         () => loadYaraRules(),
     agents:       () => { loadAgents(); loadAgentConfig(); loadTenantAgentKey(); },
     tenants:      () => loadTenants(),
-    license:      () => loadLicenseInfo(),
     quarantine:   () => loadQuarantine(),
     ansible:      () => loadAnsibleJobs(),
   };
@@ -2388,7 +2387,7 @@ async function loadAgentFilterOptions() {
 
 
 // ══════════════════════════════════════════════════════════════════════════════
-// LICENCIAS + LDAP/AD + WEBSOCKET PUSH (sin polling)
+// LDAP/AD + WEBSOCKET PUSH (sin polling)
 // ══════════════════════════════════════════════════════════════════════════════
 
 // ── WebSocket push — notificaciones en tiempo real sin polling ────────────────
@@ -2461,57 +2460,6 @@ function handlePushEvent(msg) {
         'high');
       break;
   }
-}
-
-// ── Licencias ─────────────────────────────────────────────────────────────────
-async function loadLicenseInfo() {
-  if (!hostAccess()) return;   // de la plataforma: un tenant recibiría 403
-  try {
-    const r = await fetch('/api/license');
-    if (!r.ok) return;
-    const lic = await r.json();
-    const box = document.getElementById('license-info');
-    if (!box) return;
-    const tierColors = { community:'var(--text2)', starter:'var(--blue)', professional:'var(--green)', enterprise:'var(--yellow)' };
-    const color = tierColors[lic.tier] || 'var(--text2)';
-    box.innerHTML = `
-      <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">
-        <div>
-          <div style="font-size:1.1rem;font-weight:700;color:${color}">${(lic.tier||'').toUpperCase()}</div>
-          <div style="color:var(--text2);font-size:.82rem">${esc(lic.licensee||'')}</div>
-        </div>
-        <div style="flex:1;min-width:200px">
-          <div style="font-size:.82rem;margin-bottom:4px">
-            ${lic.valid_until
-              ? `Expira: ${new Date(lic.valid_until).toLocaleDateString('es')} (${lic.days_remaining} días)`
-              : '<span style="color:var(--green)">Licencia perpetua</span>'}
-          </div>
-          <div style="display:flex;gap:6px;flex-wrap:wrap;font-size:.72rem">
-            ${lic.limits?.siem_enabled ? '<span style="background:var(--bg3);padding:2px 6px;border-radius:3px">✓ SIEM</span>' : '<span style="background:var(--bg3);padding:2px 6px;border-radius:3px;opacity:.4">✗ SIEM</span>'}
-            ${lic.limits?.agent_enabled ? '<span style="background:var(--bg3);padding:2px 6px;border-radius:3px">✓ Agentes</span>' : '<span style="background:var(--bg3);padding:2px 6px;border-radius:3px;opacity:.4">✗ Agentes</span>'}
-            ${lic.limits?.intel_enabled ? '<span style="background:var(--bg3);padding:2px 6px;border-radius:3px">✓ Intel</span>' : '<span style="background:var(--bg3);padding:2px 6px;border-radius:3px;opacity:.4">✗ Intel</span>'}
-            ${lic.limits?.max_hosts > 0 ? `<span style="background:var(--bg3);padding:2px 6px;border-radius:3px">máx ${lic.limits.max_hosts} hosts</span>` : '<span style="background:var(--bg3);padding:2px 6px;border-radius:3px">✓ Hosts ilimitados</span>'}
-          </div>
-        </div>
-      </div>`;
-  } catch(e) {}
-}
-
-async function activateLicense() {
-  const key = document.getElementById('license-key')?.value.trim();
-  const msg = document.getElementById('license-msg');
-  if (!key) { if (msg) { msg.textContent = 'Introduce la clave de licencia'; msg.style.color='var(--yellow)'; } return; }
-
-  const r = await fetch('/api/license/activate', {
-    method: 'POST', headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({ key }),
-  });
-  const d = await r.json();
-  if (msg) {
-    msg.textContent = d.message || (d.ok ? '✓ Licencia activada' : '✗ Error');
-    msg.style.color = d.ok ? 'var(--green)' : 'var(--red)';
-  }
-  if (d.ok) { await loadLicenseInfo(); toast('✓ Licencia activada correctamente'); }
 }
 
 // ── LDAP / AD ─────────────────────────────────────────────────────────────────
@@ -3442,13 +3390,11 @@ window._wsPushHandler = function(event) {
 async function loadSystemStatus() {
   if (!hostAccess()) return;   // de la plataforma: un tenant recibiría 403
   try {
-    const [monR, licR, schedR] = await Promise.all([
+    const [monR, schedR] = await Promise.all([
       fetch('/api/monitor/status'),
-      fetch('/api/license'),
       fetch('/api/scheduler'),
     ]);
     const mon   = monR.ok   ? await monR.json()   : {};
-    const lic   = licR.ok   ? await licR.json()   : {};
     const sched = schedR.ok ? await schedR.json() : {};
 
     const el = document.getElementById('dash-system-status');
@@ -3460,11 +3406,6 @@ async function loadSystemStatus() {
         value: mon.active ? `Activo (${mon.mode})` : 'Inactivo',
         color: mon.active ? 'var(--green)' : 'var(--yellow)',
         tip:   mon.active ? '' : 'sudo apt install auditd',
-      },
-      {
-        label: 'Licencia',
-        value: lic.tier ? `${lic.tier} — ${lic.licensee || 'Community'}` : '?',
-        color: 'var(--text)',
       },
       {
         label: 'Notif. push',
@@ -3862,6 +3803,9 @@ async function createTenant() {
   const body = { slug: val('tenant-slug').toLowerCase(), name: val('tenant-name'), admin_email: val('tenant-email'),
                  plan: val('tenant-plan') || 'starter', admin_username: val('tenant-admin-user'),
                  admin_password: document.getElementById('tenant-admin-pass')?.value || '' };
+  if (!body.slug || !body.name) {
+    msg.style.color = 'var(--yellow)'; msg.textContent = 'Indica el identificador y el nombre'; return;
+  }
   const r = await fetch('/api/tenants', {
     method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body),
   });

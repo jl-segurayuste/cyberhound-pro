@@ -1,7 +1,8 @@
 # Revisión de seguridad y QA — CyberHound Pro
 
-> Fecha: **2026-06-14** · Alcance: backend (`cyberhound/`) + UI (`cyberhound/ui`).
-> Rol: QA + CISO. Resultado: **suite 560 verde, ruff limpio**, 2 hallazgos
+> Revisión inicial: **2026-06-14** (§1-6) · Última revisión: **2026-10-20** ([§7](#7-revisión-de-2026-10-20-qa-de-extremo-a-extremo--seguridad)).
+> Alcance: backend (`cyberhound/`) + UI (`cyberhound/ui`).
+> Rol: QA + CISO. Resultado de 2026-06-14: **suite 560 verde, ruff limpio**, 2 hallazgos
 > corregidos, exposición **solo interna** verificada.
 
 ## 1. QA
@@ -23,7 +24,7 @@
 
 ## 3. Verificado correcto (sin cambios)
 
-- **Sin inyección de comandos**: 0 usos de `shell=True`, `os.system`, `os.popen`.
+- **Sin inyección de comandos**: 0 usos de `shell=True`, `os.system`, `os.popen`. *(Corrección 2026-10-20: la corrección remota sí ejecutaba por SSH texto del host auditado, ver §7.)*
 - **Exposición SOLO interna**: el dominio se resuelve únicamente por DNS interno
   hacia un reverse proxy en la LAN que reenvía al contenedor; **no** se publica por
   túnel ni en DNS público (los resolvers públicos no devuelven registro). El
@@ -31,7 +32,7 @@
 - **Auth**: JWT HS256 con secreto persistente (aviso si falta); login con
   **rate-limiting** (5/15 min + bloqueo), **CSRF** en el formulario, comparaciones
   de tiempo constante. Cookie de sesión por defecto; redirección a `/login`.
-- **MFA**: TOTP disponible (cifrado en reposo).
+- **MFA**: TOTP disponible. *(Corrección 2026-10-20: el secreto se guardaba en claro; ahora va cifrado, ver §7.)*
 - **Cabeceras**: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`,
   `Referrer-Policy`, `Cache-Control: no-store`, **CSP** (`default-src 'self'`).
 - **WS**: validación de mensajes (suite `test_ws_message_validation`).
@@ -72,3 +73,36 @@ llamadas; simulación de los 12 scanners) y se corrigieron:
 la suite normal que toda función de handler existe, que no hay desajuste
 `_func`/`func`, que no hay ids duplicados y que los cargadores `load*` existen —
 habría cazado todos estos bugs. Estado: **suite 568 verde, ruff limpio**.
+
+
+## 7. Revisión de 2026-10-20 (QA de extremo a extremo + seguridad)
+
+Se recorrió la aplicación entera con un navegador real (cada panel en 3 tamaños, cada control, los
+roles y el multi-tenant) y una batería funcional contra el backend con análisis reales sobre objetivos
+controlados (hoy en `scripts/e2e/`). Además de bugs funcionales (Intel inservible, configuración que se
+perdía en Docker, PostgreSQL que nunca se activaba, PDF que no salía…), se encontraron y corrigieron
+estos problemas de seguridad, cada uno con su test de regresión:
+
+| # | Severidad | Hallazgo | Corrección |
+|---|---|---|---|
+| 1 | **Crítica** | **Bypass del 2FA**: el token intermedio "contraseña OK, falta el código" se firmaba con el mismo secreto que la sesión y no se miraba su `purpose`: enviándolo como `Bearer` o como cookie de sesión se entraba sin código. | `verify_jwt` rechaza cualquier token con `purpose`. `tests/test_auth_tokens.py`. |
+| 2 | **Alta** | **Inyección de comandos en la corrección remota**: se ejecutaba por SSH, tal cual, la remediación que devolvía el host auditado (con nombres de fichero del propio host). Un usuario sin privilegios de ese host podía ejecutar comandos como el usuario SSH (normalmente root) creando un fichero world-writable con `;` en el nombre. | La acción se construye en CyberHound desde el id del hallazgo, con parámetros validados, viaja como dato a un script fijo y se ejecuta sin shell. `tests/test_remote_fix.py`. |
+| 3 | **Alta** | **Escalada en la auditoría remota**: el script se escribía en `/tmp` con nombre predecible y luego se ejecutaba con `sudo`; un usuario local podía sustituirlo. | El script va por stdin a `python3 -`; nada en `/tmp`. |
+| 4 | **Alta** | **Roles decorativos**: ningún endpoint comprobaba los permisos (un `viewer` podía crear administradores). | Middleware RBAC + la UI desactiva lo no permitido; coherencia UI↔servidor comprobada por test. |
+| 5 | **Media** | `/api/fix/local` aplicaba en este servidor el fix de un hallazgo de otro host; `/api/fix/remote` usaba el host de la petición en vez del del hallazgo. | Validado contra `source_host`. |
+| 6 | **Media** | Rate limit del login esquivable con `X-Forwarded-For` falso; detrás de un proxy, todos los clientes compartían la IP del proxy (bloqueo de todos a la vez). | IP real solo desde `trusted_proxies` (IP, CIDR o nombre), entrada más a la derecha no confiable. |
+| 7 | **Media** | Escrituras en `/api/*` desde otro subdominio del mismo sitio (SameSite no lo cubre). | Rechazo por `Sec-Fetch-Site`/`Origin`. |
+| 8 | **Media** | XSS almacenado en el informe HTML descargable: títulos y categorías de hallazgos (que pueden venir de webs o agentes de terceros) sin escapar. | Todo escapado; sin JS en línea. |
+| 9 | **Media** | Secreto TOTP en claro en la BD. | Cifrado con Fernet (clave derivada por HKDF del secreto de la instancia); los antiguos se cifran al entrar. |
+| 10 | **Media** | Sistema de licencias falsificable (HMAC con la clave publicada en el repo) y sin ningún límite aplicado. | Eliminado: todo es AGPL sin restricciones. |
+| 11 | **Baja** | Sin contraseña configurada valía `cyberhound`; el entrypoint de Docker usaba SHA-256 sin sal e interpolaba la contraseña en código Python. | Hash inutilizable por defecto, validación al arrancar, entrypoint con PBKDF2 y valores por entorno. |
+| 12 | **Baja** | `/metrics` público también a través de un proxy; rutas públicas por prefijo (`/loginx`). | Sin sesión solo desde el propio host; rutas exactas. |
+| 13 | **Baja** | CSP con `unsafe-inline` en atributos de eventos. | 241 manejadores en línea eliminados; `script-src-attr 'none'`. |
+| 14 | **Baja** | Activar ufw desde un fix podía dejar fuera al administrador remoto. | Abre antes SSH y el puerto de la web. |
+| 15 | **Baja** | `/api/intel/*` metía los objetivos sin validar en las URLs de las APIs externas. | Validación de IP/dominio/hash/email. |
+
+Multi-tenant (nuevo): cada organización tiene su propia BD (fichero SQLite o esquema PostgreSQL), la
+sesión queda ligada a ella, las cachés en memoria y las notificaciones push se separan, y lo que actúa
+sobre el propio servidor queda reservado al superadmin. `tests/test_multitenancy_isolation.py` cubre
+datos, usuarios, supresiones, agentes, caché de hallazgos, push, rutas de plataforma, baja y reutilización
+del identificador, en SQLite y en PostgreSQL.

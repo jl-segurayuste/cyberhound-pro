@@ -105,3 +105,23 @@ def test_host_de_la_cli_no_se_queda_guardado(tmp_path, monkeypatch):
     cli.main()
     assert yaml.safe_load(path.read_text())["server"]["host"] == "127.0.0.1"
     assert yaml.safe_load(path.read_text())["server"]["port"] == 8443
+
+
+def test_setup_no_interactivo_para_install_sh(tmp_path, monkeypatch):
+    """install.sh pasa la contraseña por stdin (antes llamaba a opciones que no existían
+    y acababa en un plan B con SHA-256 sin sal)."""
+    import io
+
+    from cyberhound import __main__ as cli
+    from cyberhound.core import passwords
+    path = tmp_path / "config.yaml"
+    monkeypatch.setattr(sys, "stdin", io.StringIO("clave-instalador-1\n"))
+    monkeypatch.setattr(sys, "argv", ["cyberhound", "setup", "--config", str(path), "--password-stdin",
+                                      "--username", "jefe", "--host", "0.0.0.0", "--port", "9443",
+                                      "--db-url", ""])
+    cli.main()
+    raw = yaml.safe_load(path.read_text())
+    assert raw["auth"]["username"] == "jefe" and raw["server"]["host"] == "0.0.0.0" and raw["server"]["port"] == 9443
+    assert passwords.verify_password("clave-instalador-1", raw["auth"]["password_hash"])
+    assert raw["auth"]["password_hash"].startswith("pbkdf2_sha256$")
+    assert stat.S_IMODE(os.stat(path).st_mode) == 0o600

@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from cyberhound.core.logging import get_logger
+from cyberhound.core.paths import YARA_DIR
 
 logger = get_logger("scheduler")
 
@@ -292,7 +293,7 @@ def build_scheduler(app_ref, cfg) -> Scheduler:
             except ImportError:
                 pass
             logger.info("Actualizando reglas YARA automáticamente…")
-            yara_dir = Path.home() / ".cyberhound" / "yara"
+            yara_dir = YARA_DIR
             yara_dir.mkdir(exist_ok=True)
             sources = [
                 ("https://raw.githubusercontent.com/Yara-Rules/rules/master/malware/MALW_Ransomware.yar",

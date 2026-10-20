@@ -354,7 +354,7 @@ class DatabasePG:
         await self._exec("UPDATE users SET last_login=$1 WHERE username=$2", _now(), username)
 
     async def update_user(self, username: str, **kwargs) -> None:
-        allowed = {"password_hash","role","active"}
+        allowed = {"password_hash", "role", "active", "totp_secret"}
         fields = {k: v for k, v in kwargs.items() if k in allowed}
         if not fields:
             return

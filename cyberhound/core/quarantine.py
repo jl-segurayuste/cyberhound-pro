@@ -5,8 +5,9 @@ Cuando YARA, hash scan o detección de webshells identifica un fichero
 sospechoso, el usuario puede enviarlo a cuarentena con un clic desde la UI.
 
 La cuarentena:
-  - Mueve el fichero a un directorio seguro (~/.cyberhound/quarantine/)
-  - Lo cifra con XOR + clave aleatoria (previene ejecución accidental)
+  - Mueve el fichero a <CH_DATA_DIR>/quarantine/ (0600)
+  - Lo ofusca con XOR (clave fija: no es cifrado, evita que se ejecute o que el antivirus
+    lo vuelva a detectar)
   - Guarda metadatos: ruta original, hash, fecha, finding_id
   - Permite restaurar el fichero a su ubicación original si era FP
   - No elimina permanentemente — eso siempre es decisión del usuario
@@ -24,10 +25,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from cyberhound.core.logging import get_logger
+from cyberhound.core.paths import DATA_DIR
 
 logger = get_logger("quarantine")
 
-QUARANTINE_DIR = Path.home() / ".cyberhound" / "quarantine"
+QUARANTINE_DIR = DATA_DIR / "quarantine"
 QUARANTINE_META = QUARANTINE_DIR / "index.json"
 QUARANTINE_KEY  = b"CyberHoundQuarantine2024"  # XOR key fija (no criptografía real, solo previene ejecución)
 

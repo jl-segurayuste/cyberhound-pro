@@ -8,7 +8,7 @@ El informe incluye:
   - Gráfico de distribución por severidad (SVG → drawing)
   - Tabla de hallazgos agrupados por categoría
   - Sección de remediaciones priorizadas
-  - Pie de página con información de licencia
+  - Pie de página con la organización (si la hay)
 
 Si fpdf2 no está disponible, genera HTML y lo convierte con weasyprint
 o retorna el HTML directamente como fallback.
@@ -16,6 +16,7 @@ o retorna el HTML directamente como fallback.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from html import escape as _esc
 
 from cyberhound.core.logging import get_logger
 from cyberhound.core.models import Finding
@@ -46,7 +47,7 @@ def generate_pdf(
     target: str = "localhost",
     scan_type: str = "audit",
     score: int | None = None,
-    licensee: str = "CyberHound Pro",
+    organization: str = "",
     include_compliance: bool = True,
 ) -> bytes:
     """
@@ -54,15 +55,15 @@ def generate_pdf(
     Intenta fpdf2 primero, weasyprint como fallback.
     """
     try:
-        return _generate_with_fpdf2(findings, target, scan_type, score, licensee,
+        return _generate_with_fpdf2(findings, target, scan_type, score, organization,
                                     include_compliance)
     except ImportError:
         logger.warning("fpdf2 no disponible - usando HTML como fallback")
-        return _generate_html_fallback(findings, target, scan_type, score, licensee,
+        return _generate_html_fallback(findings, target, scan_type, score, organization,
                                        include_compliance)
     except Exception as e:
         logger.warning("fpdf2 fallo (%s) - usando HTML como fallback", type(e).__name__)
-        return _generate_html_fallback(findings, target, scan_type, score, licensee,
+        return _generate_html_fallback(findings, target, scan_type, score, organization,
                                        include_compliance)
 
 
@@ -83,7 +84,7 @@ def _sanitize_pdf(text: str) -> str:
 
 
 def _generate_with_fpdf2(
-    findings, target, scan_type, score, licensee, include_compliance=True,
+    findings, target, scan_type, score, organization, include_compliance=True,
 ):
     from fpdf import FPDF, XPos, YPos
 
@@ -153,7 +154,8 @@ def _generate_with_fpdf2(
     pdf.set_font("Helvetica", "", 10)
     pdf.set_text_color(139, 148, 158)
     pdf.set_xy(15, 81)
-    pdf.cell(0, 6, f"Empresa / licenciatario: {licensee}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    if organization:
+        pdf.cell(0, 6, f"Organización: {organization}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
     # ── RESUMEN EJECUTIVO ─────────────────────────────────────────────────────
     pdf.set_xy(15, 100)
@@ -318,14 +320,15 @@ def _generate_with_fpdf2(
     pdf.set_font("Helvetica", "", 7)
     pdf.set_text_color(139, 148, 158)
     pdf.cell(0, 5,
-             f"CyberHound Pro - Informe confidencial - {_sanitize_pdf(now.strftime(chr(37)+'d/'+chr(37)+'m/'+chr(37)+'Y'))} - {_sanitize_pdf(licensee)}",
+             f"CyberHound Pro - Informe confidencial - {_sanitize_pdf(now.strftime(chr(37)+'d/'+chr(37)+'m/'+chr(37)+'Y'))}"
+             + (f" - {_sanitize_pdf(organization)}" if organization else ""),
              align="C")
 
     return pdf.output()
 
 
 def _generate_html_fallback(
-    findings, target, scan_type, score, licensee, include_compliance=True,
+    findings, target, scan_type, score, organization, include_compliance=True,
 ):
     """Genera HTML que el navegador puede imprimir como PDF."""
     now = datetime.now(UTC).strftime("%d/%m/%Y %H:%M UTC")
@@ -344,12 +347,12 @@ def _generate_html_fallback(
         color = sev_css.get(f.severity, "#8b949e")
         rows += f"""
         <tr>
-          <td><span class="badge" style="background:{color}">{f.severity.upper()}</span></td>
-          <td class="dim">{f.category or ''}</td>
-          <td><strong>{f.title or ''}</strong>
-            <div class="dim small">{(f.description or '')[:200]}</div>
+          <td><span class="badge" style="background:{color}">{_esc(f.severity.upper())}</span></td>
+          <td class="dim">{_esc(f.category or '')}</td>
+          <td><strong>{_esc(f.title or '')}</strong>
+            <div class="dim small">{_esc((f.description or '')[:200])}</div>
           </td>
-          <td class="green small">{(f.remediation or '').split(chr(10))[0][:100]}</td>
+          <td class="green small">{_esc((f.remediation or '').split(chr(10))[0][:100])}</td>
         </tr>"""
 
     score_color = "#3fb950" if (score or 0) >= 75 else "#d29922" if (score or 0) >= 50 else "#f85149"
@@ -377,7 +380,7 @@ def _generate_html_fallback(
 
     html = f"""<!DOCTYPE html>
 <html lang="es"><head><meta charset="UTF-8">
-<title>CyberHound Pro — Informe {target}</title>
+<title>CyberHound Pro — Informe {_esc(target)}</title>
 <style>
   body {{ font-family: system-ui, sans-serif; background: #0d1117; color: #e6edf3;
           font-size: 13px; padding: 30px; margin: 0; }}
@@ -405,11 +408,11 @@ def _generate_html_fallback(
   .print-btn {{ background: #58a6ff; color: #0d1117; border: none; padding: 8px 16px;
                  border-radius: 6px; cursor: pointer; font-weight: 600; margin-bottom: 20px; }}
 </style></head><body>
-<button class="print-btn no-print" onclick="window.print()">🖨️ Imprimir / Guardar PDF</button>
+<p class="no-print" style="color:#8b949e">Para guardarlo como PDF: Imprimir (Ctrl+P) › Guardar como PDF.</p>
 <div class="score">{score if score is not None else '—'}<span style="font-size:16px;color:#8b949e">/100</span></div>
 <h1>🐾 CyberHound Pro</h1>
-<div class="meta">Informe de seguridad — {target} — {scan_type.upper()} — {now}<br>
-Licenciatario: {licensee}</div>
+<div class="meta">Informe de seguridad — {_esc(target)} — {_esc(scan_type.upper())} — {now}<br>
+{_esc(organization)}</div>
 <div style="clear:both"></div>
 <div class="counters">
   <div class="counter"><div class="num" style="color:#f85149">{counts['critical']}</div><div class="label">Críticos</div></div>
@@ -422,6 +425,6 @@ Licenciatario: {licensee}</div>
 <table><thead><tr><th>Severidad</th><th>Categoría</th><th>Hallazgo</th><th>Remediación</th></tr></thead>
 <tbody>{rows}</tbody></table>
 {compliance_html}
-<div class="footer">CyberHound Pro — Informe confidencial — {now} — {licensee}</div>
+<div class="footer">CyberHound Pro — Informe confidencial — {now}{' — ' + _esc(organization) if organization else ''}</div>
 </body></html>"""
     return html.encode("utf-8")

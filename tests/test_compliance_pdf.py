@@ -179,10 +179,10 @@ class TestPDFReport:
             else:
                 sys.modules['fpdf'] = orig
 
-    def test_html_print_button_present(self):
-        findings = []
-        html = _generate_html_fallback(findings, "host", "audit", 100, "Corp")
-        assert b"window.print()" in html
+    def test_html_explica_como_guardar_pdf_sin_js(self):
+        # Sin onclick en línea: el HTML se sirve con la misma CSP (script-src-attr 'none')
+        html = _generate_html_fallback([], "host", "audit", 100, "Corp")
+        assert b"Guardar como PDF" in html and b"onclick" not in html
 
     def test_empty_findings_no_error(self):
         html = _generate_html_fallback([], "host", "audit", None, "Corp")

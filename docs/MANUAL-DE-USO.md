@@ -1,7 +1,7 @@
 # CyberHound Pro — Manual de uso
 
-Guía práctica para usar CyberHound en el día a día. Para instalar, ver el
-[README](../README.md#instalación-rápida) y los [requisitos](../README.md#requisitos).
+Guía práctica para el día a día. Para instalar, ver el [README](../README.md#instalación) y los
+[requisitos](../README.md#requisitos).
 
 ![Interfaz de CyberHound Pro](img/interfaz.png)
 
@@ -9,43 +9,50 @@ Guía práctica para usar CyberHound en el día a día. Para instalar, ver el
 
 ## 1. Acceder a la interfaz
 
-```bash
-sudo cyberhound web --port 8443     # con autenticación
-# o, solo en local (desarrollo), sin login:
-sudo cyberhound web --no-auth --host 127.0.0.1
-```
-Abre **https://TU_HOST:8443** (certificado autofirmado la primera vez → el
-navegador avisará). Credenciales: las que fijaste con `cyberhound setup`.
+| Instalación | Cómo arranca | Dónde está la configuración |
+|---|---|---|
+| Docker | `docker compose up -d` | `/data/config.yaml` (volumen) |
+| `install.sh` | servicio `cyberhound` (systemd) | `/root/.cyberhound/config.yaml` |
+| A mano | `cyberhound web --config <fichero>` | `~/.cyberhound/config.yaml` por defecto |
 
-> El modo `--no-auth` solo permite acceso desde `127.0.0.1` (localhost).
+Abre **https://TU_HOST:8443** (certificado autofirmado la primera vez: el navegador avisará). Por
+defecto solo escucha en `127.0.0.1`; para la red, `server.host: 0.0.0.0` en la configuración,
+`--host 0.0.0.0` o `CH_HOST=0.0.0.0` en Docker.
+
+Credenciales: las que fijaste con `cyberhound setup`, las que mostró `install.sh`, o la contraseña
+que Docker generó en el primer arranque (`docker compose logs cyberhound | grep -i contraseña`).
+
+> `cyberhound web --no-auth` (sin login) solo acepta conexiones desde `127.0.0.1`: para pruebas locales.
 
 ### Navegación
 
-La interfaz es **responsive** (se adapta a cualquier monitor o móvil, sin scroll
-lateral) y agrupa todas las funciones en cinco menús de la barra superior:
+La interfaz se adapta a cualquier pantalla (escritorio, tablet, móvil, sin scroll lateral) y agrupa
+las funciones en cinco menús:
 
 ![Menú de navegación](img/interfaz-navegacion.png)
 
 | Menú | Funciones |
 |---|---|
-| **Inicio** | Panel de estado (score, problemas, cumplimiento, sistema) |
+| **Inicio** | Panel de estado (score, problemas, dispositivos, cumplimiento, sistema) |
 | **Red** | Mi Red · Subdominios · DNS Security · Intel |
 | **Sistema** | Seguridad · Malware · Docker · Código · Servicios |
 | **Web** | TLS/SSL · Cabeceras Web · Exposición Web · API / CORS · Nuclei |
 | **Gestión** | Historial · Monitor · Informes · Configuración |
 
-En móvil, los menús se despliegan desde el botón **☰**. Arriba a la derecha:
-buscador de hallazgos, **Log**, **API** (documentación Swagger) y **Salir**.
+En móvil los menús se abren con **☰**. Arriba a la derecha: buscador de hallazgos, **Log**, **API**
+(documentación Swagger), tu usuario y rol (y la organización, en multi-tenant) y **Salir**.
 
 ## 2. El panel (Inicio)
 
 | Tarjeta | Qué muestra |
 |---|---|
 | **Score** | Puntuación 0-100 y grado del último análisis |
-| **Problemas encontrados** | Recuento por severidad (críticos/altos/medios/bajos) |
+| **Problemas encontrados** | Recuento por severidad y comparación con el análisis anterior |
+| **Dispositivos en red** | Activos conocidos y los no autorizados |
+| **Acciones rápidas** | Analizar seguridad, red, malware, Docker |
 | **Cumplimiento** | % de controles **CIS** y **ENS** cubiertos |
-| **Estado del sistema** | Monitor en tiempo real, licencia, notificaciones |
-| **Atención inmediata** | Hallazgos críticos con su botón de corrección |
+| **Estado del sistema** | Monitor en tiempo real y notificaciones del navegador |
+| **Evolución del score** | Media diaria de los últimos 30 días |
 
 ### Cómo se interpreta el score
 | Grado | Score | Significado |
@@ -56,89 +63,108 @@ buscador de hallazgos, **Log**, **API** (documentación Swagger) y **Salir**.
 | **D** | 40-59 | Deficiente |
 | **F** | 0-39 | Crítico |
 
-> Un sistema **recién instalado** suele puntuar ~60 ("Mejorable"): tiene hardening
-> pendiente pero no riesgos activos. Los **críticos** (exploitables) hunden el score;
-> el volumen de hallazgos de baja criticidad, no.
+> Un sistema **recién instalado** suele puntuar ~60 ("Mejorable"): tiene hardening pendiente pero no
+> riesgos activos. Los **críticos** hunden el score; el volumen de hallazgos leves, no.
 
 ## 3. Lanzar análisis
 
-Cada función abre un scanner. Pulsa **Analizar** (o las *Acciones rápidas* del
-panel). Los resultados aparecen en vivo (WebSocket) con su severidad y evidencia.
+Cada función abre su panel: rellena el objetivo y pulsa **Analizar** (o usa las *Acciones rápidas*).
+Los hallazgos aparecen en vivo con su severidad y evidencia; pulsa uno para ver el detalle.
 
 | Menú | Función | Qué audita | Requiere |
 |---|---|---|---|
-| Sistema | **Seguridad** | Hardening del SO (26 checks) + score | root |
-| Red | **Mi Red** | Descubrimiento, OS, CVEs | `nmap` (+root para OS detection) |
-| Sistema | **Malware** | YARA, hashes (VT/MB), auditd, cron, webshells | — |
-| Sistema | **Docker** | 7 checks Docker + 11 de Kubernetes | acceso a Docker/`kubectl` |
-| Sistema | **Código** | bandit, shellcheck, eslint sobre una ruta | esas herramientas |
-| Sistema | **Servicios** | Servicios inseguros/expuestos | — |
+| Sistema | **Seguridad** | Hardening del SO (31 checks) + score | root |
+| Red | **Mi Red** | Descubrimiento, SO, CVEs y auditoría SSH de cada host | `nmap` (+root para el SO) |
+| Sistema | **Malware** | YARA, hashes (VirusTotal/MalwareBazaar), auditd, cron, webshells | — |
+| Sistema | **Docker** | 7 checks de Docker + 11 de Kubernetes, imágenes (Trivy) | Docker / `kubectl` |
+| Sistema | **Código** | bandit, shellcheck, eslint y secretos en una ruta | esas herramientas |
+| Sistema | **Servicios** | nginx, apache, MySQL, PostgreSQL, Redis, MongoDB | — |
 | Web | **TLS/SSL** | Certificados y protocolos de tus HTTPS | — |
 | Web | **Cabeceras Web** | CSP, HSTS y demás cabeceras de seguridad | — |
-| Web | **Exposición Web** | `.git`/`.env`, backups, listados, métodos | — |
-| Web | **API / CORS** | CORS roto, docs de API, GraphQL introspection | — |
-| Red | **DNS Security** | SPF/DMARC/DNSSEC/CAA de un dominio | — |
-| Red | **Subdominios** | Enumeración vía Certificate Transparency | — |
-| Web | **Nuclei** | Plantillas de ProjectDiscovery (CVEs, exposiciones) | binario `nuclei` + plantillas |
+| Web | **Exposición Web** | `.git`/`.env`, copias, listados, métodos peligrosos | — |
+| Web | **API / CORS** | CORS roto, documentación de API, GraphQL | — |
+| Red | **DNS Security** | SPF/DMARC/DKIM/DNSSEC/CAA de un dominio | — |
+| Red | **Subdominios** | Enumeración por Certificate Transparency | — |
+| Red | **Intel** | IPs, dominios, hashes o emails en Shodan, VirusTotal, AbuseIPDB, GreyNoise, OTX, HIBP | API keys (Configuración › API Keys) |
+| Web | **Nuclei** | Plantillas de ProjectDiscovery | binario `nuclei` + plantillas |
 
-## 4. Corregir hallazgos (auto-fix)
+## 4. Corregir hallazgos
 
-Los hallazgos con el icono ⚡ tienen **remediación automática**. Pulsa el botón para
-aplicarla (requiere privilegios). Antes de aplicar, revisa el comando que muestra:
-algunos cambios (firewall, SSH, montajes `noexec`) **pueden afectar a servicios** —
-en un host de producción, valídalos.
+Los hallazgos con ⚡ tienen **corrección automática**: pulsa **Corregir** (en los de otro host,
+**Corregir en &lt;host&gt;**, que se aplica por SSH en ese host). Revisa antes lo que va a hacer:
+cambios de firewall, SSH o montajes **pueden afectar a servicios** en producción.
 
-> Los fixes son idempotentes y se registran en el log de auditoría.
+- Los fixes locales se pueden **deshacer**: el botón pasa a **↶ Deshacer**. Las instalaciones de
+  paquetes se marcan como no reversibles (no se desinstala nada a ciegas).
+- Activar el firewall abre antes SSH y el puerto de CyberHound, para no dejarte fuera.
+- Todo queda en el log de auditoría (`security_audit.log`).
+- **Supresiones**: lo que sea un falso positivo se suprime con un patrón y un motivo
+  (Configuración › Supresiones); deja de aparecer en los análisis siguientes.
 
-## 5. Programación y monitorización
+## 5. Usuarios, roles y 2FA
 
-- **Tareas programadas** (por defecto): auditoría diaria 02:00, malware semanal
-  (lun 03:00), red diaria 04:00. Configurables en *Ajustes*.
-- **Monitor en tiempo real** (eBPF): vigila procesos/conexiones; necesita `bpftrace`
-  y privilegios (y kernel real — no arranca en contenedores no privilegiados).
+En **Configuración › Usuarios** (solo admin) se crean usuarios con rol `viewer` (ver), `operator`
+(ver, analizar y corregir) o `admin` (todo). La interfaz desactiva lo que tu rol no permite y el
+servidor lo rechaza aunque se intente por la API.
 
-## 6. Integración SIEM
+En **Configuración › 2FA** cada usuario activa el doble factor: escanea el QR con una app TOTP,
+guarda los **códigos de recuperación** (solo se muestran una vez) y confirma con un código. A partir
+de ahí el login pide contraseña y código.
 
-Envía hallazgos a tu SIEM desde *Ajustes* o `config.yaml`: **Wazuh** (UDP/API),
-**Elasticsearch**, **Splunk HEC**. Útil para correlacionar con el resto de tu telemetría.
+## 6. Organizaciones (multi-tenant)
 
-## 6b. Ticketing (Jira / ServiceNow)
+Con `multi_tenant.enabled: true`, el admin de la plataforma gestiona organizaciones en
+**Configuración › Organizaciones** (alta con su primer administrador, nueva clave de agente, baja) y
+puede verlas con el selector de la cabecera. Cada organización entra escribiendo su identificador en
+el campo *Organización* del login y solo ve sus datos; las funciones que actúan sobre el propio
+servidor (menú Sistema, Monitor y la configuración global) no le aparecen. Detalle en el
+[README](../README.md#multi-tenant).
 
-Desde *Ajustes → Ticketing* (o `config.yaml`), abre un ticket automáticamente en
-**Jira Cloud** o **ServiceNow** cuando la auditoría diaria detecta un hallazgo **nuevo**
-por encima del umbral de severidad configurado (por defecto, solo *critical*). Solo se
-abre un ticket la primera vez que aparece: mientras el hallazgo siga sin remediar en
-días sucesivos no se duplica. Usa *«Crear ticket de prueba»* para verificar la conexión
-antes de dejarlo en producción.
+## 7. Programación y monitorización
 
-## 6c. Compliance en tiempo real
+- **Tareas programadas** (Configuración › Scheduler): auditoría diaria 02:00, malware semanal
+  (lunes 03:00), red diaria 04:00 y actualización semanal de reglas YARA. Se pueden pausar o lanzar al momento.
+- **Monitor en tiempo real** (Gestión › Monitor): comandos sospechosos y cambios en ficheros críticos;
+  usa `bpftrace` (eBPF) o, si no está, `auditd`. Necesita privilegios y kernel real (no funciona en un
+  contenedor sin privilegios).
 
-Cada auditoría diaria compara tu cumplimiento normativo (**ENS, ISO 27001, PCI-DSS,
-CIS Controls**) con el del día anterior. Si un hallazgo nuevo tumba un control que
-antes pasaba y el porcentaje de cumplimiento de algún marco baja, te avisa por el
-mismo canal que las demás notificaciones (email/webhook, configurable en *Ajustes*).
-No hace falta configurar nada aparte: se activa solo en cuanto haya dos auditorías
-que comparar. El detalle por marco/control sigue disponible en **Informes → Informe
-de Compliance**.
+## 8. Integraciones
 
-## 7. Configuración
+Desde **Configuración**: SIEM (**Wazuh**, **Elasticsearch**, **Splunk HEC**), ticketing (**Jira Cloud**
+o **ServiceNow**: un ticket por hallazgo **nuevo** por encima del umbral, sin duplicar a diario),
+notificaciones (email y webhook de Slack/Teams/Discord), **Ansible AWX**, **agentes** (otros servidores
+que envían sus hallazgos a este) y **LDAP/AD**. Cada sección tiene un botón de prueba para verificar la
+conexión antes de dejarla activa.
+
+### Compliance en tiempo real
+
+Cada auditoría diaria compara el cumplimiento (**ENS, ISO 27001, PCI-DSS, CIS Controls**) con el del día
+anterior. Si un hallazgo nuevo hace caer un control y baja el porcentaje de algún marco, avisa por el
+canal de notificaciones configurado. El detalle está en **Informes → Informe de Compliance**.
+
+## 9. Configuración
 
 ```bash
-sudo cyberhound setup    # asistente: contraseña, puerto, API keys, clave SSH
+cyberhound setup --config <fichero>    # asistente: usuario, contraseña, puerto, API keys, clave SSH
 ```
-Fichero: `~/.cyberhound/config.yaml`. Claves de API opcionales (Shodan, VirusTotal,
-AbuseIPDB, GreyNoise, OTX, HIBP) enriquecen el módulo de inteligencia.
 
-## 8. Resolución de problemas
+Lo que se cambia desde la interfaz se guarda en ese mismo `config.yaml`. Las API keys de threat
+intelligence (Shodan, VirusTotal, AbuseIPDB, GreyNoise, OTX, HIBP) son opcionales: sin ninguna, el
+panel Intel lo indica.
+
+## 10. Resolución de problemas
 
 | Síntoma | Causa / solución |
 |---|---|
-| Arranca en HTTP "inseguro" | El dir `~/.cyberhound/tls` no es escribible → `sudo chown -R $USER ~/.cyberhound` |
-| Nuclei devuelve 0 hallazgos | Falta el binario o las plantillas → instala `nuclei` + `nuclei -update-templates` |
-| "OS detection requiere root" | Ejecuta el scan de red con `sudo` |
-| Monitor eBPF inactivo | Instala `auditd`/`bpftrace`; en contenedor no privilegiado no funciona |
+| Arranca en HTTP "inseguro" | No pudo crear el certificado: el directorio de datos (`CH_DATA_DIR`, por defecto `~/.cyberhound`) no es escribible |
+| "Errores de configuración" al arrancar | El mensaje dice qué campo y en qué fichero; p. ej. falta la contraseña → `cyberhound setup --config <fichero>` |
+| Nuclei devuelve 0 hallazgos | Falta el binario o las plantillas: instala `nuclei` + `nuclei -update-templates` |
+| "OS detection requiere root" | Ejecuta CyberHound como root (o el análisis de red con `sudo`) |
+| Monitor inactivo | Instala `auditd` o `bpftrace`; en un contenedor sin privilegios no funciona |
+| Intel: "No hay ninguna API key" | Configura al menos una en Configuración › API Keys |
+| Botones en gris | Tu rol (o tu organización) no permite esa acción; pásale el cursor por encima para verlo |
 
 ---
 
-> Para la referencia técnica completa (API REST/WebSocket, arquitectura, checks),
-> ver el [README](../README.md).
+> Para la referencia técnica (API REST/WebSocket, arquitectura, checks, seguridad), ver el
+> [README](../README.md).

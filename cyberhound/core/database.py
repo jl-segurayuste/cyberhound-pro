@@ -22,6 +22,7 @@ import aiosqlite
 
 from cyberhound.core.logging import get_logger
 from cyberhound.core.models import Finding
+from cyberhound.core.paths import DATA_DIR
 
 logger = get_logger("database")
 
@@ -47,7 +48,7 @@ MIGRATIONS: list[tuple[int, str]] = [
         ALTER TABLE users ADD COLUMN totp_last_counter INTEGER;
     """),
 ]
-DEFAULT_DB_PATH = Path.home() / ".cyberhound" / "cyberhound.db"
+DEFAULT_DB_PATH = DATA_DIR / "cyberhound.db"
 
 SCHEMA = """
 PRAGMA journal_mode=WAL;
@@ -528,7 +529,7 @@ class Database:
             await db.commit()
 
     async def update_user(self, username: str, **kwargs) -> None:
-        allowed = {"password_hash", "role", "active"}
+        allowed = {"password_hash", "role", "active", "totp_secret"}
         fields = {k: v for k, v in kwargs.items() if k in allowed}
         if not fields:
             return

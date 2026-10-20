@@ -284,3 +284,47 @@ class TestTOTPManagerAntiReplay:
         # consumido: no debe volver a funcionar
         ok2, _ = await TOTPManager(db).verify("admin", codes[0])
         assert ok2 is False
+
+
+# ── Secreto cifrado en la BD (antes iba en claro) ─────────────────────────────
+
+async def test_secreto_totp_cifrado_en_la_bd_y_migracion(tmp_path):
+    import json
+
+    from cyberhound.core import passwords, totp
+    from cyberhound.core.database import Database, UserRecord
+    from cyberhound.core.totp import TOTPManager
+    db = Database(tmp_path / "t.db")
+    await db.init()
+    await db.create_user(UserRecord(username="u", password_hash=passwords.hash_password("x" * 10)))
+    mgr = TOTPManager(db, key="clave-instancia")
+    data = await mgr.setup_2fa("u")
+    assert (await db.get_totp_pending("u"))["secret"].startswith("enc:v1:")
+    assert data["secret"] not in json.dumps(await db.get_totp_pending("u"))
+    assert await mgr.activate_2fa("u", totp.generate_totp(data["secret"]))
+    stored = (await db.get_user("u"))["totp_secret"]
+    assert stored.startswith("enc:v1:") and data["secret"] not in stored
+    import time
+    ok, _ = await mgr.verify("u", totp.generate_totp(data["secret"], timestamp=time.time() + 30))
+    assert ok
+    # otra clave (auth.secret cambiado): el TOTP no vale, los códigos de recuperación sí
+    other = TOTPManager(db, key="otra-clave")
+    assert not (await other.verify("u", totp.generate_totp(data["secret"], timestamp=time.time() + 60)))[0]
+    assert (await other.verify("u", data["recovery_codes"][0]))[0]
+
+
+async def test_secreto_antiguo_en_claro_se_cifra_al_entrar(tmp_path):
+    import time
+
+    from cyberhound.core import passwords, totp
+    from cyberhound.core.database import Database, UserRecord
+    from cyberhound.core.totp import TOTPManager
+    db = Database(tmp_path / "t.db")
+    await db.init()
+    await db.create_user(UserRecord(username="u", password_hash=passwords.hash_password("x" * 10)))
+    secret = totp.generate_secret()
+    await db.set_totp_pending("u", secret, totp.generate_recovery_codes())     # como antes: en claro
+    await TOTPManager(db).activate_2fa("u", totp.generate_totp(secret))
+    assert (await db.get_user("u"))["totp_secret"] == secret
+    ok, _ = await TOTPManager(db, key="k").verify("u", totp.generate_totp(secret, timestamp=time.time() + 30))
+    assert ok and (await db.get_user("u"))["totp_secret"].startswith("enc:v1:")

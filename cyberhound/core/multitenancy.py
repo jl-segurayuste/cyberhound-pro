@@ -34,6 +34,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from cyberhound.core.logging import get_logger
+from cyberhound.core.paths import DATA_DIR
 
 logger = get_logger("multitenancy")
 
@@ -199,7 +200,7 @@ class TenantDatabases:
     def __init__(self, default_db, db_url: str = "", db_path: str = "") -> None:
         self._dbs = {DEFAULT_TENANT: default_db}
         self._db_url = db_url or ""
-        self._dir = (Path(db_path).parent if db_path else Path.home() / ".cyberhound") / "tenants"
+        self._dir = (Path(db_path).parent if db_path else DATA_DIR) / "tenants"
 
     @property
     def default(self):

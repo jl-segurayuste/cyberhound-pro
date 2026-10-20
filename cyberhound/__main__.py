@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 
 from cyberhound import __version__
+from cyberhound.core.config import DEFAULT_CONFIG_PATH
 
 
 def _check_dependencies() -> list[str]:
@@ -43,14 +44,20 @@ def main() -> None:
         "--host",
         help="Interfaz de escucha (por defecto server.host: solo localhost). Usa 0.0.0.0 para exponer en la red.",
     )
-    web_p.add_argument("--config", default=str(Path.home() / ".cyberhound" / "config.yaml"))
+    web_p.add_argument("--config", default=str(DEFAULT_CONFIG_PATH))
     web_p.add_argument("--no-auth", action="store_true", help="Sin autenticación (solo localhost)")
     web_p.add_argument("--tls-cert", help="Ruta al certificado TLS")
     web_p.add_argument("--tls-key", help="Ruta a la clave TLS privada")
 
     # setup — configura contraseña y genera config inicial
     setup_p = sub.add_parser("setup", help="Configuración inicial (contraseña, API keys)")
-    setup_p.add_argument("--config", default=str(Path.home() / ".cyberhound" / "config.yaml"))
+    setup_p.add_argument("--config", default=str(DEFAULT_CONFIG_PATH))
+    # Modo no interactivo (instaladores): la contraseña llega por stdin, nunca en la línea de comandos
+    setup_p.add_argument("--username", help="Usuario admin")
+    setup_p.add_argument("--password-stdin", action="store_true", help="Leer la contraseña de stdin (sin preguntar nada)")
+    setup_p.add_argument("--host", help="Interfaz de escucha (127.0.0.1 = solo este equipo, 0.0.0.0 = la red)")
+    setup_p.add_argument("--port", type=int, help="Puerto HTTPS")
+    setup_p.add_argument("--db-url", help="postgresql://usuario:clave@host:5432/bd (vacío = SQLite)")
 
     # version
     sub.add_parser("version", help="Muestra la versión")
@@ -80,7 +87,10 @@ def main() -> None:
     from cyberhound.core.logging import setup_logging
 
     if args.command == "setup":
-        _run_setup(Path(args.config))
+        if args.password_stdin:
+            _run_setup_unattended(Path(args.config), args)
+        else:
+            _run_setup(Path(args.config))
         return
 
     # Cargar configuración
@@ -109,6 +119,27 @@ def main() -> None:
         asyncio.run(server.start())
     except KeyboardInterrupt:
         print("\n✓ CyberHound detenido.")
+
+
+def _run_setup_unattended(config_path: Path, args) -> None:
+    """`cyberhound setup --password-stdin`: lo que usa install.sh."""
+    from cyberhound.core.config import CyberHoundConfig
+    cfg = CyberHoundConfig.load(config_path) if config_path.exists() else CyberHoundConfig()
+    cfg.config_path = config_path
+    password = sys.stdin.readline().rstrip("\n")
+    if len(password) < 8:
+        print("❌ La contraseña debe tener al menos 8 caracteres.", file=sys.stderr)
+        sys.exit(1)
+    cfg.auth.username = args.username or cfg.auth.username
+    cfg.auth.password_hash = CyberHoundConfig.hash_password(password)
+    if args.host:
+        cfg.server.host = args.host
+    if args.port:
+        cfg.server.port = args.port
+    if args.db_url is not None:
+        cfg.db_url = args.db_url
+    cfg.save(config_path)
+    print(f"✓ Configuración guardada en {config_path}")
 
 
 def _run_setup(config_path: Path) -> None:

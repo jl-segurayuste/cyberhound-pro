@@ -2,11 +2,11 @@
 
 **Plataforma de auditoría, seguridad y monitoreo continuo para PYMEs**
 
-> Analiza tu red, servidores, contenedores y código. Detecta vulnerabilidades, malware y configuraciones inseguras. Corrige automáticamente. Monitoriza en tiempo real.
+> Analiza tu red, servidores, contenedores, webs y código. Detecta vulnerabilidades, malware y configuraciones inseguras, corrige con un clic (y deshace) y vigila en tiempo real. Una instancia o varias organizaciones aisladas (multi-tenant).
 
 [![Versión](https://img.shields.io/badge/versión-v6.4.0-blue.svg)](cyberhound/__init__.py)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://python.org)
-[![Tests](https://img.shields.io/badge/tests-645%20passed-green.svg)](#tests)
+[![Tests](https://img.shields.io/badge/tests-690%20passed-green.svg)](#tests)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
 
 ---
@@ -16,36 +16,42 @@
 - [¿Qué hace?](#qué-hace)
 - [Capturas](#capturas)
 - [Requisitos](#requisitos)
-- [Instalación rápida](#instalación-rápida)
+- [Instalación](#instalación)
+- [Usuarios, roles y 2FA](#usuarios-roles-y-2fa)
+- [Multi-tenant](#multi-tenant)
 - [Funcionalidades](#funcionalidades)
 - [Arquitectura](#arquitectura)
-- [Checks de hardening](#checks-de-hardening-26-checks)
+- [Checks de hardening](#checks-de-hardening-31-checks)
 - [Checks Docker y Kubernetes](#checks-docker-y-kubernetes)
 - [API REST y WebSocket](#api-rest-y-websocket)
 - [Seguridad implementada](#seguridad-implementada)
-- [SIEM — Integración externa](#siem--integración-externa)
+- [Integraciones](#integraciones)
 - [Configuración](#configuración)
 - [Tests](#tests)
 - [Roadmap](#roadmap)
+- [Licencia](#licencia)
 
 ---
 
 ## ¿Qué hace?
 
-CyberHound Pro es una herramienta todo-en-uno de ciberseguridad orientada a entornos Linux sin equipo de seguridad dedicado:
+CyberHound Pro es una herramienta todo-en-uno de ciberseguridad para entornos Linux sin equipo de seguridad dedicado:
 
 | Módulo | Descripción |
 |--------|-------------|
-| **🔍 Hardening Audit** | 26 checks de configuración con corrección automática |
-| **📡 Network Scan** | Descubrimiento de red, OS detection, CVEs via nmap |
-| **🖥️ SSH Audit** | Audit remoto de múltiples hosts en paralelo |
-| **🦠 Malware Scan** | YARA, hashes (VT/MalwareBazaar), auditd, cron, webshells |
-| **🐳 Docker + K8s** | 7 checks Docker + 11 checks Kubernetes |
-| **📝 Code Audit** | bandit, shellcheck, eslint + detección de secretos |
-| **🌐 Intel** | Shodan, VirusTotal, AbuseIPDB, GreyNoise, HIBP |
-| **📊 Scoring** | Score contextual 0-100 con factor de exposición |
-| **📡 Monitoreo** | Panel de actividad en tiempo real, alertas automáticas |
-| **🛡 SIEM** | Wazuh, Elasticsearch, Splunk HEC |
+| **Hardening** | 31 checks del sistema con corrección automática (y deshacer) de la mayoría |
+| **Red** | Descubrimiento (nmap/arp-scan), sistema operativo, CVEs y auditoría SSH de cada host |
+| **SSH remoto** | Auditoría de varios hosts en paralelo y corrección remota segura |
+| **Malware** | YARA, hashes (VirusTotal/MalwareBazaar), auditd, cron y webshells; cuarentena |
+| **Docker + K8s** | 7 checks de Docker + 11 de Kubernetes; análisis de imágenes y de contenedores en vivo |
+| **Código** | bandit, shellcheck, eslint y detección de secretos (gitleaks → trufflehog → semgrep → regex) |
+| **Web** | TLS/SSL, cabeceras de seguridad, exposición (`.git`, `.env`, backups), API/CORS, Nuclei |
+| **DNS** | SPF, DMARC, DKIM, DNSSEC, CAA y subdominios por Certificate Transparency |
+| **Threat intel** | Shodan, VirusTotal, AbuseIPDB, GreyNoise, AlienVault OTX y Have I Been Pwned |
+| **Scoring** | Score contextual 0-100 (A-F) con factor de exposición |
+| **Compliance** | ENS, ISO 27001:2022, PCI-DSS v4.0 y CIS Controls v8, con aviso si baja |
+| **Monitor** | Procesos y ficheros críticos en tiempo real (eBPF con bpftrace, o auditd) |
+| **Integraciones** | SIEM (Wazuh, Elasticsearch, Splunk), Jira/ServiceNow, email/webhooks, AWX, agentes |
 
 ---
 
@@ -90,7 +96,7 @@ SPF, DMARC, DKIM, DNSSEC y CAA.
 
 ### Red › Intel
 
-Consulta de IPs, dominios y hashes en Shodan, VirusTotal, AbuseIPDB, GreyNoise.
+IPs, dominios, hashes y emails en Shodan, VirusTotal, AbuseIPDB, GreyNoise, OTX y HIBP.
 
 <img src="docs/img/capturas/intel.png" alt="Red › Intel">
 
@@ -174,7 +180,7 @@ HTML, PDF, playbook Ansible, JSON para SIEM, compliance e importación de audito
 
 ### Gestión › Configuración
 
-API keys, notificaciones, SIEM, ticketing, scheduler, usuarios, 2FA, YARA, agentes, licencia, LDAP, cuarentena, SBOM, Ansible.
+API keys, notificaciones, SIEM, ticketing, scheduler, usuarios, supresiones, 2FA, YARA, agentes, LDAP, cuarentena, SBOM, Ansible y organizaciones (multi-tenant).
 
 <img src="docs/img/capturas/settings.png" alt="Gestión › Configuración">
 
@@ -186,12 +192,9 @@ API keys, notificaciones, SIEM, ticketing, scheduler, usuarios, 2FA, YARA, agent
 
 ### Sistema
 - **SO**: Linux x86_64 (Ubuntu 22.04/24.04, Debian 12/13, RHEL/Rocky/Alma 9+).
-- **Python**: 3.12+ (solo para instalación manual; con Docker no hace falta).
-- **Privilegios**: varios scanners y los auto-fixes requieren `root`/`sudo`
-  (nmap OS detection, `auditd`, monitor eBPF, remediaciones de hardening). La
-  interfaz web puede ejecutarse sin root.
-- **Red**: salida a internet para feeds opcionales (CVEs, plantillas de Nuclei,
-  threat intelligence). Funciona en entornos aislados con cobertura reducida.
+- **Python**: 3.11 o superior (solo para la instalación manual; la imagen Docker lo trae).
+- **Privilegios**: varios análisis y las correcciones requieren `root` (detección de SO con nmap, `auditd`, monitor eBPF, fixes de hardening). La interfaz web puede ejecutarse sin root.
+- **Red**: salida a internet para lo opcional (CVEs, plantillas de Nuclei, threat intelligence). Funciona en entornos aislados con cobertura reducida.
 
 ### Hardware
 
@@ -201,40 +204,94 @@ API keys, notificaciones, SIEM, ticketing, scheduler, usuarios, 2FA, YARA, agent
 | **RAM** | 2 GB | 8 GB |
 | **Disco** | 3 GB | 15+ GB SSD |
 
-- Base (app + BD SQLite + logs): ~1 GB.
-- **Plantillas de Nuclei**: ~1,5 GB adicionales (si usas ese scanner).
-- El escaneo de **malware (YARA sobre el sistema de ficheros)** y **Nuclei** con
-  todas las plantillas son lo que más CPU/RAM consume; sube recursos si los usas
-  de forma intensiva. Para un homelab/PYME pequeña, 2 vCPU / 4 GB / 10 GB sobran.
+- Base (app + BD SQLite + logs): ~1 GB. **Plantillas de Nuclei**: ~1,5 GB adicionales.
+- Lo que más consume es YARA sobre el sistema de ficheros y Nuclei con todas las plantillas. Para un homelab o PYME pequeña bastan 2 vCPU / 4 GB / 10 GB.
 
 ---
 
-## Instalación rápida
+## Instalación
 
-### Docker (recomendado)
+### Docker (un servidor, SQLite)
 
 ```bash
 git clone https://github.com/jl-segurayuste/cyberhound-pro.git
 cd cyberhound-pro
-cp .env.example .env
-nano .env        # Cambiar CH_PASSWORD
+cp .env.example .env          # opcional: CH_PASSWORD, CH_HOST, API keys…
 docker compose up -d
-# Abrir https://localhost:8443
+docker compose logs cyberhound | grep -i contraseña   # si no definiste CH_PASSWORD
 ```
 
-### Manual (Linux)
+Abre **https://localhost:8443** (certificado autofirmado: el navegador avisará). Usa la imagen que publica el CI (`ghcr.io/jl-segurayuste/cyberhound-pro:latest`); `docker compose build` construye una local con el código del repo.
+
+- El contenedor usa la red del host (`network_mode: host`) para poder descubrir la LAN. Por defecto escucha solo en `127.0.0.1`; `CH_HOST=0.0.0.0` lo expone a la red.
+- Todo lo persistente (configuración, BD, cuarentena, reglas YARA, certificado) vive en el volumen `/data`.
+- `CH_PASSWORD` solo se usa al crear `/data/config.yaml` la primera vez. Después: `docker exec -it cyberhound cyberhound setup --config /data/config.yaml`.
+
+### Producción (PostgreSQL + nginx + copias)
+
+```bash
+cp .env.example .env          # obligatorio: CH_PASSWORD y POSTGRES_PASSWORD; opcional CH_DOMAIN
+docker compose -f docker-compose.production.yml up -d
+```
+
+| Servicio | Qué hace |
+|---|---|
+| `postgres` | PostgreSQL 16 en una red interna sin salida |
+| `cyberhound` | La aplicación, con `CH_DB_URL` hacia PostgreSQL y solo accesible por nginx |
+| `certs` | Genera un certificado autofirmado para nginx si no pones el tuyo en `docker/nginx/certs/` |
+| `nginx` | TLS, HTTP→HTTPS y rate limit en `/login` y `/api/` (puertos `CH_HTTP_PORT`/`CH_HTTPS_PORT`) |
+| `backup` | `pg_dump` al arrancar y cada 24 h; conserva las 30 últimas copias |
+
+El rate limit de la aplicación ve la IP real del cliente (`CH_TRUSTED_PROXIES=nginx`).
+
+### Manual (Linux, servicio systemd)
 
 ```bash
 git clone https://github.com/jl-segurayuste/cyberhound-pro.git
 cd cyberhound-pro
-chmod +x install.sh && ./install.sh
-sudo cyberhound web --port 8443
+sudo bash install.sh                      # solo accesible desde este equipo
+sudo bash install.sh --host 0.0.0.0       # accesible desde la red
+sudo bash install.sh --postgres           # PostgreSQL local en lugar de SQLite
 ```
 
-**Cambiar contraseña:**
-```bash
-sudo cyberhound setup
+Instala en `/opt/cyberhound`, crea `/root/.cyberhound/config.yaml` con una contraseña aleatoria (la muestra una vez) y el servicio `cyberhound`. Probado en Ubuntu 24.04 y Debian 12. Para cambiar la contraseña: `sudo cyberhound setup --config /root/.cyberhound/config.yaml`.
+
+---
+
+## Usuarios, roles y 2FA
+
+El administrador de `config.yaml` (`auth.username`) siempre es admin. Desde **Configuración › Usuarios** se crean más, con uno de estos roles:
+
+| Rol | Puede |
+|---|---|
+| `viewer` | Ver todo (panel, historial, informes) |
+| `operator` | Lo anterior + lanzar análisis y aplicar correcciones |
+| `admin` | Lo anterior + configuración, usuarios y supresiones |
+
+El servidor aplica los permisos en cada petición; la interfaz desactiva lo que el rol no permite. Un admin no puede quitarse su propio rol ni desactivarse. Cada usuario puede activar **2FA (TOTP)** con códigos de recuperación de un solo uso.
+
+---
+
+## Multi-tenant
+
+Para un MSP o una instancia compartida: varias organizaciones **aisladas** en un solo CyberHound. Se activa con
+
+```yaml
+multi_tenant:
+  enabled: true
 ```
+
+y se gestionan en **Configuración › Organizaciones** (alta con su primer administrador, nueva clave de agente, baja).
+
+- **Datos separados**: cada organización tiene su propia base de datos (un fichero SQLite en `<dir de la BD>/tenants/<slug>.db` o un esquema `tenant_<slug>` en PostgreSQL): escaneos, hallazgos, activos, supresiones, usuarios, 2FA y agentes. La organización "Plataforma" es la BD de siempre, así que activarlo no mueve datos.
+- **Login por organización**: el formulario pide la organización (o la toma del subdominio, `acme.cyberhound.ejemplo-demo.es`). La sesión queda ligada a ella y no se puede cambiar.
+- **Superadmin**: el admin de `config.yaml` (organización vacía en el login) gestiona las organizaciones y puede ver cualquiera con el selector de la cabecera.
+- **Reservado a la plataforma**: lo que actúa sobre el propio servidor o es configuración global (auditoría local, malware, Docker, servicios, código, fixes locales, cuarentena, YARA, SBOM, monitor, Ansible, scheduler, API keys, SIEM, notificaciones, ticketing). Una organización usa los análisis de red, web, DNS, intel, SSH remoto, LDAP e importación.
+- **Agentes**: cada organización tiene su clave de agente (la ve su admin en Configuración › Agentes); sus informes solo llegan a ella.
+- **Baja**: corta al momento sesiones y clave de agente y **archiva** sus datos (no se borran). Si se vuelve a crear el mismo identificador, empieza vacío.
+- Los análisis de una organización salen desde el servidor de la plataforma: limita con el firewall a qué redes puede llegar.
+
+<p><img src="docs/img/capturas/organizaciones.png" alt="Configuración › Organizaciones" width="640"> <img src="docs/img/capturas/login-organizacion.png" alt="Login con organización" width="300"></p>
 
 ---
 
@@ -242,57 +299,54 @@ sudo cyberhound setup
 
 ### Panel de actividad en tiempo real
 
-El panel lateral muestra en tiempo real cada hallazgo conforme se detecta, con:
-- Icono de severidad (🔴 crítico, 🟠 alto, 🟡 medio, 🔵 bajo)
-- Barra de progreso animada por cada scan activo
-- Contadores en tiempo real (críticos, altos, medios)
-- Apertura automática cuando aparece un hallazgo crítico
-- Monitoreo periódico de nuevos dispositivos en la red (cada 15 min)
+Cada hallazgo aparece conforme se detecta (WebSocket), con barra de progreso por análisis y contadores por severidad. El panel se abre solo ante un hallazgo crítico y la red se revisa cada 15 minutos en busca de dispositivos nuevos.
 
-### Escaneos paralelos
+### Análisis en paralelo
 
-Puedes ejecutar múltiples análisis simultáneamente:
-- Lanzar Docker scan mientras corre el Network scan
-- Malware scan en segundo plano mientras revisas resultados del audit
-- Cada scan tiene su propia barra de progreso independiente
+Se pueden lanzar varios a la vez (red mientras corre Docker, malware en segundo plano…), cada uno con su progreso.
 
 ### Scoring contextual (0-100)
 
-El score no es una simple resta de puntos — tiene en cuenta:
-
 | Factor | Impacto |
 |--------|---------|
-| Categoría | `docker/escape` ×2.0, `ssh` ×1.5, `updates` ×0.7 |
-| Exposición | Internet-facing +40%, web server +20% |
-| Auto-fix disponible | Penalización -25% (el riesgo es manejable) |
-| Acumulación | El décimo finding del mismo tipo pesa ×0.8^9 menos |
-| Bonus | +2pts si SSH bien configurado, +2pts si firewall OK |
+| Categoría | `docker/escape` ×2.0, `ssh` y `firewall` ×1.5, `network` ×1.4, `updates` ×0.7… |
+| Exposición | Expuesto a internet ×1.4, servidor web ×1.2 |
+| Corrección automática disponible | ×0.75 (el riesgo es manejable) |
+| Acumulación | Cada hallazgo repetido de la misma categoría pesa ×0.8 respecto al anterior |
+| Bonus | +2 firewall bien, +2 SSH bien, +1 autenticación bien |
 
-Grades: **A** (≥90) · **B** (≥75) · **C** (≥60) · **D** (≥40) · **F** (<40)
+Grados: **A** (≥90) · **B** (≥75) · **C** (≥60) · **D** (≥40) · **F** (<40)
 
-### Corrección automática
+### Corrección automática y deshacer
 
-Los hallazgos con ⚡ pueden corregirse con un clic, tanto en local como en hosts remotos vía SSH:
+Los hallazgos con ⚡ se corrigen con un clic, en local o en el host remoto donde se encontraron:
 
-| Categoría | Ejemplos de fixes |
-|-----------|------------------|
-| SSH | PermitRootLogin no, PasswordAuthentication no, MaxAuthTries 4 |
-| Firewall | ufw enable, systemctl enable --now firewalld |
-| Kernel | sysctl -w + persistencia en /etc/sysctl.d/ |
-| Auth | pam_faillock, login.defs policy |
-| Sistema | ctrl-alt-del mask, USB blacklist, core dumps off |
-| Banners | Crear /etc/issue, /etc/issue.net, /etc/motd |
-| NTP | apt install chrony + enable |
-| OpenSSH CVE | apt upgrade openssh-server |
+| Categoría | Ejemplos |
+|-----------|----------|
+| SSH | PermitRootLogin no, PasswordAuthentication no, MaxAuthTries 4, permisos de las claves de host |
+| Firewall | ufw / firewalld (antes de activar ufw abre SSH y el puerto de la web: no te deja fuera) |
+| Kernel | `sysctl -w` + persistencia en `/etc/sysctl.d/99-cyberhound.conf` |
+| Autenticación | pam_faillock, políticas de `login.defs`, bloquear cuentas sin contraseña |
+| Sistema | core dumps, almacenamiento USB, Ctrl+Alt+Del, AppArmor, auditd, AIDE, NTP, umask, banners |
+| Ficheros | world-writable, permisos de logs, `/etc/passwd` y `/etc/shadow`, sticky bit de `/tmp` |
+| OpenSSH | actualización del paquete ante CVEs conocidos |
 
-#### Rollback (deshacer un fix)
+- **Deshacer** (fixes locales): cada fix guarda en un journal lo necesario para revertirlo (copia del fichero, permisos previos, estado del servicio o comando inverso) y el botón pasa a **↶ Deshacer**. Las instalaciones de paquetes se marcan como no reversibles: no se desinstala nada a ciegas.
+- **Corrección remota**: el comando lo construye CyberHound a partir del hallazgo (nunca se ejecuta lo que devuelve el host auditado) y se lanza por SSH sin shell, con `sudo -n` si está disponible.
 
-Cada fix **local** se registra en un *journal* (`<log_dir>/rollback-journal.jsonl`) con lo
-necesario para revertirlo: snapshot del fichero modificado, modo de permisos previo, estado
-del servicio o el comando inverso. Tras aplicar un fix reversible, el botón pasa a **«↶ Deshacer»**;
-también vía API: `GET /api/rollback` (lista lo reversible) y `POST /api/rollback/local`
-(`{"finding_id": "..."}`). Las instalaciones de paquetes se marcan **no reversibles** (no se
-desinstalan a ciegas): el rollback lo informa en vez de hacer algo peligroso.
+### Threat intelligence
+
+Busca IPs, dominios, hashes (MD5/SHA1/SHA256) o emails en las fuentes con API key configurada, o analiza de golpe las IPs del último escaneo de red. Cada respuesta se traduce en hallazgos con severidad (p. ej. AbuseIPDB ≥75 % → crítico, CVEs en Shodan, detecciones de VirusTotal, pulsos de OTX, brechas de HIBP).
+
+### Más
+
+- **Cuarentena**: aparta un fichero sospechoso a `<datos>/quarantine/` ofuscado (XOR, no es cifrado: evita que se ejecute o que el antivirus lo vuelva a detectar) y permite restaurarlo verificando su SHA-256.
+- **SBOM**: CycloneDX 1.4 y SPDX 2.3 de paquetes pip/npm/del sistema, con diferencias entre versiones.
+- **Compliance**: cumplimiento de ENS, ISO 27001, PCI-DSS y CIS a partir de los hallazgos, en el informe PDF y con aviso si baja de un día a otro.
+- **Informes**: HTML, PDF, JSON y playbook de Ansible con las correcciones.
+- **Importación**: Nessus, OpenSCAP/XCCDF (RHEL STIG/CIS), CSV y JSON.
+- **Supresiones**: patrones de falsos positivos con motivo y caducidad.
+- **Explicación con IA**: un LLM local (Ollama) explica un hallazgo en lenguaje llano (opcional).
 
 ---
 
@@ -300,98 +354,83 @@ desinstalan a ciegas): el rollback lo informa en vez de hacer algo peligroso.
 
 ```
 cyberhound/
+├── __init__.py              # __version__ (única fuente de la versión)
 ├── __main__.py              # CLI: web / setup / version
-├── pyproject.toml           # v6.1.0, deps, pytest config
-│
-├── core/
-│   ├── models.py            # Finding, HostResult, ScanReport
-│   ├── config.py            # YAML + env vars + validate() eager
-│   ├── auth.py              # JWT HS256 + rate limiting + CSRF
-│   ├── security.py          # RateLimiter, InputValidator, TLSManager, CSRF
-│   ├── logging.py           # JSON estructurado + journald + SecurityAuditLogger
-│   ├── executor.py          # Comandos async + ThreadPoolExecutor
-│   ├── database.py          # SQLite WAL: scans, findings, assets, suppressions, users
-│   ├── scheduler.py         # Loop asyncio: audit 02:00, malware lun 03:00, network 04:00
-│   ├── notifications.py     # Email SMTP+TLS + webhooks Slack/Teams
-│   ├── scoring.py           # Motor de scoring contextual (5 factores)
-│   └── siem.py              # Wazuh UDP/API + Elasticsearch + Splunk HEC
-│
-├── scanners/
-│   ├── hardening.py         # 26 checks + HardeningFixer (todos los fixes)
-│   ├── malware.py           # YARA + MalwareBazaar/VT + auditd + cron + webshells
-│   ├── network.py           # nmap XML, OS detection, CVEs, risk level
-│   ├── ssh_audit.py         # asyncssh, SFTP para script remoto, whitelist fixes
-│   ├── docker_scan.py       # 7 checks Docker + integración K8s
-│   ├── kubernetes_scan.py   # 11 checks Kubernetes via kubectl
-│   ├── code.py              # bandit + shellcheck + eslint
-│   ├── secrets.py           # gitleaks → trufflehog → semgrep → regex
-│   ├── intel.py             # Shodan, VT, AbuseIPDB, GreyNoise, OTX, HIBP
-│   ├── nuclei_scan.py       # motor Nuclei (ProjectDiscovery) → Finding normalizado
-│   └── reports.py           # HTML + Ansible playbook
-│
 ├── api/
-│   └── server.py            # aiohttp + WebSocket streaming + 25+ endpoints REST
-│
-└── ui/static/
-    ├── index.html           # SPA — 9 secciones + panel de actividad
-    ├── style.css            # Dark theme corporativo
-    └── app.js               # WebSocket, dashboard, scoring, actividad en tiempo real
+│   ├── server.py            # aiohttp: UI, WebSocket, API REST, middlewares (CSP, auth, tenant, RBAC)
+│   └── routes/intel_routes.py
+├── core/
+│   ├── auth.py              # login, JWT, 2FA, rate limit del login
+│   ├── security.py          # validación de entradas, IP real tras proxies, CSRF/origen, TLS
+│   ├── passwords.py         # PBKDF2-HMAC-SHA256
+│   ├── totp.py              # 2FA TOTP (secreto cifrado en la BD) y códigos de recuperación
+│   ├── config.py · paths.py # YAML + variables de entorno · directorio de datos (CH_DATA_DIR)
+│   ├── database.py          # SQLite (WAL)
+│   ├── database_pg.py       # PostgreSQL (asyncpg), misma interfaz
+│   ├── multitenancy.py      # tenants, BD por tenant y enrutado por petición
+│   ├── scoring.py · scheduler.py · notifications.py · siem.py · ticketing.py
+│   ├── agent.py · rollback.py · quarantine.py · ebpf_monitor.py · llm.py
+│   ├── ansible_integration.py · openapi.py · executor.py · logging.py · models.py
+├── scanners/                # hardening, network, ssh_audit, malware, docker_scan, kubernetes_scan,
+│                            # docker_image_scan, runtime_scan, code, secrets, services_audit, tls_scan,
+│                            # web_headers, web_exposure, api_security, dns_security, subdomain_enum,
+│                            # nuclei_scan, intel, ldap_audit, compliance, sbom, audit_import,
+│                            # reports, pdf_report
+└── ui/static/               # SPA: index.html, app.js, style.css (sin JS en línea), Swagger vendorizado
 ```
 
 ---
 
-## Checks de hardening (26 checks)
+## Checks de hardening (31 checks)
+
+⚡ = corrección automática.
 
 ### SSH (`/etc/ssh/sshd_config`)
 | ID | Verifica | Fix |
 |----|---------|-----|
-| `ssh_PermitRootLogin` | PermitRootLogin yes | ✅ |
-| `ssh_PasswordAuthentication` | PasswordAuthentication yes | ✅ |
-| `ssh_PermitEmptyPasswords` | PermitEmptyPasswords yes | ✅ |
-| `ssh_X11Forwarding` | X11Forwarding yes | ✅ |
-| `ssh_MaxAuthTries` | MaxAuthTries > 4 | ✅ |
-| `ssh_protocol1` | Protocol 1 activo | ✅ |
+| `ssh_PermitRootLogin` · `ssh_PasswordAuthentication` · `ssh_PermitEmptyPasswords` · `ssh_X11Forwarding` | Valores inseguros | ⚡ |
+| `ssh_MaxAuthTries` | MaxAuthTries > 4 | ⚡ |
+| `ssh_protocol1` | Protocol 1 activo | ⚡ |
+| `ssh_hostkey_perm_*` | Claves de host con permisos distintos de 600 | ⚡ |
+| `openssh_cve_*` | Versión de OpenSSH con CVEs conocidos | ⚡ actualizar |
 
-### Firewall
+### Firewall y red
 | ID | Verifica | Fix |
 |----|---------|-----|
-| `fw_ufw_inactive` | UFW instalado pero inactivo | ✅ |
-| `fw_firewalld_inactive` | firewalld inactivo | ✅ |
-| `fw_none` | Sin firewall detectado | ❌ manual |
+| `fw_ufw_inactive` · `fw_firewalld_inactive` | Firewall instalado pero inactivo | ⚡ |
+| `fw_none` | Sin firewall | manual |
+| `kernel_*` | 10 parámetros: ip_forward, send_redirects, accept_source_route, ASLR, SYN cookies, log_martians, rp_filter, dmesg_restrict, perf_event_paranoid, IPv6 | ⚡ |
+| `svc_listen_all_*` | Bases de datos/cachés escuchando en 0.0.0.0 | manual |
+| `ipv6_enabled_unused` | IPv6 activo sin uso | manual |
 
-### Kernel (`/proc/sys/`)
-10 parámetros: ASLR, SYN cookies, IP forwarding, ICMP redirects, source routing, log martians, rp_filter, dmesg_restrict, perf_event_paranoid, IPv6. Todos con fix automático vía sysctl + persistencia.
-
-### Autenticación y contraseñas
+### Autenticación y cuentas
 | ID | Verifica | Fix |
 |----|---------|-----|
-| `no_pam_faillock` | pam_faillock no configurado | ✅ |
-| `login_defs_PASS_MAX_DAYS` | > 90 días | ✅ |
-| `login_defs_PASS_MIN_DAYS` | < 1 día | ✅ |
-| `login_defs_PASS_WARN_AGE` | < 7 días aviso | ✅ |
-| `login_defs_LOGIN_RETRIES` | > 5 reintentos | ✅ |
+| `no_pam_faillock` | Sin bloqueo por intentos fallidos | ⚡ |
+| `login_defs_*` | PASS_MAX_DAYS, PASS_MIN_DAYS, PASS_WARN_AGE, LOGIN_RETRIES | ⚡ |
+| `empty_password_*` | Cuentas sin contraseña | ⚡ bloquear |
+| `duplicate_uid0_*` | UID 0 en una cuenta que no es root | manual |
+| `sudoers_nopasswd_*` | NOPASSWD en sudoers | manual |
+| `passwd_perm_*` | Permisos excesivos en `/etc/passwd` o `/etc/shadow` | ⚡ |
+| `grub_no_password` | GRUB sin contraseña | manual |
 
-### Sistema general
+### Sistema
 | ID | Verifica | Fix |
 |----|---------|-----|
-| `check_umask` | umask 022 en /etc/profile | ✅ |
-| `no_ntp` | Sin NTP/chrony activo | ✅ |
-| `no_banner_*` | Banners de login vacíos | ✅ |
-| `empty_password_*` | Cuentas sin contraseña en /etc/shadow | ✅ bloquear |
-| `duplicate_uid0_*` | UID 0 en cuenta que no es root | ❌ manual |
-| `tmp_*_noexec` | /tmp sin noexec/nosuid | ❌ manual |
-| `tmp_no_sticky_bit` | /tmp sin sticky bit | ✅ |
-| `svc_listen_all_*` | Servicios DB/cache en 0.0.0.0 | ❌ manual |
-| `openssh_cve_*` | Versión OpenSSH con CVEs conocidos | ✅ apt upgrade |
-| `ww_*` | Ficheros world-writable | ✅ chmod o-w |
-| `log_perm_*` | Logs legibles por todos | ✅ chmod o-r |
-| `no_auditd` | auditd no instalado/activo | ✅ |
-| `no_aide` | AIDE no instalado | ✅ |
-| `apparmor_inactive` | AppArmor inactivo | ✅ |
-| `core_dumps_enabled` | Core dumps activos | ✅ |
-| `usb_storage_enabled` | USB storage no bloqueado | ✅ |
-| `ctrlaltdel_enabled` | Ctrl+Alt+Del habilitado | ✅ |
-| `no_unattended_upgrades` | Updates automáticos no configurados | ✅ |
+| `svc_*` | Servicios inseguros activos (telnet, rsh, rlogin, finger, talk, tftp, xinetd, nis) | ⚡ desactivar |
+| `no_auditd` · `auditd_inactive` | auditd ausente o parado | ⚡ |
+| `no_aide` · `aide_db_missing` | Sin AIDE o sin su base de datos | ⚡ |
+| `apparmor_inactive` | AppArmor inactivo | ⚡ |
+| `core_dumps_enabled` · `usb_storage_enabled` · `ctrlaltdel_enabled` | Core dumps, USB, Ctrl+Alt+Del | ⚡ |
+| `no_unattended_upgrades` | Sin actualizaciones automáticas | ⚡ |
+| `no_ntp` | Sin NTP/chrony | ⚡ |
+| `umask_insecure_*` | umask permisivo | ⚡ |
+| `no_banner_*` | Banners de login vacíos | ⚡ |
+| `cron_unrestricted` · `cron_no_restriction` · `at_no_restriction` | cron/at sin restringir | manual |
+| `log_perm_*` | Logs legibles por todos | ⚡ |
+| `ww_*` | Ficheros world-writable | ⚡ |
+| `tmp_*` | `/tmp` y `/var/tmp` sin noexec/nosuid | manual |
+| `tmp_no_sticky_bit` | `/tmp` sin sticky bit | ⚡ |
 
 ---
 
@@ -400,68 +439,61 @@ cyberhound/
 ### Docker (7 checks)
 | Check | Severidad | Descripción |
 |-------|-----------|-------------|
-| `containers_root` | High | Contenedores sin runAsUser ni User definido |
-| `privileged` | Critical | Contenedores con `--privileged` |
-| `docker_socket` | Critical | `/var/run/docker.sock` montado |
-| `env_secrets` | High | Credenciales en variables de entorno |
-| `dangerous_mounts` | Critical | Rutas del host como `/etc`, `/proc`, `/` montadas |
-| `old_images` | Medium | Imágenes con más de 90 días sin actualizar |
-| `images_cve` | Critical/High | CVEs en imágenes (requiere Trivy) |
+| Contenedores como root | High | Sin `User` definido |
+| Privilegiados / capacidades | Critical | `--privileged` o capacidades peligrosas |
+| `docker.sock` montado | Critical | Control total del host desde el contenedor |
+| Secretos en variables de entorno | High | Credenciales en `Env` |
+| Montajes peligrosos | Critical | `/etc`, `/proc`, `/`… del host |
+| Imágenes antiguas | Medium | Más de 90 días sin actualizar |
+| CVEs en imágenes | Critical/High | Con Trivy |
 
-### Kubernetes (11 checks via kubectl)
-| Check | Severidad | Descripción |
-|-------|-----------|-------------|
-| `pods_as_root` | High | Pods sin `runAsNonRoot: true` |
-| `privileged_pods` | Critical | Contenedores con `privileged: true` |
-| `rbac_wildcards` | Critical | ClusterRoles con permisos `*` |
-| `automount_service_account` | Medium | Token ServiceAccount no desactivado |
-| `no_network_policy` | High | Namespaces sin NetworkPolicy |
-| `no_resource_limits` | Medium | Contenedores sin límites CPU/memoria |
-| `latest_image_tag` | Low | Imágenes con tag `:latest` |
-| `env_secrets` | High | Secretos hardcodeados en env vars |
-| `dangerous_hostpath` | Critical | HostPath con rutas peligrosas del host |
-| `kubernetes_version` | High | Versión de K8s con CVEs conocidos |
-| `pod_security_standards` | Medium | Namespaces sin Pod Security Admission |
+### Kubernetes (11 checks vía kubectl)
+Pods como root, contenedores privilegiados, ClusterRoles con `*`, token de ServiceAccount montado, namespaces sin NetworkPolicy, contenedores sin límites, imágenes `:latest`, secretos en variables, hostPath peligrosos, versión de Kubernetes con CVEs y namespaces sin Pod Security Admission.
 
 ---
 
 ## API REST y WebSocket
 
+La referencia completa está en **`/api/docs`** (Swagger UI, servida por la propia instancia) y en `/api/openapi.json`: todas las rutas están documentadas (un test lo comprueba). Autenticación: la cookie de sesión del navegador o `Authorization: Bearer <token>`; los agentes usan `Authorization: AgentKey <clave>`.
+
 ### Endpoints principales
 
 | Método | Ruta | Descripción |
 |--------|------|-------------|
-| `GET/POST` | `/login` | Autenticación |
-| `GET` | `/ws` | WebSocket streaming de scans |
-| `GET` | `/health` | Healthcheck |
-| `GET` | `/api/dashboard` | Stats del dashboard |
-| `GET` | `/api/history` | Histórico de scans |
-| `GET` | `/api/history/{id}/compare` | Comparación entre scans |
-| `GET` | `/api/score/trend` | Tendencia de score 30 días |
-| `GET` | `/api/score/detail` | Desglose contextual del score |
-| `GET/POST` | `/api/assets` | Inventario de dispositivos |
-| `POST` | `/api/assets/{ip}/authorize` | Autorizar/denegar dispositivo |
-| `GET/POST/DELETE` | `/api/suppressions` | Gestión de falsos positivos |
-| `GET/POST/PATCH/DELETE` | `/api/users` | Gestión de usuarios |
-| `GET/POST` | `/api/scheduler/{name}/run` | Scheduler de tareas |
-| `POST` | `/api/fix/local` | Aplicar fix local |
-| `POST` | `/api/fix/remote` | Aplicar fix remoto via SSH |
-| `POST` | `/api/report/{html\|ansible}` | Generar informes |
-| `GET/POST` | `/api/config/keys` | API keys |
-| `GET/POST` | `/api/config/notifications` | Config notificaciones |
-| `GET/POST` | `/api/config/siem` | Config SIEM |
-| `POST` | `/api/config/siem/test` | Test de conectividad SIEM |
+| `POST` | `/login` | Inicio de sesión (formulario con CSRF; luego código 2FA si está activo) |
+| `GET` | `/health` | Healthcheck (sin autenticación) |
+| `GET` | `/api/me` | Usuario, rol, permisos y organización de la sesión |
+| `GET` | `/api/dashboard` | Datos del panel |
+| `GET` | `/api/history` · `/api/history/{scan_id}` · `/api/history/{scan_id}/compare` | Historial, detalle y comparación |
+| `GET` | `/api/score/trend` · `/api/score/detail` | Tendencia y desglose del score |
+| `GET` · `POST` | `/api/assets` · `/api/assets/{ip}/authorize` | Inventario de dispositivos |
+| `GET` · `POST` · `DELETE` | `/api/suppressions` | Falsos positivos |
+| `GET` · `POST` · `PATCH` · `DELETE` | `/api/users` | Usuarios |
+| `POST` | `/api/fix/local` · `/api/fix/remote` · `/api/rollback/local` | Corregir y deshacer |
+| `POST` | `/api/report/{html\|ansible\|json}` · `/api/report/pdf` | Informes |
+| `POST` · `GET` | `/api/intel/scan` · `/api/intel/lookup` | Threat intelligence |
+| `GET` · `POST` | `/api/config/{keys\|notifications\|siem\|ticketing\|agent}` | Configuración |
+| `GET` · `POST` · `PATCH` · `DELETE` | `/api/tenants` | Organizaciones (multi-tenant, superadmin) |
+| `GET` | `/metrics` | Métricas Prometheus (sin sesión solo desde el propio host) |
 
-### Tareas WebSocket disponibles
+### Tareas WebSocket (`/ws`)
 
 ```json
 { "task": "audit" }
-{ "task": "malware", "skip": ["hash"], "yara_rules": "/ruta/" }
+{ "task": "malware", "skip": ["hash"], "web_roots": ["/var/www"] }
 { "task": "network", "networks": "192.168.1.0/24", "ssh_audit": true }
-{ "task": "ssh", "hosts": "192.168.1.10,192.168.1.20", "ssh_key": "/ruta" }
+{ "task": "ssh", "hosts": "192.168.1.10,192.168.1.20", "ssh_user": "root" }
 { "task": "docker", "scan_images_cve": true, "scan_k8s": true }
 { "task": "code", "path": "/var/www/html" }
-{ "task": "intel", "target": "1.2.3.4", "modules": ["shodan","virustotal"] }
+{ "task": "services" }
+{ "task": "intel", "target": "203.0.113.7", "modules": ["shodan", "virustotal"] }
+{ "task": "tls", "targets": ["www.ejemplo-demo.es"] }
+{ "task": "web_headers", "urls": ["https://www.ejemplo-demo.es"] }
+{ "task": "web_exposure", "urls": ["https://www.ejemplo-demo.es"] }
+{ "task": "api_security", "urls": ["https://api.ejemplo-demo.es"] }
+{ "task": "nuclei", "urls": ["https://www.ejemplo-demo.es"], "severities": ["high", "critical"] }
+{ "task": "dns", "domains": ["ejemplo-demo.es"] }
+{ "task": "subdomain_enum", "domains": ["ejemplo-demo.es"] }
 ```
 
 ---
@@ -469,90 +501,88 @@ cyberhound/
 ## Seguridad implementada
 
 ### Autenticación y sesión
-- **JWT HS256** con secreto persistente en `config.yaml` (permisos 600)
-- **Cookie** `httponly` + `SameSite=Strict` + `Secure` (dinámico según TLS)
-- **Rate limiting**: 5 intentos/15min → bloqueo 15min/1h/24h (exponencial)
-- **Rate limiting** nunca bloquea localhost
-- **CSRF**: double-submit cookie en formularios POST; `/api/*` exentas (JWT)
-- **JWT expirado**: redirige al login limpiando la cookie inválida
+- Contraseñas con **PBKDF2-HMAC-SHA256** (600 000 iteraciones, sal aleatoria); los hashes SHA-256 antiguos se migran al iniciar sesión.
+- **JWT HS256** con secreto persistente en `config.yaml` (0600), en cookie `HttpOnly` + `SameSite=Strict` + `Secure` con HTTPS.
+- **2FA TOTP** con anti-repetición; el secreto se guarda **cifrado** (Fernet, clave derivada del secreto de la instancia) y los códigos de recuperación como hash. El token intermedio "falta el código" nunca vale como sesión.
+- **Roles** (viewer/operator/admin) aplicados por middleware en cada petición; usuarios desactivados pierden la sesión al instante.
+- **Rate limiting del login**: 5 intentos en 15 min → bloqueo de 15 min, luego 1 h y 24 h. Detrás de un proxy inverso (`server.trusted_proxies`) usa la IP real del cliente; sin él, ignora `X-Forwarded-For` (no se puede falsear). Localhost nunca se bloquea.
 
-### TLS automático
-- Certificado RSA 4096 auto-firmado generado en el primer arranque
-- TLS 1.2+ obligatorio, cifrados modernos únicamente (ECDHE+AES-GCM, ChaCha20)
-- Soporte de certificados externos (Let's Encrypt compatible)
+### Peticiones
+- **CSRF**: doble envío (cookie + campo) en el formulario de login; las escrituras en `/api/*` que un navegador marque como de otro origen (`Sec-Fetch-Site` / `Origin`, también otro subdominio) se rechazan.
+- **CSP con nonce** por petición y `script-src-attr 'none'`: la interfaz no usa JS en línea (eventos delegados con `data-on-*`), así que ni un atributo inyectado ejecuta código.
+- `X-Content-Type-Options`, `X-Frame-Options: DENY`, `Referrer-Policy`, `Cache-Control: no-store`.
+- Entradas validadas: lista blanca de tareas WS, IPs con `ipaddress`, redes de como mucho /16 (máx. 5 por petición), máx. 50 hosts por análisis, rutas sin traversal, indicadores de intel validados antes de usarlos en URLs.
+- Informes HTML con todo escapado: los títulos de hallazgos pueden venir de webs o agentes de terceros.
 
-### Validación de inputs
-- `InputValidator.ws_message()`: whitelist de tareas, bloqueo de path traversal
-- IPs validadas con `ipaddress.ip_address()` (no regex — evita falsos positivos)
-- CIDRs máximo /16 (no se permiten /8 o más grandes)
-- Máximo 50 hosts por scan, máximo 5 redes por petición
+### Ejecución
+- Ningún `shell=True` ni `os.system`. La corrección remota no ejecuta texto que venga del host auditado: construye la acción desde el id del hallazgo, la pasa como dato y el script remoto va por stdin (nada en `/tmp` que otro usuario pueda sustituir antes del `sudo`).
+- Un hallazgo de otro host no se puede corregir en local por error, y el fix remoto se aplica en el host del hallazgo, no en el que diga la petición.
 
-### Headers HTTP
-`X-Content-Type-Options`, `X-Frame-Options: DENY`, `X-XSS-Protection`, `CSP`, `Cache-Control: no-store`
+### TLS
+- Certificado RSA 4096 autofirmado en el primer arranque (o el tuyo con `server.tls_cert`/`tls_key`), TLS 1.2+ y cifrados modernos.
 
-### Logging de auditoría
-`/var/log/cyberhound/security_audit.log`: logins, fixes aplicados, scans iniciados
+### Auditoría
+`<log_dir>/security_audit.log`: logins (con la IP real), fallos de permisos, fixes aplicados y análisis lanzados.
 
 ---
 
-## SIEM — Integración externa
+## Integraciones
 
-Envío automático de findings en tiempo real a:
-
-### Wazuh
-- **UDP socket** (agente activo, puerto 1514)
-- **API REST** del Wazuh Manager (opcional)
-- Formato compatible con decoders custom de Wazuh
-
-### Elasticsearch / ELK
-- Indexación directa en el índice configurado
-- Autenticación: API Key o usuario/contraseña
-- Índice por defecto: `cyberhound-findings`
-
-### Splunk HEC
-- HTTP Event Collector
-- Token configurable, índice y sourcetype configurables
-
-**Configuración** desde la UI: ⚙️ Config → 🛡 SIEM
+| Integración | Detalle |
+|---|---|
+| **Wazuh** | UDP al agente (1514) o API del manager; decoders y reglas en [`wazuh/`](wazuh/) |
+| **Elasticsearch** | Índice configurable (`cyberhound-findings`), API key o usuario/contraseña |
+| **Splunk** | HTTP Event Collector, índice y sourcetype configurables |
+| **Jira / ServiceNow** | Un ticket por hallazgo **nuevo** por encima del umbral (sin duplicar a diario) |
+| **Email / webhooks** | SMTP con TLS; Slack, Teams o Discord por webhook |
+| **AWX / Tower** | Lanza playbooks de remediación |
+| **Agentes** | Otros servidores con CyberHound en modo `agent` envían sus hallazgos a un `manager` |
+| **Prometheus** | `/metrics` |
+| **Ollama** | LLM local para explicar hallazgos (`OLLAMA_URL`, `CYBERHOUND_LLM_MODEL`) |
 
 ---
 
 ## Configuración
 
-`~/.cyberhound/config.yaml` (o `/root/.cyberhound/config.yaml` con sudo):
+`config.yaml` (por defecto en `~/.cyberhound/`, en Docker `/data/config.yaml`). Las variables de entorno mandan sobre el fichero. Lo que se cambia desde la interfaz se guarda en ese mismo fichero.
 
 ```yaml
 auth:
-  mode: jwt
+  mode: jwt                 # jwt | basic | none (none: solo desde localhost)
   username: admin
-  password_hash: "sha256hex"    # cyberhound setup
-  secret: "hex32chars"          # persistido automáticamente
+  password_hash: "…"        # lo escribe 'cyberhound setup'
+  secret: "…"               # se genera solo
   token_ttl_hours: 8
 
 server:
-  host: "127.0.0.1"   # seguro por defecto (solo localhost); usa 0.0.0.0 para exponer en la red
+  host: 127.0.0.1           # seguro por defecto; 0.0.0.0 para exponer en la red
   port: 8443
-  tls_cert: null    # null = auto-firmado
+  tls_cert: null            # null = autofirmado
   tls_key: null
-  trusted_proxies: []  # IP/CIDR de tu proxy inverso (p. ej. ["10.0.0.5"]) para que el rate limit vea la IP real del cliente
+  trusted_proxies: []       # IP, CIDR o nombre del proxy inverso (p. ej. ["10.0.0.5"])
+
+db_path: ~/.cyberhound/cyberhound.db
+db_url: ""                  # postgresql://usuario:clave@host:5432/bd (vacío = SQLite)
+
+multi_tenant:
+  enabled: false
 
 scan:
-  ssh_key_path: "~/.ssh/id_ed25519"
+  ssh_key_path: ~/.ssh/id_ed25519
   ssh_default_user: root
   ssh_concurrency: 5
-  max_ww_files: 200
 
 scheduler:
   enabled: true
-  audit_hour: 2        # audit diario 02:00
-  malware_day: 0       # malware los lunes (0=lunes)
+  audit_hour: 2             # auditoría diaria 02:00
+  malware_day: 0            # malware los lunes (0 = lunes) a las 03:00
   malware_hour: 3
-  network_hour: 4
+  network_hour: 4           # red diaria 04:00
 
 notifications:
   email_enabled: false
   smtp_host: smtp.gmail.com
-  min_level: warning   # info | warning | critical
+  min_level: warning        # info | warning | critical
 
 siem:
   wazuh_enabled: false
@@ -561,43 +591,48 @@ siem:
   min_severity: medium
 ```
 
-### Variables de entorno (Docker)
+Para cambiar la contraseña o el puerto: `cyberhound setup` (asistente) o `printf '%s\n' "$CLAVE" | cyberhound setup --password-stdin`.
+
+### Variables de entorno
 
 | Variable | Descripción |
 |----------|-------------|
-| `CH_PASSWORD` | Contraseña de acceso |
-| `CH_USERNAME` | Usuario (defecto: admin) |
-| `SHODAN_API_KEY` | API key de Shodan |
-| `VT_API_KEY` | API key de VirusTotal |
-| `CH_SMTP_PASSWORD` | Contraseña SMTP (no en YAML) |
-| `CH_WAZUH_PASS` | Contraseña API Wazuh |
-| `CH_ELK_API_KEY` | API key Elasticsearch |
-| `CH_SPLUNK_TOKEN` | Token Splunk HEC |
-| `CH_JIRA_TOKEN` | API token de Jira Cloud (no en YAML) |
-| `CH_SERVICENOW_PASS` | Contraseña de ServiceNow (no en YAML) |
+| `CH_DATA_DIR` | Directorio de datos persistentes (config, BD, cuarentena, reglas YARA, certificado). Docker: `/data` |
+| `CH_DB_URL` | URL de PostgreSQL (si no, SQLite) |
+| `CH_HOST` · `CH_PORT` | Interfaz y puerto (Docker) |
+| `CH_USERNAME` · `CH_PASSWORD` | Usuario y contraseña del primer arranque (Docker; vacía = se genera) |
+| `CH_SECRET` | Secreto de las sesiones JWT |
+| `CH_TRUSTED_PROXIES` | Proxies inversos de confianza (IP, CIDR o nombre, separados por comas) |
+| `CH_TLS_DIR` | Dónde guardar el certificado autofirmado |
+| `SHODAN_API_KEY` · `VT_API_KEY` · `ABUSEIPDB_KEY` · `GREYNOISE_KEY` · `OTX_KEY` · `HIBP_API_KEY` | Threat intelligence |
+| `CH_SMTP_PASSWORD` · `CH_WEBHOOK_URL` | Notificaciones |
+| `CH_WAZUH_URL` · `CH_WAZUH_USER` · `CH_WAZUH_PASS` | API de Wazuh |
+| `CH_ELK_API_KEY` · `CH_ELK_PASS` · `CH_SPLUNK_TOKEN` | Elasticsearch y Splunk |
+| `CH_JIRA_TOKEN` · `CH_SERVICENOW_PASS` | Ticketing |
+| `CH_AGENT_KEY` | Clave de los agentes |
+| `CH_SSH_KEY` | Clave SSH privada (contenido) para el contenedor |
+| `OLLAMA_URL` · `CYBERHOUND_LLM_MODEL` | LLM local |
+| `POSTGRES_PASSWORD` · `CH_DOMAIN` · `CH_HTTP_PORT` · `CH_HTTPS_PORT` | Compose de producción |
+
+Los secretos que llegan por entorno no se copian al fichero.
 
 ---
 
 ## Tests
 
-**645 tests** distribuidos en 42 ficheros (`tests/test_*.py`):
+**690 tests** en 48 ficheros (`tests/test_*.py`), que el CI ejecuta en Python 3.11 y 3.12 y otra vez contra PostgreSQL 16.
 
 ```bash
-# Ejecutar todos los tests
-pytest tests/ -v
-
-# Con cobertura
-pytest tests/ --cov=cyberhound --cov-report=term-missing
+pip install -e ".[test]"
+pytest tests/                                              # SQLite
+CH_DB_URL=postgresql://usuario:clave@host:5432/bd pytest tests/   # la misma suite contra PostgreSQL
 ```
 
-| Área | Ficheros |
-|------|----------|
-| Auth y seguridad web | `test_auth_security.py`, `test_rbac.py`, `test_login_2fa.py`, `test_totp.py`, `test_passwords.py`, `test_csp.py`, `test_security.py`, `test_ws_message_validation.py` |
-| Scanners | `test_scanners_core.py`, `test_hardening.py`, `test_hardening_v63.py`, `test_docker_k8s.py`, `test_docker_image.py`, `test_tls_scan.py`, `test_dns_security.py`, `test_web_headers.py`, `test_web_exposure.py`, `test_api_security.py`, `test_nuclei_scan.py`, `test_subdomain_enum.py`, `test_services_audit.py`, `test_openssh_backport.py` |
-| Scoring y compliance | `test_scoring.py`, `test_scoring_caps.py`, `test_compliance_drops.py`, `test_compliance_pdf.py`, `test_pdf_report.py` |
-| Plataforma | `test_database.py`, `test_config.py`, `test_scheduler.py`, `test_agent_config.py`, `test_licensing.py`, `test_metrics.py`, `test_rollback.py`, `test_audit_import.py`, `test_quarantine_sbom.py` |
-| Integraciones | `test_intel_routes.py`, `test_ticketing.py`, `test_llm.py`, `test_new_modules.py` |
-| Frontend | `test_frontend_integrity.py`, `test_frontend_routes.py` |
+Además de las pruebas unitarias hay tests de extremo a extremo sobre la aplicación real (login con 2FA, roles, aislamiento entre organizaciones, correcciones, threat intel) y de coherencia: toda ruta está en OpenAPI, los permisos de la interfaz coinciden con los del servidor y la versión sale de un único sitio.
+
+### Batería E2E en navegador
+
+[`scripts/e2e/`](scripts/e2e/) levanta instancias de demo con datos ficticios y las recorre con Chromium: los 19 paneles en escritorio, tablet y móvil (scroll y desbordamiento), cada botón y control, los roles, el multi-tenant y la API con análisis reales contra objetivos controlados. Ver su [README](scripts/e2e/README.md).
 
 ---
 
@@ -605,69 +640,34 @@ pytest tests/ --cov=cyberhound --cov-report=term-missing
 
 | Herramienta | Para qué | Instalación |
 |-------------|---------|-------------|
-| `nmap` | Network scan, OS detection, CVEs | `sudo apt install nmap` |
-| `nuclei` | Scanner por plantillas (CVEs, exposiciones) | [github.com/projectdiscovery/nuclei](https://github.com/projectdiscovery/nuclei/releases) + `nuclei -update-templates` |
+| `nmap` | Red, detección de SO, CVEs | `sudo apt install nmap` |
 | `arp-scan` | Descubrimiento LAN | `sudo apt install arp-scan` |
-| `kubectl` | Kubernetes scan | [kubernetes.io/docs](https://kubernetes.io/docs/tasks/tools/) |
-| `trivy` | CVEs en imágenes Docker | [aquasecurity.github.io](https://aquasecurity.github.io/trivy/) |
-| `gitleaks` | Secretos en código | [github.com/gitleaks](https://github.com/gitleaks/gitleaks/releases) |
-| `shellcheck` | Análisis Bash | `sudo apt install shellcheck` |
-| `bandit` | Análisis Python | `pip install bandit` |
-| `semgrep` | Análisis multi-lenguaje | `pip install semgrep` |
-| `auditd` | Logging kernel | `sudo apt install auditd` |
+| `nuclei` | Plantillas (CVEs, exposiciones) | [projectdiscovery/nuclei](https://github.com/projectdiscovery/nuclei/releases) + `nuclei -update-templates` |
+| `trivy` | CVEs en imágenes Docker | [aquasecurity.github.io/trivy](https://aquasecurity.github.io/trivy/) |
+| `kubectl` | Kubernetes | [kubernetes.io/docs](https://kubernetes.io/docs/tasks/tools/) |
+| `gitleaks` · `semgrep` | Secretos y análisis multilenguaje | [gitleaks](https://github.com/gitleaks/gitleaks/releases) · `pip install semgrep` |
+| `shellcheck` · `bandit` | Bash y Python | `sudo apt install shellcheck` · `pip install bandit` |
+| `auditd` · `bpftrace` | Monitor en tiempo real | `sudo apt install auditd bpftrace` |
 
 ---
 
 ## Roadmap
 
-### ✅ Implementado en v6.3 — Funcionalidades completas
+### ✅ Implementado (v6.4)
 
-| Área | Módulo | Detalle |
-|------|--------|---------|
-| Auditoría | `hardening.py` | 26 checks + corrección automática |
-| Red | `network.py` | nmap, OS detection, CVEs en red |
-| SSH | `ssh_audit.py` | audit remoto paralelo, SFTP |
-| Malware | `malware.py` | YARA streaming O(1), VT, webshells |
-| Docker | `docker_scan.py` | 7 checks de configuración |
-| Kubernetes | `kubernetes_scan.py` | 11 checks via kubectl |
-| Docker image | `docker_image_scan.py` | Secretos en capas, SUID, EOL |
-| Runtime | `runtime_scan.py` | Procesos, diff, red, CPU en vivo |
-| Servicios | `services_audit.py` | nginx, apache, mysql, pg, redis, mongodb |
-| TLS/SSL | `tls_scan.py` | expiración, autofirmados, protocolos/firmas/claves débiles |
-| Cabeceras web | `web_headers.py` | HSTS, CSP, X-Frame, cookies inseguras, fuga de info |
-| DNS security | `dns_security.py` | SPF, DMARC, DKIM, DNSSEC, CAA |
-| Código | `code.py` | bandit, shellcheck, eslint, secretos |
-| Intel | `intel.py` | Shodan, VT, AbuseIPDB, GreyNoise, HIBP |
-| LDAP/AD | `ldap_audit.py` | 6 checks: AS-REP, domain admins, policy |
-| Scoring | `scoring.py` | 5 factores, grades A-F, exposición |
-| PDF | `pdf_report.py` | fpdf2 + compliance ENS/ISO en el informe |
-| Compliance | `compliance.py` | ENS, ISO 27001, PCI-DSS, CIS Controls v8 + alertas en tiempo real cuando baja el score |
-| SBOM | `sbom.py` | CycloneDX 1.4, SPDX 2.3, diff entre scans |
-| Cuarentena | `quarantine.py` | XOR + restore con verificación SHA-256 |
-| Monitor | `ebpf_monitor.py` | eBPF/auditd: 12 patrones, 14 ficheros |
-| 2FA | `totp.py` | TOTP RFC 6238, recovery codes |
-| Licencias | `licensing.py` | community/starter/professional/enterprise |
-| Agentes | `agent.py` | Multi-servidor con heartbeat |
-| Multi-tenant | `multitenancy.py` | TenantStore y API key por tenant (gestión por API; el middleware de aislamiento por tenant aún no está conectado a la app) |
-| OpenAPI | `openapi.py` | Spec 3.0.3 + Swagger UI en /api/docs |
-| Ansible | `ansible_integration.py` | Playbooks auto + AWX/Tower API |
-| BD | `database.py` + `database_pg.py` | SQLite WAL + PostgreSQL asyncpg |
-| SIEM | `siem.py` + `wazuh/` | Wazuh (decoders+reglas), ELK, Splunk |
-| Ticketing | `ticketing.py` | Jira Cloud + ServiceNow, ticket por hallazgo nuevo (sin duplicar) |
-| Push | WS `/ws/push` | Notificaciones en tiempo real sin polling |
-| CSS | `style.css` | Responsive mobile/tablet/print |
-| Tests | `tests/` | **645 tests pytest** |
+Todo lo descrito arriba: hardening con fixes y deshacer, red, SSH remoto, malware y cuarentena, Docker/K8s/imágenes/runtime, código y secretos, web (TLS, cabeceras, exposición, API/CORS, Nuclei), DNS y subdominios, threat intelligence, scoring, compliance, SBOM, LDAP/AD (6 checks: AS-REP roasting, admins del dominio, cuentas sin caducidad…), monitor, 2FA, roles, multi-tenant, agentes, SIEM, ticketing, AWX, OpenAPI, SQLite y PostgreSQL, interfaz responsive (escritorio, tablet y móvil).
 
 ### 🔜 Ideas para futuras versiones
 
-- **ML scoring** — modelo entrenado con datos históricos para priorización más inteligente
-- **App móvil nativa** — iOS/Android con notificaciones push reales
-- **Marketplace de reglas YARA** — repositorio centralizado con actualización automática
-- **Exportación a Elastic Security** — timeline de incidentes y correlation rules
+- **ML scoring**: modelo entrenado con el histórico para priorizar mejor.
+- **App móvil nativa** con notificaciones push reales.
+- **Marketplace de reglas YARA** con actualización automática.
+- **Exportación a Elastic Security**: timeline de incidentes y reglas de correlación.
 
+---
 
 ## Licencia
 
-AGPL-3.0 License — ver [LICENSE](LICENSE). Copyright © 2026 José Luis Segura Yuste.
+AGPL-3.0 — ver [LICENSE](LICENSE). Todo el código y todas las funciones están bajo esa licencia, sin ediciones ni limitaciones de pago. Copyright © 2026 José Luis Segura Yuste.
 
 *Desarrollado para hacer la ciberseguridad accesible a las PYMEs*
