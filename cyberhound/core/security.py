@@ -173,33 +173,62 @@ class RateLimiter:
         return rate_limit_middleware
 
 
+_LOOPBACK = (ipaddress.ip_network("127.0.0.0/8"), ipaddress.ip_network("::1/128"))
+_trusted_proxies: list = []
+
+
+def set_trusted_proxies(entries: list[str]) -> None:
+    """Proxies inversos (IP o CIDR) de confianza además de localhost."""
+    nets = []
+    for e in entries or []:
+        try:
+            nets.append(ipaddress.ip_network(e.strip(), strict=False))
+        except ValueError:
+            logger.warning("trusted_proxies: entrada inválida ignorada: %r", e)
+    _trusted_proxies[:] = nets
+
+
+def _is_trusted_proxy(ip: str) -> bool:
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+    return any(addr in n for n in (*_LOOPBACK, *_trusted_proxies))
+
+
 def _get_real_ip(request: web.Request) -> str:
     """
     Obtiene la IP real del cliente.
-    Considera cabeceras de proxy (X-Forwarded-For, X-Real-IP)
-    solo si vienen de localhost (proxy de confianza).
+
+    Las cabeceras de proxy solo cuentan si la conexión viene de un proxy de
+    confianza (localhost o server.trusted_proxies). De X-Forwarded-For se toma
+    la entrada MÁS A LA DERECHA que no sea un proxy de confianza: las de la
+    izquierda las pone el cliente y antes se usaba la primera, así que bastaba
+    con enviar una IP falsa distinta en cada intento para esquivar el rate limit.
     """
     peer = request.transport and request.transport.get_extra_info("peername")
     peer_ip = peer[0] if peer else "unknown"
+    if not _is_trusted_proxy(peer_ip):
+        return peer_ip
 
-    # Solo confiar en cabeceras de proxy si la petición viene de localhost
-    if peer_ip in ("127.0.0.1", "::1"):
-        forwarded = request.headers.get("X-Forwarded-For", "").split(",")
-        if forwarded and forwarded[0].strip():
-            candidate = forwarded[0].strip()
-            try:
-                ipaddress.ip_address(candidate)
-                return candidate
-            except ValueError:
-                pass
-        real_ip = request.headers.get("X-Real-IP", "").strip()
-        if real_ip:
-            try:
-                ipaddress.ip_address(real_ip)
-                return real_ip
-            except ValueError:
-                pass
+    hops = [h.strip() for h in request.headers.get("X-Forwarded-For", "").split(",") if h.strip()]
+    for hop in reversed(hops):
+        try:
+            ipaddress.ip_address(hop)
+        except ValueError:
+            return peer_ip          # cadena manipulada: no fiarse de nada a su izquierda
+        if not _is_trusted_proxy(hop):
+            return hop
+    if hops:
+        return hops[0]              # toda la cadena son proxies de confianza
 
+    real_ip = request.headers.get("X-Real-IP", "").strip()
+    if real_ip:
+        try:
+            ipaddress.ip_address(real_ip)
+            return real_ip
+        except ValueError:
+            pass
     return peer_ip
 
 
@@ -477,6 +506,18 @@ class InputValidator:
 # 3. CSRF PROTECTION
 # ──────────────────────────────────────────────────────────────────────────────
 
+def _same_origin(request: web.Request) -> bool:
+    """False si el navegador indica que la petición viene de otro origen."""
+    site = request.headers.get("Sec-Fetch-Site", "").lower()
+    if site:
+        return site in ("same-origin", "none")
+    origin = request.headers.get("Origin", "")
+    if not origin or origin == "null":
+        return not origin          # "null" (iframes sandbox, file://) no es de fiar
+    from urllib.parse import urlsplit
+    return urlsplit(origin).netloc.lower() == request.host.lower()
+
+
 class CsrfProtection:
     """
     Protección CSRF para formularios POST.
@@ -531,8 +572,14 @@ class CsrfProtection:
             if request.path in ("/login", "/logout"):
                 return await handler(request)
 
-            # Exentar todas las rutas /api/* (autenticadas con JWT Bearer)
+            # /api/* no lleva token de formulario (la UI usa fetch con cookie
+            # SameSite=Strict), pero sí se rechaza lo que el navegador marca como
+            # originado en otro sitio u otro subdominio. Clientes sin navegador
+            # (agentes, curl con Bearer) no envían estas cabeceras.
             if request.path.startswith("/api/"):
+                if not _same_origin(request):
+                    audit_log.auth_failure(_get_real_ip(request), f"CSRF cross-origin en {request.path}")
+                    raise web.HTTPForbidden(reason="Petición de otro origen rechazada")
                 return await handler(request)
 
             # Para cualquier otro POST de formulario: verificar double-submit

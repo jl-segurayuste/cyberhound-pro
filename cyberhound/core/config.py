@@ -65,6 +65,10 @@ class ServerSettings:
     tls_cert: str | None = None
     tls_key:  str | None = None
     log_dir:  str  = "/var/log/cyberhound"
+    # Proxies inversos (IP o CIDR) cuyo X-Forwarded-For se acepta, además de
+    # localhost. Sin esto, tras un proxy en otra máquina todos los clientes
+    # comparten la IP del proxy y un atacante bloquea el login de todos.
+    trusted_proxies: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -219,6 +223,7 @@ class CyberHoundConfig:
             tls_cert=svr.get("tls_cert"),
             tls_key=svr.get("tls_key"),
             log_dir=svr.get("log_dir", "/var/log/cyberhound"),
+            trusted_proxies=[str(p) for p in (svr.get("trusted_proxies") or [])],
         )
 
         # Scheduler

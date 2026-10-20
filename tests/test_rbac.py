@@ -166,3 +166,18 @@ async def test_usuario_borrado_se_puede_volver_a_crear(server):
         assert (await c.get("/api/history")).status == 200
     finally:
         await c.close()
+
+
+async def test_api_rechaza_escrituras_de_otro_origen(server):
+    """Defensa en profundidad: SameSite=Strict no cubre otro subdominio del mismo sitio."""
+    c = await _login(server, "admin", _ADMIN_PW)
+    try:
+        body = {"pattern": "x_*", "reason": "r"}
+        assert (await c.post("/api/suppressions", json=body, headers={"Sec-Fetch-Site": "same-site"})).status == 403
+        assert (await c.post("/api/suppressions", json=body, headers={"Sec-Fetch-Site": "cross-site"})).status == 403
+        assert (await c.post("/api/suppressions", json=body, headers={"Origin": "https://otro.ejemplo.es"})).status == 403
+        assert (await c.post("/api/suppressions", json=body, headers={"Sec-Fetch-Site": "same-origin"})).status == 200
+        assert (await c.post("/api/suppressions", json=body)).status == 200   # cliente sin navegador
+        assert (await c.get("/api/history", headers={"Sec-Fetch-Site": "cross-site"})).status == 200  # leer no
+    finally:
+        await c.close()

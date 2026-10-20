@@ -533,6 +533,7 @@ server:
   port: 8443
   tls_cert: null    # null = auto-firmado
   tls_key: null
+  trusted_proxies: []  # IP/CIDR de tu proxy inverso (p. ej. ["10.0.0.5"]) para que el rate limit vea la IP real del cliente
 
 scan:
   ssh_key_path: "~/.ssh/id_ed25519"

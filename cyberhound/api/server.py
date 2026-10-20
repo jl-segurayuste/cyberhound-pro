@@ -37,6 +37,7 @@ from cyberhound.core.security import (
     TLSManager,
     ValidationError,
     _get_real_ip,
+    set_trusted_proxies,
 )
 
 logger = get_logger("api")
@@ -261,6 +262,7 @@ class CyberHoundServer:
 
     def __init__(self, cfg: CyberHoundConfig) -> None:
         self.cfg = cfg
+        set_trusted_proxies(cfg.server.trusted_proxies)
         self._app: web.Application | None = None
         self._findings_cache: dict[str, list[Finding]] = {}
         self._scan_id_cache:  dict[str, int] = {}
