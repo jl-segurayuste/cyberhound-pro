@@ -46,12 +46,12 @@
 
 ## 5. Persistencia / despliegue
 
-Los cambios (UI + backend) están **commiteados en git (local, sin push)** y
-desplegados en caliente al contenedor con `docker cp` + `docker restart`
-(sobreviven a restart/reboot). Para hacerlos **permanentes ante un recrear/rebuild**
-del contenedor hay que **reconstruir la imagen** `cyberhound-pro` y recrear el
-contenedor con la **misma** config de compose/Caddy → el dominio interno sigue
-igual. (Recomendado coordinarlo por la sensibilidad del acceso.)
+Los cambios (UI + backend) están **commiteados y subidos** al repositorio
+remoto. El contenedor corre desde una imagen con el código dentro (sin bind-mount),
+así que un cambio no queda desplegado solo por estar en git: hay que
+**reconstruir la imagen** `cyberhound-pro` y recrear el contenedor con la
+**misma** config de compose/proxy (`docker compose up -d --build`); los datos y
+la configuración persisten en el volumen `/data`, y el dominio interno sigue igual.
 
 ## 6. QA exhaustivo del frontend (addendum)
 

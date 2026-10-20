@@ -5,7 +5,7 @@
 > Analiza tu red, servidores, contenedores y código. Detecta vulnerabilidades, malware y configuraciones inseguras. Corrige automáticamente. Monitoriza en tiempo real.
 
 [![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://python.org)
-[![Tests](https://img.shields.io/badge/tests-522%20passed-green.svg)](#tests)
+[![Tests](https://img.shields.io/badge/tests-628%20passed-green.svg)](#tests)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
 
 ---
@@ -13,6 +13,7 @@
 ## Índice
 
 - [¿Qué hace?](#qué-hace)
+- [Capturas](#capturas)
 - [Requisitos](#requisitos)
 - [Instalación rápida](#instalación-rápida)
 - [Funcionalidades](#funcionalidades)
@@ -44,6 +45,139 @@ CyberHound Pro es una herramienta todo-en-uno de ciberseguridad orientada a ento
 | **📊 Scoring** | Score contextual 0-100 con factor de exposición |
 | **📡 Monitoreo** | Panel de actividad en tiempo real, alertas automáticas |
 | **🛡 SIEM** | Wazuh, Elasticsearch, Splunk HEC |
+
+---
+
+## Capturas
+
+> Capturas de la interfaz actual tomadas sobre una instancia local con **datos de ejemplo ficticios** (red `10.10.0.0/24`, dominio `ejemplo-demo.es`).
+
+<img src="docs/img/capturas/dashboard.png" alt="Panel de inicio">
+
+<p><img src="docs/img/capturas/login.png" alt="Login" width="420"> <img src="docs/img/capturas/movil.png" alt="Vista móvil" width="200"></p>
+
+Menú de navegación (las secciones se agrupan en Red, Sistema, Web y Gestión):
+
+<img src="docs/img/capturas/menu.png" alt="Menú de navegación">
+
+<details>
+<summary><b>Ver todas las secciones (19 capturas)</b></summary>
+
+### Inicio
+
+Score, hallazgos por severidad, dispositivos, cumplimiento y evolución del score a 30 días.
+
+<img src="docs/img/capturas/dashboard.png" alt="Inicio">
+
+### Red › Mi Red
+
+Descubrimiento de dispositivos, auditoría SSH en paralelo y CVEs.
+
+<img src="docs/img/capturas/network.png" alt="Red › Mi Red">
+
+### Red › Subdominios
+
+Enumeración por Certificate Transparency.
+
+<img src="docs/img/capturas/subenum.png" alt="Red › Subdominios">
+
+### Red › DNS Security
+
+SPF, DMARC, DKIM, DNSSEC y CAA.
+
+<img src="docs/img/capturas/dnssec.png" alt="Red › DNS Security">
+
+### Red › Intel
+
+Consulta de IPs, dominios y hashes en Shodan, VirusTotal, AbuseIPDB, GreyNoise.
+
+<img src="docs/img/capturas/intel.png" alt="Red › Intel">
+
+### Sistema › Seguridad
+
+Hardening del propio servidor con corrección automática.
+
+<img src="docs/img/capturas/audit.png" alt="Sistema › Seguridad">
+
+### Sistema › Malware
+
+YARA, hashes, auditd, cron y webshells.
+
+<img src="docs/img/capturas/malware.png" alt="Sistema › Malware">
+
+### Sistema › Docker
+
+Configuración de Docker y Kubernetes.
+
+<img src="docs/img/capturas/docker.png" alt="Sistema › Docker">
+
+### Sistema › Código
+
+bandit, shellcheck, eslint y secretos.
+
+<img src="docs/img/capturas/code.png" alt="Sistema › Código">
+
+### Sistema › Servicios
+
+nginx, apache, MySQL, PostgreSQL, Redis, MongoDB.
+
+<img src="docs/img/capturas/services.png" alt="Sistema › Servicios">
+
+### Web › TLS/SSL
+
+Caducidad, autofirmados, protocolos y claves débiles.
+
+<img src="docs/img/capturas/tls.png" alt="Web › TLS/SSL">
+
+### Web › Cabeceras Web
+
+HSTS, CSP, X-Frame-Options, cookies, fuga de información.
+
+<img src="docs/img/capturas/webhdr.png" alt="Web › Cabeceras Web">
+
+### Web › Exposición Web
+
+.git, .env, copias de seguridad y métodos HTTP peligrosos.
+
+<img src="docs/img/capturas/webexp.png" alt="Web › Exposición Web">
+
+### Web › API / CORS
+
+CORS, documentación de API expuesta, GraphQL.
+
+<img src="docs/img/capturas/apisec.png" alt="Web › API / CORS">
+
+### Web › Nuclei
+
+Escáner por plantillas (CVEs y exposiciones).
+
+<img src="docs/img/capturas/nuclei.png" alt="Web › Nuclei">
+
+### Gestión › Historial
+
+Todos los análisis con su score y comparación.
+
+<img src="docs/img/capturas/history.png" alt="Gestión › Historial">
+
+### Gestión › Monitor
+
+Monitor eBPF/auditd en tiempo real y análisis de imágenes Docker.
+
+<img src="docs/img/capturas/monitor.png" alt="Gestión › Monitor">
+
+### Gestión › Informes
+
+HTML, PDF, playbook Ansible, JSON para SIEM, compliance e importación de auditorías.
+
+<img src="docs/img/capturas/reports.png" alt="Gestión › Informes">
+
+### Gestión › Configuración
+
+API keys, notificaciones, SIEM, ticketing, scheduler, usuarios, 2FA, YARA, agentes, licencia, LDAP, cuarentena, SBOM, Ansible.
+
+<img src="docs/img/capturas/settings.png" alt="Gestión › Configuración">
+
+</details>
 
 ---
 
@@ -444,7 +578,7 @@ siem:
 
 ## Tests
 
-**195 tests** distribuidos en 7 ficheros:
+**628 tests** distribuidos en 39 ficheros (`tests/test_*.py`):
 
 ```bash
 # Ejecutar todos los tests
@@ -454,15 +588,14 @@ pytest tests/ -v
 pytest tests/ --cov=cyberhound --cov-report=term-missing
 ```
 
-| Fichero | Tests | Cobertura |
-|---------|-------|-----------|
-| `test_security.py` | 45 | RateLimiter, InputValidator, TLS |
-| `test_database.py` | 40 | Scans, assets, supresiones, usuarios, stats |
-| `test_hardening.py` | 22 | Checks individuales + HardeningFixer |
-| `test_scheduler.py` | 13 | Scheduler, entries, run_now |
-| `test_scoring.py` | 25 | Motor de scoring, contexto, grades |
-| `test_config.py` | 22 | Validación eager, save/reload |
-| `test_docker_k8s.py` | 28 | Docker y Kubernetes checks |
+| Área | Ficheros |
+|------|----------|
+| Auth y seguridad web | `test_auth_security.py`, `test_login_2fa.py`, `test_totp.py`, `test_passwords.py`, `test_csp.py`, `test_security.py`, `test_ws_message_validation.py` |
+| Scanners | `test_scanners_core.py`, `test_hardening.py`, `test_hardening_v63.py`, `test_docker_k8s.py`, `test_docker_image.py`, `test_tls_scan.py`, `test_dns_security.py`, `test_web_headers.py`, `test_web_exposure.py`, `test_api_security.py`, `test_nuclei_scan.py`, `test_subdomain_enum.py`, `test_services_audit.py`, `test_openssh_backport.py` |
+| Scoring y compliance | `test_scoring.py`, `test_scoring_caps.py`, `test_compliance_drops.py`, `test_compliance_pdf.py` |
+| Plataforma | `test_database.py`, `test_config.py`, `test_scheduler.py`, `test_agent_config.py`, `test_licensing.py`, `test_metrics.py`, `test_rollback.py`, `test_audit_import.py`, `test_quarantine_sbom.py` |
+| Integraciones | `test_intel_routes.py`, `test_ticketing.py`, `test_llm.py`, `test_new_modules.py` |
+| Frontend | `test_frontend_integrity.py` |
 
 ---
 
@@ -521,7 +654,7 @@ pytest tests/ --cov=cyberhound --cov-report=term-missing
 | Ticketing | `ticketing.py` | Jira Cloud + ServiceNow, ticket por hallazgo nuevo (sin duplicar) |
 | Push | WS `/ws/push` | Notificaciones en tiempo real sin polling |
 | CSS | `style.css` | Responsive mobile/tablet/print |
-| Tests | `tests/` | **610 tests pytest** |
+| Tests | `tests/` | **628 tests pytest** |
 
 ### 🔜 Ideas para futuras versiones
 
