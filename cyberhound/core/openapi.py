@@ -73,7 +73,7 @@ ENDPOINT_DOCS: dict[str, dict] = {
         "requestBody": {
             "required": True,
             "properties": {
-                "finding_id_pattern": {"type": "string", "description": "Patrón glob (e.g. ssh_*)"},
+                "pattern": {"type": "string", "description": "Patrón glob (e.g. ssh_*)"},
                 "reason": {"type": "string"},
                 "expires_at": {"type": "string", "format": "date-time"},
             },
@@ -92,7 +92,7 @@ ENDPOINT_DOCS: dict[str, dict] = {
             "properties": {
                 "username": {"type": "string"},
                 "password": {"type": "string"},
-                "role": {"type": "string", "enum": ["admin", "analyst", "viewer"]},
+                "role": {"type": "string", "enum": ["admin", "operator", "viewer"]},
             },
         },
     },

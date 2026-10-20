@@ -5,7 +5,7 @@
 > Analiza tu red, servidores, contenedores y código. Detecta vulnerabilidades, malware y configuraciones inseguras. Corrige automáticamente. Monitoriza en tiempo real.
 
 [![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://python.org)
-[![Tests](https://img.shields.io/badge/tests-628%20passed-green.svg)](#tests)
+[![Tests](https://img.shields.io/badge/tests-645%20passed-green.svg)](#tests)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
 
 ---
@@ -578,7 +578,7 @@ siem:
 
 ## Tests
 
-**628 tests** distribuidos en 39 ficheros (`tests/test_*.py`):
+**645 tests** distribuidos en 42 ficheros (`tests/test_*.py`):
 
 ```bash
 # Ejecutar todos los tests
@@ -590,12 +590,12 @@ pytest tests/ --cov=cyberhound --cov-report=term-missing
 
 | Área | Ficheros |
 |------|----------|
-| Auth y seguridad web | `test_auth_security.py`, `test_login_2fa.py`, `test_totp.py`, `test_passwords.py`, `test_csp.py`, `test_security.py`, `test_ws_message_validation.py` |
+| Auth y seguridad web | `test_auth_security.py`, `test_rbac.py`, `test_login_2fa.py`, `test_totp.py`, `test_passwords.py`, `test_csp.py`, `test_security.py`, `test_ws_message_validation.py` |
 | Scanners | `test_scanners_core.py`, `test_hardening.py`, `test_hardening_v63.py`, `test_docker_k8s.py`, `test_docker_image.py`, `test_tls_scan.py`, `test_dns_security.py`, `test_web_headers.py`, `test_web_exposure.py`, `test_api_security.py`, `test_nuclei_scan.py`, `test_subdomain_enum.py`, `test_services_audit.py`, `test_openssh_backport.py` |
-| Scoring y compliance | `test_scoring.py`, `test_scoring_caps.py`, `test_compliance_drops.py`, `test_compliance_pdf.py` |
+| Scoring y compliance | `test_scoring.py`, `test_scoring_caps.py`, `test_compliance_drops.py`, `test_compliance_pdf.py`, `test_pdf_report.py` |
 | Plataforma | `test_database.py`, `test_config.py`, `test_scheduler.py`, `test_agent_config.py`, `test_licensing.py`, `test_metrics.py`, `test_rollback.py`, `test_audit_import.py`, `test_quarantine_sbom.py` |
 | Integraciones | `test_intel_routes.py`, `test_ticketing.py`, `test_llm.py`, `test_new_modules.py` |
-| Frontend | `test_frontend_integrity.py` |
+| Frontend | `test_frontend_integrity.py`, `test_frontend_routes.py` |
 
 ---
 
@@ -646,7 +646,7 @@ pytest tests/ --cov=cyberhound --cov-report=term-missing
 | 2FA | `totp.py` | TOTP RFC 6238, recovery codes |
 | Licencias | `licensing.py` | community/starter/professional/enterprise |
 | Agentes | `agent.py` | Multi-servidor con heartbeat |
-| Multi-tenant | `multitenancy.py` | TenantStore, middleware, API key por tenant |
+| Multi-tenant | `multitenancy.py` | TenantStore y API key por tenant (gestión por API; el middleware de aislamiento por tenant aún no está conectado a la app) |
 | OpenAPI | `openapi.py` | Spec 3.0.3 + Swagger UI en /api/docs |
 | Ansible | `ansible_integration.py` | Playbooks auto + AWX/Tower API |
 | BD | `database.py` + `database_pg.py` | SQLite WAL + PostgreSQL asyncpg |
@@ -654,7 +654,7 @@ pytest tests/ --cov=cyberhound --cov-report=term-missing
 | Ticketing | `ticketing.py` | Jira Cloud + ServiceNow, ticket por hallazgo nuevo (sin duplicar) |
 | Push | WS `/ws/push` | Notificaciones en tiempo real sin polling |
 | CSS | `style.css` | Responsive mobile/tablet/print |
-| Tests | `tests/` | **628 tests pytest** |
+| Tests | `tests/` | **645 tests pytest** |
 
 ### 🔜 Ideas para futuras versiones
 

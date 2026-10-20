@@ -158,6 +158,19 @@ class TestTenantStore:
         # get sigue funcionando
         assert store.get("acme") is not None
 
+    def test_deleted_slug_can_be_recreated_with_new_key(self, store):
+        old = store.create("acme", "ACME")
+        old_key = old.api_key
+        store.delete("acme")
+        new = store.create("acme", "ACME 2")
+        assert new.active and new.api_key != old_key
+        assert [t.slug for t in store.list()] == ["acme"]
+
+    def test_deleted_tenant_key_no_longer_valid(self, store):
+        t = store.create("acme", "ACME")
+        store.delete("acme")
+        assert store.get_by_api_key(t.api_key) is None
+
     def test_get_by_api_key(self, store):
         t = store.create("acme", "ACME")
         found = store.get_by_api_key(t.api_key)

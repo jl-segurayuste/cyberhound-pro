@@ -10,6 +10,7 @@ Integra múltiples fuentes de intel para contexto de amenazas:
 """
 from __future__ import annotations
 
+import ipaddress
 import json
 
 from aiohttp import web
@@ -33,6 +34,31 @@ async def _read_json(request) -> dict:
             return {}
 
 
+async def _targets_from_last_network_scan(db, limit: int = 10) -> list[str]:
+    """IPs del último scan de red: hosts con hallazgos primero, luego el inventario de activos.
+
+    Ningún scanner escribe la IP en `evidence`; el scan de red sí rellena
+    `source_host` de cada hallazgo y la tabla `assets` con cada dispositivo.
+    """
+    ips: list[str] = []
+
+    def _add(value: str) -> None:
+        try:
+            ip = str(ipaddress.ip_address((value or "").strip()))
+        except ValueError:
+            return
+        if ip not in ips:
+            ips.append(ip)
+
+    history = await db.get_scan_history("network", limit=1)
+    if history:
+        for f in await db.get_scan_findings(history[0]["id"]):
+            _add(f.get("source_host", ""))
+    for asset in await db.get_assets():
+        _add(asset.get("ip", ""))
+    return ips[:limit]
+
+
 async def api_intel_scan(request: web.Request) -> web.Response:
     """
     POST /api/intel/scan
@@ -47,17 +73,7 @@ async def api_intel_scan(request: web.Request) -> web.Response:
         modules = body.get("modules", [])
 
         if not targets:
-            # Auto-detectar: usar IPs del último scan de red
-            history = await server.db.get_scan_history("network", limit=1)
-            if history:
-                findings_raw = await server.db.get_scan_findings(history[0]["id"])
-                ips = set()
-                for f in findings_raw:
-                    ev = f.get("evidence", "")
-                    if "ip=" in ev:
-                        ip = ev.split("ip=")[1].split()[0]
-                        ips.add(ip)
-                targets = list(ips)[:10]
+            targets = await _targets_from_last_network_scan(server.db)
 
         if not targets:
             return web.json_response(

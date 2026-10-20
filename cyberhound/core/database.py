@@ -306,6 +306,13 @@ class Database:
             async with db.execute(q, p) as cur:
                 return [dict(r) for r in await cur.fetchall()]
 
+    async def get_scan(self, scan_id: int) -> dict | None:
+        async with aiosqlite.connect(str(self.path)) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("SELECT * FROM scans WHERE id=?", (scan_id,)) as cur:
+                row = await cur.fetchone()
+                return dict(row) if row else None
+
     async def get_scan_findings(self, scan_id: int) -> list[dict]:
         async with aiosqlite.connect(str(self.path)) as db:
             db.row_factory = aiosqlite.Row

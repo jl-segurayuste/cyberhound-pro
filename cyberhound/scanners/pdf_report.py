@@ -1,7 +1,7 @@
 """
 Generación de informes PDF para CyberHound Pro.
 
-Usa fpdf2 (ya en las dependencias) para generar PDFs sin dependencias externas.
+Usa fpdf2 (dependencia en pyproject.toml) para generar PDFs sin dependencias externas.
 El informe incluye:
   - Portada con logo, fecha, objetivo y score
   - Resumen ejecutivo con métricas principales
@@ -95,7 +95,13 @@ def _generate_with_fpdf2(
     now = datetime.now(UTC)
     grade = "A" if (score or 0) >= 90 else "B" if (score or 0) >= 75 else "C" if (score or 0) >= 60 else "D" if (score or 0) >= 40 else "F"
 
-    pdf = FPDF()
+    class _LatinPDF(FPDF):
+        # Las fuentes core solo cubren latin-1: sanear TODO el texto aquí y no en cada
+        # cell(); antes un "→" o un emoji en cualquier hallazgo tumbaba el PDF entero.
+        def normalize_text(self, text):
+            return super().normalize_text(_sanitize_pdf(text))
+
+    pdf = _LatinPDF()
     pdf.set_auto_page_break(auto=True, margin=15)
 
     # ── PORTADA ───────────────────────────────────────────────────────────────

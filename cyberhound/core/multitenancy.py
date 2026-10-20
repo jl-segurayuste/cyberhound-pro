@@ -122,7 +122,8 @@ class TenantStore:
 
     def create(self, slug: str, name: str, admin_email: str = "",
                plan: str = "starter") -> Tenant:
-        if slug in self._tenants:
+        # El borrado es lógico: un slug borrado se puede volver a crear (con API key nueva)
+        if slug in self._tenants and self._tenants[slug].active:
             raise ValueError(f"Tenant '{slug}' ya existe")
         tenant = Tenant(slug=slug, name=name, admin_email=admin_email, plan=plan)
         self._tenants[slug] = tenant
@@ -135,7 +136,7 @@ class TenantStore:
 
     def get_by_api_key(self, key: str) -> Tenant | None:
         for tenant in self._tenants.values():
-            if secrets.compare_digest(tenant.api_key, key):
+            if tenant.active and secrets.compare_digest(tenant.api_key, key):
                 return tenant
         return None
 

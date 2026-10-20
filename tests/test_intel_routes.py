@@ -99,3 +99,29 @@ class TestIntelRoutes:
         assert summary["by_severity"]["medium"] == 1
         assert summary["by_severity"]["low"] == 1
         assert summary["malicious"] == 3  # critical + high
+
+
+async def test_targets_from_last_network_scan(tmp_path):
+    """Bug real 2026-10-20: la autodetección buscaba 'ip=' en evidence, que ningún
+    scanner escribe -> 'Analizar IPs del último scan de red' siempre daba 400."""
+    from cyberhound.api.routes.intel_routes import _targets_from_last_network_scan
+    from cyberhound.core.database import AssetRecord, Database
+    from cyberhound.core.models import Finding
+
+    db = Database(tmp_path / "intel.db")
+    await db.init()
+    assert await _targets_from_last_network_scan(db) == []
+
+    sid = await db.create_scan("network")
+    await db.complete_scan(sid, [
+        Finding(id="telnet", category="network", severity="high", title="t", description="",
+                remediation="", evidence="23/tcp open", source_host="10.0.0.23"),
+        Finding(id="x", category="network", severity="low", title="t", description="",
+                remediation="", source_host="no-es-una-ip"),
+    ])
+    await db.upsert_asset(AssetRecord(ip="10.0.0.1"))
+    await db.upsert_asset(AssetRecord(ip="10.0.0.23"))
+
+    targets = await _targets_from_last_network_scan(db)
+    assert targets[0] == "10.0.0.23"          # hosts con hallazgos primero
+    assert sorted(targets) == ["10.0.0.1", "10.0.0.23"]  # sin duplicados ni basura

@@ -35,6 +35,13 @@ _PENDING_2FA_TTL = timedelta(minutes=5)
 # Prometheus; el bind por defecto es 127.0.0.1, no expuesto a Internet).
 PUBLIC_ROUTES = {"/health", "/login", "/static", "/metrics"}
 
+# Endpoints de agentes remotos: no usan JWT sino "Authorization: AgentKey <clave>",
+# que verifica el propio handler contra la clave configurada.
+AGENT_ROUTES = {"/api/agent/report", "/api/agent/heartbeat"}
+
+# Hash de relleno para que un usuario inexistente tarde lo mismo que uno real
+_DUMMY_HASH = passwords.hash_password(secrets.token_hex(16))
+
 # Rate limiter global para /login (5 intentos / 15 minutos)
 _login_rate_limiter = RateLimiter(max_attempts=5, window_seconds=900, block_seconds=900)
 _csrf = CsrfProtection()
@@ -127,6 +134,21 @@ def _is_localhost(request: web.Request) -> bool:
     return False
 
 
+async def verify_credentials(cfg: AuthConfig, server, username: str, password: str) -> bool:
+    """Admin de config.yaml o usuario activo de la BD (los de Ajustes › Usuarios).
+
+    Antes solo se aceptaba el usuario de config.yaml: los usuarios creados desde
+    la UI se guardaban pero nunca podían iniciar sesión.
+    """
+    if username == cfg.username:
+        return cfg.verify_password(password)
+    db_user = await server.db.get_user(username) if server and username else None
+    if not db_user:
+        passwords.verify_password(password, _DUMMY_HASH)
+        return False
+    return passwords.verify_password(password, db_user.get("password_hash") or "")
+
+
 def _extract_token(request: web.Request) -> str | None:
     auth_header = request.headers.get(AUTH_HEADER, "")
     if auth_header.startswith("Bearer "):
@@ -155,6 +177,9 @@ async def auth_middleware(request: web.Request, handler):
     if any(request.path.startswith(p) for p in PUBLIC_ROUTES):
         return await handler(request)
 
+    if request.path in AGENT_ROUTES and request.headers.get(AUTH_HEADER, "").startswith("AgentKey "):
+        return await handler(request)
+
     # Modo none: solo localhost
     if cfg.mode == "none":
         if not _is_localhost(request):
@@ -172,7 +197,7 @@ async def auth_middleware(request: web.Request, handler):
                 headers={"Retry-After": str(wait)},
             )
         creds = _extract_basic(request)
-        if not creds or creds[0] != cfg.username or not cfg.verify_password(creds[1]):
+        if not creds or not await verify_credentials(cfg, request.app.get("server"), *creds):
             await _login_rate_limiter.record_failure(ip)
             audit_log.auth_failure(ip, "Basic Auth fallido")
             raise web.HTTPUnauthorized(
@@ -330,7 +355,7 @@ def setup_auth_routes(app: web.Application, cfg: AuthConfig) -> None:
         username = str(data.get("username", "")).strip()[:64]
         password = str(data.get("password", ""))
 
-        if username != cfg.username or not cfg.verify_password(password):
+        if not await verify_credentials(cfg, server, username, password):
             blocked, block_time = await _login_rate_limiter.record_failure(ip)
             audit_log.auth_failure(ip, f"Login fallido para '{username}'")
             if blocked:
@@ -345,7 +370,7 @@ def setup_auth_routes(app: web.Application, cfg: AuthConfig) -> None:
         # Rehash transparente: si el hash almacenado es del formato antiguo
         # (SHA-256 sin sal), se migra a PBKDF2 ahora que tenemos la contraseña en
         # claro. Best-effort: un fallo de persistencia NUNCA debe romper el login.
-        if passwords.needs_rehash(cfg.password_hash or ""):
+        if username == cfg.username and passwords.needs_rehash(cfg.password_hash or ""):
             try:
                 new_hash = passwords.hash_password(password)
                 cfg.password_hash = new_hash

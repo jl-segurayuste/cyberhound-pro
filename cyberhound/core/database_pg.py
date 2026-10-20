@@ -237,6 +237,10 @@ class DatabasePG:
             )
         return await self._fetch("SELECT * FROM scans ORDER BY started_at DESC LIMIT $1", limit)
 
+    async def get_scan(self, scan_id: int) -> dict | None:
+        rows = await self._fetch("SELECT * FROM scans WHERE id=$1", scan_id)
+        return rows[0] if rows else None
+
     async def get_scan_findings(self, scan_id: int) -> list[dict]:
         return await self._fetch(
             "SELECT * FROM findings WHERE scan_id=$1 ORDER BY "

@@ -121,6 +121,24 @@ class TestQuarantine:
         remaining = list_quarantine()
         assert len(remaining) == 0
 
+    def test_same_file_twice_in_same_second_does_not_collide(self, quarantine_env, malicious_file):
+        """Bug real 2026-10-20: el nombre solo llevaba segundos; aislar, restaurar y
+        volver a aislar el mismo fichero en el mismo segundo pisaba el .quar anterior."""
+        original = malicious_file.read_text()
+        quarantine_file(str(malicious_file), "f1", "t")
+        first = list_quarantine()[0]["quarantine_name"]
+        ok, _ = restore_file(first)
+        assert ok
+        malicious_file.write_text("segunda version\n")
+        quarantine_file(str(malicious_file), "f2", "t")
+        names = [i["quarantine_name"] for i in list_quarantine()]
+        assert len(set(names)) == 2
+        second = next(n for n in names if n != first)
+        ok, _ = delete_quarantined(first)
+        assert ok
+        ok, _ = restore_file(second)
+        assert ok and malicious_file.read_text() == "segunda version\n" != original
+
     def test_stats(self, quarantine_env, tmp_path):
         for i in range(3):
             f = tmp_path / f"file{i}.sh"

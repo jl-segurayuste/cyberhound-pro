@@ -21,8 +21,9 @@ from pathlib import Path
 
 from aiohttp import web
 
+from cyberhound.api.routes.intel_routes import register_routes as register_intel_routes
 from cyberhound.core import passwords
-from cyberhound.core.auth import AuthConfig, auth_middleware, setup_auth_routes
+from cyberhound.core.auth import AGENT_ROUTES, AuthConfig, auth_middleware, setup_auth_routes
 from cyberhound.core.config import CyberHoundConfig
 from cyberhound.core.database import AssetRecord, UserRecord
 from cyberhound.core.licensing import license_manager
@@ -35,6 +36,7 @@ from cyberhound.core.security import (
     InputValidator,
     TLSManager,
     ValidationError,
+    _get_real_ip,
 )
 
 logger = get_logger("api")
@@ -122,24 +124,47 @@ ROLE_PERMISSIONS = {
 }
 
 
-def _requires_role(*roles: str):
-    """Decorator para proteger endpoints por rol."""
-    def decorator(handler):
-        async def wrapper(self, request: web.Request) -> web.Response:
-            user = request.get("auth_user", "")
-            db_user = await self.db.get_user(user) if user else None
-            role = db_user["role"] if db_user else "viewer"
-            required = set(roles)
-            allowed = ROLE_PERMISSIONS.get(role, set())
-            if not required.issubset(allowed):
-                return web.json_response(
-                    {"error": f"Permiso denegado. Rol requerido: {roles}"},
-                    status=403,
-                )
-            request["user_role"] = role
-            return await handler(self, request)
-        return wrapper
-    return decorator
+def _required_permission(method: str, path: str) -> str:
+    """Permiso de ROLE_PERMISSIONS que exige cada petición. Leer siempre es "view"."""
+    write = method not in ("GET", "HEAD", "OPTIONS")
+    if path.startswith(("/api/users", "/api/tenants")):
+        return "users"
+    if path.startswith(("/api/fix/", "/api/rollback/local", "/api/ansible/run")) or (
+        write and path.startswith(("/api/quarantine", "/api/assets/"))
+    ):
+        return "fix"
+    if path == "/ws" or path.startswith((
+        "/api/scan/", "/api/intel/scan", "/api/sbom/generate", "/api/import/audit",
+        "/api/network/discover", "/api/findings/explain",
+    )) or (write and (path == "/api/compliance" or (path.startswith("/api/scheduler/") and path.endswith("/run")))):
+        return "scan"
+    if write and path.startswith((
+        "/api/config/", "/api/suppressions", "/api/scheduler/", "/api/license/", "/api/yara/",
+    )):
+        return "config"
+    return "view"
+
+
+@web.middleware
+async def rbac_middleware(request: web.Request, handler):
+    """Aplica ROLE_PERMISSIONS. Antes los roles se guardaban pero ningún endpoint los comprobaba."""
+    user = request.get("auth_user")
+    if not user or request.path in AGENT_ROUTES:   # modo sin auth, rutas públicas o agentes
+        return await handler(request)
+    server = request.app["server"]
+    if user == server.cfg.auth.username:
+        role = "admin"   # el admin de config.yaml nunca puede quedarse sin acceso
+    else:
+        db_user = await server.db.get_user(user)
+        if not db_user:  # desactivado después de iniciar sesión
+            return web.json_response({"error": "Usuario desactivado"}, status=401)
+        role = db_user["role"]
+    request["user_role"] = role
+    needed = _required_permission(request.method, request.path)
+    if needed not in ROLE_PERMISSIONS.get(role, set()):
+        audit_log.auth_failure(_get_real_ip(request), f"'{user}' ({role}) sin permiso '{needed}' en {request.path}")
+        return web.json_response({"error": f"Permiso denegado: tu rol ({role}) no permite '{needed}'"}, status=403)
+    return await handler(request)
 
 
 # ── Métricas (formato Prometheus, sin dependencias) ───────────────────────────
@@ -319,7 +344,7 @@ class CyberHoundServer:
         app = web.Application(
             middlewares=[
                 security_headers_middleware, request_logger_middleware,
-                CsrfProtection().middleware_factory(is_https=True), auth_middleware,
+                CsrfProtection().middleware_factory(is_https=True), auth_middleware, rbac_middleware,
             ],
             client_max_size=10 * 1024 * 1024,
         )
@@ -327,6 +352,7 @@ class CyberHoundServer:
         app["server"] = self
 
         setup_auth_routes(app, auth_cfg)
+        register_intel_routes(app)
 
         static_dir = Path(__file__).parent.parent / "ui" / "static"
         if static_dir.exists():
@@ -1137,10 +1163,16 @@ class CyberHoundServer:
                 return web.json_response({"error": "Contraseña mínimo 8 caracteres"}, status=400)
             if not re.match(r'^[a-zA-Z0-9_\-]{1,32}$', username):
                 return web.json_response({"error": "Username inválido"}, status=400)
+            if username == self.cfg.auth.username or await self.db.get_user(username):
+                return web.json_response({"error": f"El usuario '{username}' ya existe"}, status=409)
             pw_hash = passwords.hash_password(password)
-            await self.db.create_user(UserRecord(
-                username=username, password_hash=pw_hash, role=role
-            ))
+            try:
+                await self.db.create_user(UserRecord(
+                    username=username, password_hash=pw_hash, role=role
+                ))
+            except Exception:
+                # el borrado es lógico (active=0): reutilizar el nombre reactiva la fila
+                await self.db.update_user(username, password_hash=pw_hash, role=role, active=1)
             logger.info("Usuario '%s' creado con rol '%s' por %s",
                         username, role, request.get("auth_user"))
             return web.json_response({"ok": True})
@@ -1151,6 +1183,12 @@ class CyberHoundServer:
         try:
             username = request.match_info["username"]
             body = await _read_json(request)
+            if username in (request.get("auth_user"), self.cfg.auth.username) and (
+                ("role" in body and body["role"] != "admin") or ("active" in body and not body["active"])
+            ):
+                return web.json_response(
+                    {"error": "No puedes quitarte el rol de admin ni desactivar tu propio usuario"}, status=400,
+                )
             updates = {}
             if "role" in body:
                 if body["role"] not in ("admin", "operator", "viewer"):
@@ -1171,8 +1209,8 @@ class CyberHoundServer:
     async def api_users_delete(self, request: web.Request) -> web.Response:
         username = request.match_info["username"]
         current  = request.get("auth_user", "")
-        if username == current:
-            return web.json_response({"error": "No puedes eliminar tu propio usuario"}, status=400)
+        if username in (current, self.cfg.auth.username):
+            return web.json_response({"error": "No puedes eliminar tu propio usuario ni el admin principal"}, status=400)
         await self.db.update_user(username, active=0)
         return web.json_response({"ok": True})
 
@@ -1742,9 +1780,9 @@ class CyberHoundServer:
                     description=f.get("description",""), remediation=f.get("remediation",""),
                     auto_fix=bool(f.get("auto_fix")),
                 ) for f in findings_raw]
-                # Obtener score del scan
-                history = await self.db.get_scan_history(limit=1)
-                score = next((h["score"] for h in history if h["id"] == int(scan_id)), None)
+                # Score del scan pedido (antes solo se miraba el último scan del historial)
+                scan = await self.db.get_scan(int(scan_id))
+                score = scan["score"] if scan else None
             else:
                 findings_raw = body.get("findings", [])
                 findings = [Finding.from_dict(f) for f in findings_raw]
@@ -1958,6 +1996,9 @@ class CyberHoundServer:
             if body.get("agent_key"):            # solo si no está vacío
                 a.agent_key = str(body["agent_key"])
             self.cfg.save()
+            # el AgentManager se creó al arrancar con una copia: sin esto la clave nueva no valía hasta reiniciar
+            for field in ("mode", "manager_url", "agent_key", "agent_name"):
+                setattr(self.agent_manager.cfg, field, getattr(a, field))
             return web.json_response({"ok": True})
         except Exception as e:
             return web.json_response({"ok": False, "error": str(e)}, status=400)

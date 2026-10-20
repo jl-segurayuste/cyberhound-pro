@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import secrets
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -84,7 +85,8 @@ def quarantine_file(
 
     # Nombre único en cuarentena
     ts        = datetime.now(UTC)
-    safe_name = f"{ts.strftime('%Y%m%d_%H%M%S')}_{src.name}.quar"
+    # sufijo aleatorio: con solo segundos, dos cuarentenas en el mismo segundo se pisaban el .quar
+    safe_name = f"{ts.strftime('%Y%m%d_%H%M%S')}_{secrets.token_hex(4)}_{src.name}.quar"
     dst       = QUARANTINE_DIR / safe_name
 
     try:

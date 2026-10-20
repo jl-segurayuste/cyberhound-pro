@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from cyberhound.api.server import CyberHoundServer
+from cyberhound.core.agent import AgentConfig
 from cyberhound.core.config import CyberHoundConfig
 
 
@@ -17,7 +18,7 @@ def _req(body: dict):
 
 def _server(tmp_path):
     cfg = CyberHoundConfig()
-    srv = SimpleNamespace(cfg=cfg)
+    srv = SimpleNamespace(cfg=cfg, agent_manager=SimpleNamespace(cfg=AgentConfig()))
     # Evitar escribir el config real en disco
     cfg.save = lambda path=None: None
     return srv
@@ -47,6 +48,9 @@ class TestAgentConfig:
         assert srv.cfg.agent.manager_url == "https://m:8443"
         assert srv.cfg.agent.agent_name == "web-01"
         assert srv.cfg.agent.agent_key == "k123"
+        # y el AgentManager en memoria lo usa ya, sin reiniciar
+        assert srv.agent_manager.cfg.agent_key == "k123"
+        assert srv.agent_manager.cfg.mode == "agent"
 
     @pytest.mark.asyncio
     async def test_save_rejects_invalid_mode(self, tmp_path):

@@ -865,7 +865,7 @@ async function changeUserRole(username, role) {
   });
   const d = await r.json();
   if (d.ok) toast(`✓ Rol de ${username} cambiado a ${role}`);
-  else toast('Error: ' + d.error, 'error');
+  else { toast('Error: ' + d.error, 'error'); loadUsers(); }  // el select volvería a mostrar un rol que no se aplicó
 }
 
 async function deleteUser(username) {

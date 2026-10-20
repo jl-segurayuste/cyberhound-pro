@@ -645,6 +645,8 @@ body.activity-open #main { margin-right:320px; }
   #log-toggle { order: 3; margin-left: auto; }
   .logout-btn { order: 4; }
   #status-area { order: 5; width: 100%; font-size: .75rem; }
+  /* Swagger no es útil en un móvil y desplazaba el resto de botones a otra fila */
+  #topbar a[href="/api/docs"] { display: none; }
 
   /* La navegación se colapsa tras la hamburguesa; al abrir, menú vertical. */
   .top-nav {
