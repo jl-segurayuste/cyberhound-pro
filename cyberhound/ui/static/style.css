@@ -839,3 +839,8 @@ kbd {
 @media (max-width: 600px) {
   #global-search-wrap { display: none; }
 }
+
+/* Sustituyen a los antiguos onfocus/onmouseover inline (CSP sin 'unsafe-inline') */
+#global-search:focus { border-color: var(--blue) !important; }
+.gsearch-item:hover { background: var(--bg3); }
+[role="button"] { cursor: pointer; }

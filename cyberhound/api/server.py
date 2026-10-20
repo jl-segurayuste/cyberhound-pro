@@ -215,9 +215,9 @@ METRICS = _Metrics()
 @web.middleware
 async def security_headers_middleware(request: web.Request, handler):
     # Nonce por petición: los <script> inline llevan este nonce, de modo que un
-    # <script> inyectado (sin nonce) queda bloqueado por la CSP. Los manejadores
-    # de eventos inline (onclick…) siguen permitidos vía script-src-attr
-    # (endurecimiento futuro: eliminarlos y quitar también 'unsafe-inline' ahí).
+    # <script> inyectado (sin nonce) queda bloqueado por la CSP. La UI no usa
+    # atributos on* (eventos delegados vía data-on-*), así que script-src-attr
+    # es 'none': ni siquiera un atributo inyectado puede ejecutar JS.
     nonce = secrets.token_urlsafe(16)
     request["csp_nonce"] = nonce
     response = await handler(request)
@@ -229,7 +229,7 @@ async def security_headers_middleware(request: web.Request, handler):
         "Cache-Control":           "no-store",
         "Content-Security-Policy": (
             f"default-src 'self'; script-src 'self' 'nonce-{nonce}'; "
-            "script-src-attr 'unsafe-inline'; "
+            "script-src-attr 'none'; "
             "style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
             "connect-src 'self' ws: wss:;"
         ),

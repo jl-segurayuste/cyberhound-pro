@@ -17,6 +17,35 @@ const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replac
 const fmt = dt => dt ? new Date(dt).toLocaleString('es-ES',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '—';
 const dur = s => s==null?'—':s<60?`${Math.round(s)}s`:`${Math.round(s/60)}m ${Math.round(s%60)}s`;
 
+// ── Eventos sin JS inline ─────────────────────────────────────────────────
+// La CSP no permite atributos on*: los controles declaran data-on-<evento>="función"
+// y data-args-<evento>='[...]' ("$this" = el elemento, "$value" = su valor,
+// "$event" = el evento); data-stop corta la propagación y data-key filtra la tecla.
+const _EVENT_TYPES = ['click', 'change', 'input', 'keydown'];
+
+function on(type, fn, ...args) {
+  return `data-on-${type}="${esc(fn)}"` + (args.length ? ` data-args-${type}="${esc(JSON.stringify(args))}"` : '');
+}
+
+function _dispatch(ev) {
+  const sel = `[data-on-${ev.type}]`;
+  // Fase de captura + recorrido de dentro a fuera: mismo orden que el burbujeo de
+  // los antiguos onclick, y data-stop sigue impidiendo que salte el tr.onclick de la fila.
+  for (let el = ev.target.closest?.(sel); el; el = el.parentElement?.closest(sel)) {
+    const key = el.getAttribute('data-key');
+    if (key && ev.key !== key) continue;
+    const name = el.getAttribute(`data-on-${ev.type}`);
+    const fn = window[name];
+    if (typeof fn !== 'function') { console.error(`Manejador no definido: ${name}`); continue; }
+    const raw = JSON.parse(el.getAttribute(`data-args-${ev.type}`) || '[]');
+    fn(...raw.map(a => a === '$this' ? el : a === '$value' ? el.value : a === '$event' ? ev : a));
+    if (el.hasAttribute('data-stop')) { ev.stopPropagation(); break; }
+  }
+}
+_EVENT_TYPES.forEach(t => document.addEventListener(t, _dispatch, true));
+
+function hideEl(id) { const el = document.getElementById(id); if (el) el.style.display = 'none'; }
+
 function toast(msg, type='info') {
   const t = document.getElementById('toast');
   t.textContent = msg;
@@ -232,7 +261,7 @@ function _renderDashboard(stats, trend) {
   if (critList) {
     if (stats.critical_findings?.length) {
       critList.innerHTML = stats.critical_findings.map(f => `
-        <div class="critical-item" onclick="openDrawerFromData(${JSON.stringify(f).replace(/"/g,'&quot;')})">
+        <div class="critical-item" ${on('click', 'openDrawerFromData', f)}>
           <span>${_sevBadge('critical')}</span>
           <div>
             <div class="item-title">${esc(f.title)}</div>
@@ -283,7 +312,7 @@ function _appendAuditRow(f) {
     <td><b>${esc(f.title)}</b></td>
     <td style="color:var(--text2);font-size:.82rem">${esc((f.description||'').substring(0,100))}</td>
     <td>${f.auto_fix
-      ? `<button class="fix-btn" id="fix-${esc(f.id)}" onclick="event.stopPropagation();applyFix('${esc(f.id)}',this)">Corregir</button>`
+      ? `<button class="fix-btn" id="fix-${esc(f.id)}" ${on('click', 'applyFix', f.id, '$this')} data-stop>Corregir</button>`
       : `<span style="font-size:.75rem;color:var(--text2)">Manual</span>`
     }</td>`;
   tbody.appendChild(tr);
@@ -305,7 +334,7 @@ function _appendMalwareRow(f) {
     <td><b>${esc(f.title)}</b></td>
     <td style="font-family:monospace;font-size:.72rem">${esc(f.file_path||'')}</td>
     <td>${f.auto_fix
-      ? `<button class="fix-btn" id="fix-${esc(f.id)}" onclick="event.stopPropagation();applyFix('${esc(f.id)}',this)">Corregir</button>`
+      ? `<button class="fix-btn" id="fix-${esc(f.id)}" ${on('click', 'applyFix', f.id, '$this')} data-stop>Corregir</button>`
       : `<span style="font-size:.75rem;color:var(--text2)">Manual</span>`
     }</td>`;
   tbody.appendChild(tr);
@@ -400,7 +429,7 @@ function runNetworkScan() {
         <td>${_sevBadge(f.severity)}</td>
         <td>${esc(f.title)}</td>
         <td style="font-size:.78rem;color:var(--text2)">${esc((f.remediation||'').substring(0,60))}</td>
-        <td>${f.auto_fix ? `<button class="fix-btn remote" onclick="event.stopPropagation();applyFixRemote('${esc(f.id)}','${esc(host)}',this)">Fix</button>` : ''}</td>`;
+        <td>${f.auto_fix ? `<button class="fix-btn remote" ${on('click', 'applyFixRemote', f.id, host, '$this')} data-stop>Fix</button>` : ''}</td>`;
       tbody.appendChild(tr);
     },
     onDone() { btn('btn-network', false, '▶ Descubrir y analizar'); },
@@ -438,7 +467,7 @@ function _renderNetworkTable(devices) {
       <td class="${riskCls}">${risk.toUpperCase()}</td>
       <td>${cveCount ? `<span style="color:var(--red);font-weight:600">${cveCount} CVEs</span>` : '—'}</td>
       <td id="status-${d.ip.replace(/\./g,'_')}" style="font-size:.78rem;color:var(--text2)">Pendiente</td>
-      <td>${d.has_ssh !== false ? `<button class="fix-btn remote" onclick="sshAuditOne('${esc(d.ip)}',${d.ssh_port||22})">Auditar</button>` : ''}</td>`;
+      <td>${d.has_ssh !== false ? `<button class="fix-btn remote" ${on('click', 'sshAuditOne', d.ip, d.ssh_port || 22)}>Auditar</button>` : ''}</td>`;
     tbody.appendChild(tr);
   });
 }
@@ -483,7 +512,7 @@ function sshAuditOne(ip, port) {
         <td style="font-family:monospace;font-size:.78rem;color:var(--blue)">${esc(ip)}</td>
         <td>${_sevBadge(f.severity)}</td><td>${esc(f.title)}</td>
         <td style="font-size:.78rem;color:var(--text2)">${esc((f.remediation||'').substring(0,60))}</td>
-        <td>${f.auto_fix?`<button class="fix-btn remote" onclick="event.stopPropagation();applyFixRemote('${esc(f.id)}','${esc(ip)}',this)">Fix</button>`:''}</td>`;
+        <td>${f.auto_fix?`<button class="fix-btn remote" ${on('click', 'applyFixRemote', f.id, ip, '$this')} data-stop>Fix</button>`:''}</td>`;
       tbody.appendChild(tr);
     },
   });
@@ -504,7 +533,7 @@ async function loadHistory() {
     table.style.display = 'table'; empty.style.display = 'none';
     const typeLabels = {audit:'Seguridad', malware:'Malware', network:'Red', code:'Código', ssh:'SSH'};
     tbody.innerHTML = data.map(s => `
-      <tr onclick="loadHistoryDetail(${s.id},this)" style="cursor:pointer">
+      <tr ${on('click', 'loadHistoryDetail', s.id, '$this')} style="cursor:pointer">
         <td style="white-space:nowrap">${fmt(s.started_at)}</td>
         <td>${typeLabels[s.scan_type]||s.scan_type}</td>
         <td style="font-size:.82rem;color:var(--text2)">${esc(s.target||'localhost')}</td>
@@ -513,7 +542,7 @@ async function loadHistory() {
         <td style="color:var(--text2);font-size:.82rem">${dur(s.duration_s)}</td>
         <td><span style="font-size:.75rem;color:var(--text2)">${s.triggered_by==='scheduler'?'Auto':'Manual'}</span></td>
         <td>
-          ${s.status==='completed'?`<button class="fix-btn" onclick="event.stopPropagation();loadHistoryDetail(${s.id})">Ver</button>`:''}
+          ${s.status==='completed'?`<button class="fix-btn" ${on('click', 'loadHistoryDetail', s.id)} data-stop>Ver</button>`:''}
           <span style="font-size:.75rem;color:${s.status==='completed'?'var(--green)':s.status==='failed'?'var(--red)':'var(--yellow)'}">${s.status}</span>
         </td>
       </tr>`).join('');
@@ -552,7 +581,7 @@ async function loadHistoryDetail(scanId) {
   // Tabla de findings
   const tbody = document.getElementById('hist-detail-tbody');
   tbody.innerHTML = findings.map(f => `
-    <tr data-sev="${esc(f.severity)}" onclick="openDrawerFromData(${JSON.stringify(f).replace(/"/g,'&quot;')})">
+    <tr data-sev="${esc(f.severity)}" ${on('click', 'openDrawerFromData', f)}>
       <td>${_sevBadge(f.severity)}</td>
       <td style="font-size:.78rem;color:var(--text2)">${esc(f.category)}</td>
       <td>${esc(f.title)}</td>
@@ -690,12 +719,12 @@ function _renderDrawer(f, host) {
     ${f.file_path ? `<div class="d-field"><div class="d-label">Fichero</div><div class="d-value" style="font-family:monospace;font-size:.82rem">${esc(f.file_path)}${f.line_number?':'+f.line_number:''}</div></div>` : ''}
     <div class="d-field"><div class="d-label">Cómo solucionarlo</div><div class="d-code">${esc(f.remediation)}</div></div>
     ${f.fixed_at ? `<div style="background:rgba(63,185,80,.12);border-radius:6px;padding:8px;font-size:.82rem;color:var(--green)">✓ Corregido el ${fmt(f.fixed_at)} por ${esc(f.fixed_by||'')}</div>` : ''}
-    ${f.auto_fix && !hostLabel && !f.fixed_at ? `<button class="d-fix-btn" onclick="applyFix('${esc(f.id||f.finding_id||'')}',this)">Aplicar corrección</button>` : ''}
-    ${f.auto_fix && hostLabel && !f.fixed_at ? `<button class="d-fix-btn remote" onclick="applyFixRemote('${esc(f.id||'')}','${esc(hostLabel)}',this)">Corregir en ${esc(hostLabel)}</button>` : ''}
+    ${f.auto_fix && !hostLabel && !f.fixed_at ? `<button class="d-fix-btn" ${on('click', 'applyFix', f.id || f.finding_id || '', '$this')}>Aplicar corrección</button>` : ''}
+    ${f.auto_fix && hostLabel && !f.fixed_at ? `<button class="d-fix-btn remote" ${on('click', 'applyFixRemote', f.id || '', hostLabel, '$this')}>Corregir en ${esc(hostLabel)}</button>` : ''}
     ${!f.auto_fix ? `<div style="margin-top:10px;padding:10px;background:var(--bg3);border-radius:6px;font-size:.82rem;color:var(--text2)">ℹ️ Esta corrección requiere revisión manual.</div>` : ''}
     <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
-      <button class="btn-secondary small" onclick="explainFinding('${esc(f.id||f.finding_id||'')}')">Explicar con IA</button>
-      <button class="btn-secondary small" onclick="suppressFinding('${esc(f.id||f.finding_id||'')}')">Suprimir (falso positivo)</button>
+      <button class="btn-secondary small" ${on('click', 'explainFinding', f.id || f.finding_id || '')}>Explicar con IA</button>
+      <button class="btn-secondary small" ${on('click', 'suppressFinding', f.id || f.finding_id || '')}>Suprimir (falso positivo)</button>
     </div>
     <div id="ai-explanation" style="margin-top:10px"></div>`;
   document.getElementById('drawer').classList.add('open');
@@ -781,10 +810,10 @@ async function loadScheduler() {
         </div>
         <div class="sched-actions">
           <button class="toggle-btn ${e.enabled?'active':''}"
-            onclick="toggleScheduler('${esc(e.name)}',${!e.enabled},this)">
+            ${on('click', 'toggleScheduler', e.name, !e.enabled, '$this')}>
             ${e.enabled ? 'Desactivar' : 'Activar'}
           </button>
-          <button class="fix-btn" onclick="runSchedulerNow('${esc(e.name)}',this)">▶ Ejecutar ahora</button>
+          <button class="fix-btn" ${on('click', 'runSchedulerNow', e.name, '$this')}>▶ Ejecutar ahora</button>
         </div>
       </div>`).join('') || '<p style="color:var(--text2)">Scheduler no activo</p>';
   } catch(e) { console.error('loadScheduler:', e); }
@@ -823,12 +852,12 @@ async function loadUsers() {
         <td style="color:var(--text2);font-size:.82rem">${fmt(u.last_login)}</td>
         <td>${u.active ? '<span style="color:var(--green)">Activo</span>' : '<span style="color:var(--text2)">Desactivado</span>'}</td>
         <td style="display:flex;gap:6px">
-          <select onchange="changeUserRole('${esc(u.username)}',this.value)" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:3px 6px;border-radius:4px;font-size:.78rem">
+          <select ${on('change', 'changeUserRole', u.username, '$value')} style="background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:3px 6px;border-radius:4px;font-size:.78rem">
             <option value="admin" ${u.role==='admin'?'selected':''}>admin</option>
             <option value="operator" ${u.role==='operator'?'selected':''}>operator</option>
             <option value="viewer" ${u.role==='viewer'?'selected':''}>viewer</option>
           </select>
-          <button class="btn-secondary small" onclick="deleteUser('${esc(u.username)}')">Borrar</button>
+          <button class="btn-secondary small" ${on('click', 'deleteUser', u.username)}>Borrar</button>
         </td>
       </tr>`).join('');
   } catch(e) { console.error('loadUsers:', e); }
@@ -891,7 +920,7 @@ async function loadSuppressions() {
         <td style="font-size:.82rem">${esc(s.reason)}</td>
         <td style="font-size:.78rem;color:var(--text2)">${esc(s.created_by)}</td>
         <td style="font-size:.78rem;color:var(--text2)">${s.expires_at ? fmt(s.expires_at) : 'Permanente'}</td>
-        <td><button class="btn-secondary small" onclick="removeSuppression('${esc(s.finding_id_pattern)}')">Eliminar</button></td>
+        <td><button class="btn-secondary small" ${on('click', 'removeSuppression', s.finding_id_pattern)}>Eliminar</button></td>
       </tr>`).join('');
   } catch(e) { console.error('loadSuppressions:', e); }
 }
@@ -2413,7 +2442,7 @@ async function runLDAPScan() {
       if (empty)   empty.style.display   = 'none';
       _renderSummary('ldap-summary-bar', d.findings);
       tbody.innerHTML = d.findings.map(f => `
-        <tr onclick="openDrawer(${JSON.stringify(f).replace(/"/g,'&quot;')})">
+        <tr ${on('click', 'openDrawer', f)}>
           <td>${sevBadge(f.severity)}</td>
           <td style="font-size:.78rem;color:var(--text2)">${esc((f.category||'').replace('ldap/',''))}</td>
           <td>${esc(f.title)}</td>
@@ -2467,8 +2496,8 @@ async function loadQuarantine() {
       <td style="font-size:.75rem;color:var(--text2)">${(item.size_bytes/1024).toFixed(1)} KB</td>
       <td><span style="font-size:.72rem;padding:2px 6px;border-radius:3px;background:var(--bg3)">${item.restored?'Restaurado':'Cuarentena'}</span></td>
       <td>
-        <button class="btn-secondary small" onclick="restoreQuarantine('${esc(item.quarantine_name)}')">Restaurar</button>
-        <button class="btn-danger small" onclick="deleteQuarantine('${esc(item.quarantine_name)}')">Eliminar</button>
+        <button class="btn-secondary small" ${on('click', 'restoreQuarantine', item.quarantine_name)}>Restaurar</button>
+        <button class="btn-danger small" ${on('click', 'deleteQuarantine', item.quarantine_name)}>Eliminar</button>
       </td>
     </tr>`).join('');
 }
@@ -2853,7 +2882,7 @@ async function runDockerImageScan() {
 
     if (tbody) {
       tbody.innerHTML = d.findings.map(f => `
-        <tr onclick="openDrawer(${JSON.stringify(f).replace(/"/g,'&quot;')})">
+        <tr ${on('click', 'openDrawer', f)}>
           <td>${sevBadge(f.severity)}</td>
           <td style="font-size:.78rem;color:var(--text2)">${esc((f.category||'').replace('docker/image/',''))}</td>
           <td><b>${esc(f.title)}</b><div style="font-size:.75rem;color:var(--text2)">${esc((f.description||'').substring(0,80))}</div></td>
@@ -2983,7 +3012,7 @@ async function runRuntimeScan() {
     _renderSummary('rt-summary-bar', d.findings);
     if (tbody) {
       tbody.innerHTML = d.findings.map(f => `
-        <tr onclick="openDrawer(${JSON.stringify(f).replace(/"/g,'&quot;')})">
+        <tr ${on('click', 'openDrawer', f)}>
           <td>${sevBadge(f.severity)}</td>
           <td style="font-size:.78rem;color:var(--text2)">${esc((f.category||'').replace('runtime/',''))}</td>
           <td><b>${esc(f.title)}</b></td>
@@ -3052,10 +3081,8 @@ async function globalSearch(query) {
       const sevColors = { critical:'var(--critical)', high:'var(--high)', medium:'var(--medium)', low:'var(--text2)' };
       resultsEl.innerHTML = allFindings.slice(0, 8).map(f => {
         const color = sevColors[f.severity] || 'var(--text2)';
-        return `<div style="padding:10px 14px;border-bottom:1px solid var(--border);cursor:pointer;hover:background:var(--bg3)"
-          onclick="openDrawer(${JSON.stringify(f).replace(/"/g,'&quot;')});closeGlobalSearch()"
-          onmouseover="this.style.background='var(--bg3)'"
-          onmouseout="this.style.background=''"
+        return `<div style="padding:10px 14px;border-bottom:1px solid var(--border);cursor:pointer"
+          class="gsearch-item" ${on('click', 'openSearchResult', f)}
         >
           <div style="display:flex;gap:8px;align-items:center">
             <span style="color:${color};font-size:.72rem;font-weight:700">${(f.severity||'').toUpperCase()}</span>
@@ -3069,6 +3096,12 @@ async function globalSearch(query) {
 
     } catch(e) { /* silencioso */ }
   }, 200);
+}
+
+function openSearchResult(f) { openDrawer(f); closeGlobalSearch(); }
+
+function globalSearchKeydown(ev, el) {
+  if (ev.key === 'Escape') { el.value = ''; closeGlobalSearch(); }
 }
 
 function closeGlobalSearch() {
@@ -3327,14 +3360,14 @@ async function loadSystemStatus() {
         label: 'Notif. push',
         value: _browserNotifEnabled ? 'Activadas' : 'Desactivadas',
         color: _browserNotifEnabled ? 'var(--green)' : 'var(--text2)',
-        onclick: 'requestBrowserNotifications()',
+        onclick: 'requestBrowserNotifications',
       },
     ];
 
     el.innerHTML = items.map(item => `
       <div style="display:flex;justify-content:space-between;align-items:center;
                   padding:5px 0;border-bottom:1px solid var(--border);font-size:.8rem"
-           ${item.onclick ? `onclick="${item.onclick}" style="cursor:pointer"` : ''}>
+           ${item.onclick ? `${on('click', item.onclick)} role="button"` : ''}>
         <span style="color:var(--text2)">${item.label}</span>
         <span style="color:${item.color}">${item.value}
           ${item.tip ? `<span style="color:var(--text2);font-size:.72rem"> — ${item.tip}</span>` : ''}
@@ -3499,7 +3532,7 @@ function _renderIntelResults(data) {
       const cat = (f.category || '').split('/').pop();
       const target = f.evidence?.match(/ip=([^\s]+)/)?.[1] ||
                      f.evidence?.match(/domain=([^\s]+)/)?.[1] || '—';
-      return `<tr onclick="openDrawer(${JSON.stringify(f).replace(/"/g,'&quot;')})">
+      return `<tr ${on('click', 'openDrawer', f)}>
         <td>${sevBadge(f.severity)}</td>
         <td style="font-size:.78rem;color:var(--text2)">${esc(cat)}</td>
         <td style="font-family:monospace;font-size:.78rem">${esc(target)}</td>
@@ -3549,7 +3582,7 @@ async function loadIntelHistory() {
     listEl.innerHTML = history.map(scan => `
       <div style="display:flex;gap:12px;padding:8px 0;border-bottom:1px solid var(--border);
                   font-size:.8rem;align-items:center;cursor:pointer"
-           onclick="loadIntelScanDetail(${scan.id})">
+           ${on('click', 'loadIntelScanDetail', scan.id)}>
         <span style="color:var(--text2)">${new Date(scan.started_at).toLocaleString('es')}</span>
         <span>${_scorePill(scan.score)}</span>
         <span style="color:var(--text2)">${scan.total_findings || 0} hallazgos</span>

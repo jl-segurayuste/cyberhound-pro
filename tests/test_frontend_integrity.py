@@ -1,6 +1,6 @@
 """Integridad estática del frontend (sin navegador).
 
-Detecta la clase de bug que rompió varios paneles: handlers (onclick/onchange…)
+Detecta la clase de bug que rompió varios paneles: handlers (data-on-*/on())
 que invocan funciones JS inexistentes, y el desajuste de nombres `_func` vs
 `func`. Se ejecuta con la suite normal de pytest.
 """
@@ -11,10 +11,13 @@ STATIC = Path(__file__).resolve().parent.parent / "cyberhound" / "ui" / "static"
 APP = (STATIC / "app.js").read_text(encoding="utf-8")
 IDX = (STATIC / "index.html").read_text(encoding="utf-8")
 
-_HANDLER_RE = re.compile(
-    r'on(?:click|change|input|submit|keydown|keyup|focus|blur)\s*=\s*'
-    r'[\\"\'`]\s*([A-Za-z_$][\w$]*)\s*\('
-)
+# Los eventos se declaran como data-on-<evento>="función" (HTML) o con el helper
+# on('<evento>', 'función', ...) (plantillas de app.js); el dispatcher los resuelve
+# en window[función], así que deben ser declaraciones `function` (no const/let).
+_DATA_ON_RE = re.compile(r'data-on-[a-z]+="([A-Za-z_$][\w$]*)"')
+_ON_HELPER_RE = re.compile(r"\bon\('[a-z]+',\s*'([A-Za-z_$][\w$]*)'")
+_ON_DYNAMIC_RE = re.compile(r"\bonclick:\s*'([A-Za-z_$][\w$]*)'")
+_INLINE_ATTR_RE = re.compile(r'\son[a-z]+\s*=\s*["\']')
 
 
 def _defined(text: str) -> set[str]:
@@ -25,21 +28,23 @@ def _defined(text: str) -> set[str]:
 
 
 DEFINED = _defined(APP) | _defined(IDX)
-
-# Palabras clave / globales que pueden aparecer como `palabra(` en un handler
-# inline (p.ej. onkeydown="if(...)") y no son funciones de la app.
-_JS_KEYWORDS = {"if", "for", "while", "switch", "return", "typeof", "void",
-                "delete", "new", "throw", "do", "else", "function", "catch"}
+# Lo que el dispatcher puede encontrar en window[...]
+GLOBAL_FUNCS = set(re.findall(r'^\s*(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(', APP + IDX, re.M)) | set(
+    re.findall(r'window\.([A-Za-z_$][\w$]*)\s*=', APP + IDX))
 
 
 def test_all_event_handlers_are_defined():
-    """Cada función invocada desde un on*-handler debe existir en el JS."""
-    handlers = set(_HANDLER_RE.findall(IDX)) | set(_HANDLER_RE.findall(APP))
-    # Extras invocados tras stopPropagation() dentro de plantillas
-    handlers |= set(re.findall(r'stopPropagation\(\);\s*([A-Za-z_$][\w$]*)\s*\(', APP))
-    handlers -= _JS_KEYWORDS
-    missing = sorted(h for h in handlers if h not in DEFINED)
-    assert not missing, f"Handlers que llaman a funciones inexistentes: {missing}"
+    """Cada función referenciada desde data-on-*/on() existe como función global."""
+    handlers = set(_DATA_ON_RE.findall(IDX)) | set(_ON_HELPER_RE.findall(APP)) | set(_ON_DYNAMIC_RE.findall(APP))
+    assert len(handlers) > 50, "no se encontraron los handlers: ¿ha cambiado la sintaxis?"
+    missing = sorted(h for h in handlers if h not in GLOBAL_FUNCS)
+    assert not missing, f"Handlers sin función global (window[...]) que los atienda: {missing}"
+
+
+def test_no_inline_event_attributes():
+    """La CSP tiene script-src-attr 'none': un onclick="..." no se ejecutaría."""
+    found = _INLINE_ATTR_RE.findall(IDX) + _INLINE_ATTR_RE.findall(re.sub(r"\bon\(", "", APP))
+    assert not found, f"Atributos de evento inline: {found[:5]}"
 
 
 def test_no_underscore_prefix_mismatch():

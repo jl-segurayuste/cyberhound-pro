@@ -43,11 +43,17 @@ class TestIntelScanner:
 class TestMalwareScanner:
 
     @pytest.mark.asyncio
-    async def test_scan_nonexistent_path(self):
-        """Ruta inexistente no crashea."""
+    async def test_scan_nonexistent_path(self, tmp_path):
+        """Ruta inexistente no crashea.
+
+        Antes llamaba a full_scan() sin argumentos: escaneaba la máquina entera
+        (hashes de /usr/bin, auditd, cron...) y en CI superaba a veces el timeout de 30s.
+        """
         from cyberhound.scanners.malware import MalwareScanner
-        scanner = MalwareScanner()
-        findings = await MalwareScanner.full_scan()
+        missing = str(tmp_path / "no-existe")
+        findings = await MalwareScanner.full_scan(
+            skip_modules=["hash", "auditd", "cron"], yara_paths=[missing], web_roots=[missing],
+        )
         assert isinstance(findings, list)
 
     @pytest.mark.asyncio

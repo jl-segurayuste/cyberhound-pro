@@ -21,8 +21,9 @@ async def test_csp_script_src_uses_nonce_not_unsafe_inline():
                       if d.strip().startswith("script-src "))
     assert "nonce-" in script_src
     assert "'unsafe-inline'" not in script_src   # bloquea <script> inyectados
-    # Los manejadores de eventos inline siguen permitidos por su directiva propia.
-    assert "script-src-attr 'unsafe-inline'" in csp
+    # La UI ya no usa atributos on*: ni un atributo inyectado puede ejecutar JS.
+    assert "script-src-attr 'none'" in csp
+    assert "'unsafe-inline'" not in csp.split("style-src")[0]
 
 
 @pytest.mark.asyncio
