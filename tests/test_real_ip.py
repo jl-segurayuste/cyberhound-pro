@@ -56,3 +56,19 @@ def test_entrada_basura_no_se_acepta():
 def test_entradas_invalidas_de_config_se_ignoran():
     set_trusted_proxies(["no-es-una-red", "192.168.1.0/24"])
     assert len(security._trusted_proxies) == 1
+
+
+def test_proxy_de_confianza_por_nombre(monkeypatch):
+    """docker compose: CH_TRUSTED_PROXIES=nginx (sin subred fija que choque con otras redes)."""
+    import socket
+
+    from cyberhound.core import security
+    monkeypatch.setattr(socket, "getaddrinfo", lambda name, port: [(0, 0, 0, "", ("172.18.0.5", 0))]
+                        if name == "nginx" else (_ for _ in ()).throw(OSError()))
+    security.set_trusted_proxies(["nginx", "10.0.0.0/8", "no válido!"])
+    try:
+        assert security._is_trusted_proxy("172.18.0.5")
+        assert security._is_trusted_proxy("10.1.2.3")
+        assert not security._is_trusted_proxy("172.18.0.6")
+    finally:
+        security.set_trusted_proxies([])

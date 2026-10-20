@@ -179,14 +179,39 @@ _trusted_proxies: list = []
 
 
 def set_trusted_proxies(entries: list[str]) -> None:
-    """Proxies inversos (IP o CIDR) de confianza además de localhost."""
-    nets = []
+    """Proxies inversos de confianza además de localhost: IP, CIDR o nombre de host
+    (p. ej. el servicio "nginx" de docker compose, que se resuelve por DNS)."""
+    nets, names = [], []
     for e in entries or []:
+        e = str(e).strip()
         try:
-            nets.append(ipaddress.ip_network(e.strip(), strict=False))
+            nets.append(ipaddress.ip_network(e, strict=False))
         except ValueError:
-            logger.warning("trusted_proxies: entrada inválida ignorada: %r", e)
+            if re.fullmatch(r"[A-Za-z0-9]([A-Za-z0-9.-]{0,252})", e):
+                names.append(e)
+            else:
+                logger.warning("trusted_proxies: entrada inválida ignorada: %r", e)
     _trusted_proxies[:] = nets
+    _trusted_names[:] = names
+    _resolved.clear()
+
+
+_trusted_names: list[str] = []
+_resolved: dict[str, tuple[float, set]] = {}   # nombre → (instante, IPs); se refresca cada 60 s
+
+
+def _resolve(name: str) -> set:
+    import socket
+    now = time.monotonic()
+    hit = _resolved.get(name)
+    if hit and now - hit[0] < 60:
+        return hit[1]
+    try:
+        ips = {ipaddress.ip_address(a[4][0]) for a in socket.getaddrinfo(name, None)}
+    except OSError:
+        ips = set()
+    _resolved[name] = (now, ips)
+    return ips
 
 
 def _is_trusted_proxy(ip: str) -> bool:
@@ -194,7 +219,9 @@ def _is_trusted_proxy(ip: str) -> bool:
         addr = ipaddress.ip_address(ip)
     except ValueError:
         return False
-    return any(addr in n for n in (*_LOOPBACK, *_trusted_proxies))
+    if any(addr in n for n in (*_LOOPBACK, *_trusted_proxies)):
+        return True
+    return any(addr in _resolve(n) for n in _trusted_names)
 
 
 def _get_real_ip(request: web.Request) -> str:

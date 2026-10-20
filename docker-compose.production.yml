@@ -38,7 +38,7 @@ services:
       CH_PASSWORD: ${CH_PASSWORD:?define CH_PASSWORD en .env}
       CH_DB_URL: postgresql://cyberhound:${POSTGRES_PASSWORD}@postgres:5432/cyberhound
       CH_HOST: 0.0.0.0                       # solo accesible por nginx en la red interna
-      CH_TRUSTED_PROXIES: 172.30.57.0/24     # nginx: el rate limit ve la IP real del cliente
+      CH_TRUSTED_PROXIES: nginx              # el rate limit ve la IP real del cliente, no la de nginx
       CH_TLS_DIR: /data/tls
       SHODAN_API_KEY: ${SHODAN_API_KEY:-}
       VT_API_KEY: ${VT_API_KEY:-}
@@ -98,16 +98,14 @@ services:
         condition: service_completed_successfully
     environment:
       CH_DOMAIN: ${CH_DOMAIN:-localhost}
+      CH_HTTPS_PORT: ${CH_HTTPS_PORT:-443}
     ports:
       - "${CH_HTTP_PORT:-80}:80"
       - "${CH_HTTPS_PORT:-443}:443"
     volumes:
       - ./docker/nginx/templates:/etc/nginx/templates:ro
       - nginx_certs:/etc/nginx/certs:ro
-    networks:
-      internal:
-        ipv4_address: 172.30.57.10
-      egress: {}
+    networks: [internal, egress]
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null --no-check-certificate https://127.0.0.1/health || exit 1"]
       interval: 30s
@@ -138,7 +136,4 @@ volumes:
 networks:
   internal:
     internal: true                           # PostgreSQL sin salida ni exposición
-    ipam:
-      config:
-        - subnet: 172.30.57.0/24
   egress: {}
