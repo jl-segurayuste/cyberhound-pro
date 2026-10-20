@@ -60,9 +60,11 @@ class TestMalwareScanner:
     async def test_scan_empty_directory(self, tmp_path):
         """Directorio vacío = lista de findings (puede estar vacía)."""
         from cyberhound.scanners.malware import MalwareScanner
-        scanner = MalwareScanner()
-        findings = await MalwareScanner.full_scan()
+        # Rutas controladas: sin ellas se escaneaba el sistema entero y el tiempo dependía de la máquina
+        findings = await MalwareScanner.full_scan(yara_paths=[str(tmp_path)], web_roots=[str(tmp_path)],
+                                                  skip_modules=["hash", "auditd"])
         assert isinstance(findings, list)
+        assert not any(f.category.startswith("malware/webshell") for f in findings)
 
     def test_scanner_instantiation(self):
         """Instanciación sin parámetros no falla."""
@@ -71,10 +73,11 @@ class TestMalwareScanner:
         assert scanner is not None
 
     @pytest.mark.asyncio
-    async def test_full_scan_returns_finding_list(self):
+    async def test_full_scan_returns_finding_list(self, tmp_path):
         """full_scan siempre devuelve una lista."""
         from cyberhound.scanners.malware import MalwareScanner
-        result = await MalwareScanner.full_scan()
+        result = await MalwareScanner.full_scan(yara_paths=[str(tmp_path)], web_roots=[str(tmp_path)],
+                                                skip_modules=["hash", "auditd"])
         assert isinstance(result, list)
 
 
