@@ -19,6 +19,7 @@ from aiohttp import web
 
 from cyberhound.core import passwords
 from cyberhound.core.logging import audit_log, get_logger
+from cyberhound.core.multitenancy import DEFAULT_TENANT, current_tenant, tenant_from_host
 from cyberhound.core.security import CsrfProtection, RateLimiter, _get_real_ip
 
 logger = get_logger("auth")
@@ -29,6 +30,8 @@ AUTH_HEADER = "Authorization"
 # Cookie del paso intermedio "contraseña OK, falta el código 2FA" -- separada
 # de AUTH_COOKIE para que un token pendiente nunca pueda usarse como sesión.
 PENDING_2FA_COOKIE = "ch_2fa_pending"
+# Tenant que está mirando el superadmin (multi-tenant); solo cuenta para él
+TENANT_COOKIE = "ch_tenant"
 _PENDING_2FA_TTL = timedelta(minutes=5)
 
 # Rutas que no requieren autenticación (exactas, salvo los estáticos). /metrics solo es
@@ -83,9 +86,11 @@ class AuthConfig:
         # KDF salado (PBKDF2); verifica también hashes SHA-256 antiguos.
         return passwords.verify_password(password, self.password_hash or "")
 
-    def issue_jwt(self, username: str) -> str:
+    def issue_jwt(self, username: str, tenant: str = DEFAULT_TENANT) -> str:
         payload = {
             "sub": username,
+            # Organización de la sesión (multi-tenant); la fija el login y nadie la puede cambiar
+            "tenant": tenant,
             "iat": datetime.utcnow(),
             "exp": datetime.utcnow() + self.token_ttl,
             # Nonce para invalidar tokens individuales si es necesario
@@ -110,16 +115,27 @@ class AuthConfig:
             logger.warning("JWT inválido: %s", e)
             return None
 
-    def issue_pending_2fa_token(self, username: str) -> str:
+    def issue_pending_2fa_token(self, username: str, tenant: str = DEFAULT_TENANT) -> str:
         """Token de corta duración (5 min) para el paso intermedio entre
         contraseña correcta y código 2FA -- nunca sirve como sesión."""
         payload = {
             "sub": username,
+            "tenant": tenant,
             "purpose": "pending_2fa",
             "iat": datetime.utcnow(),
             "exp": datetime.utcnow() + _PENDING_2FA_TTL,
         }
         return jwt.encode(payload, self.secret, algorithm="HS256")
+
+    def pending_2fa_claims(self, token: str) -> tuple[str, str] | None:
+        """(usuario, tenant) del token de "pendiente de 2FA", o None."""
+        try:
+            payload = jwt.decode(token, self.secret, algorithms=["HS256"])
+        except jwt.InvalidTokenError:
+            return None
+        if payload.get("purpose") != "pending_2fa" or not payload.get("sub"):
+            return None
+        return payload["sub"], payload.get("tenant", DEFAULT_TENANT)
 
     def verify_pending_2fa_token(self, token: str) -> str | None:
         """Devuelve el usuario si el token de "pendiente de 2FA" es válido, o
@@ -148,13 +164,16 @@ def _is_localhost(request: web.Request) -> bool:
     return False
 
 
-async def verify_credentials(cfg: AuthConfig, server, username: str, password: str) -> bool:
+async def verify_credentials(cfg: AuthConfig, server, username: str, password: str,
+                             tenant: str = DEFAULT_TENANT) -> bool:
     """Admin de config.yaml o usuario activo de la BD (los de Ajustes › Usuarios).
 
     Antes solo se aceptaba el usuario de config.yaml: los usuarios creados desde
-    la UI se guardaban pero nunca podían iniciar sesión.
+    la UI se guardaban pero nunca podían iniciar sesión. En multi-tenant el admin
+    de config.yaml solo existe en "default"; en el resto la BD es la del tenant
+    (el llamante fija current_tenant).
     """
-    if username == cfg.username:
+    if username == cfg.username and tenant == DEFAULT_TENANT:
         return cfg.verify_password(password)
     db_user = await server.db.get_user(username) if server and username else None
     if not db_user:
@@ -243,6 +262,7 @@ async def auth_middleware(request: web.Request, handler):
 
     audit_log.auth_success(_get_real_ip(request), payload["sub"])
     request["auth_user"] = payload["sub"]
+    request["auth_tenant"] = payload.get("tenant", DEFAULT_TENANT)
     return await handler(request)
 
 
@@ -283,7 +303,16 @@ def setup_auth_routes(app: web.Application, cfg: AuthConfig) -> None:
         # Contraseña ya verificada, falta el código -- muestra el paso 2 en
         # vez del formulario de usuario/contraseña.
         template = _CODE_HTML if pending_token and cfg.verify_pending_2fa_token(pending_token) else _LOGIN_HTML
-        html = template.replace("__ERROR__", err_html).replace("__CSRF__", csrf_token)
+        server = request.app.get("server")
+        tenant_field = ""
+        if _mt_enabled(server):
+            # Vacío = la plataforma (superadmin); el subdominio la rellena si coincide con un tenant
+            guess = tenant_from_host(request.host)
+            value = guess if guess and server.tenants.is_active(guess) else ""
+            tenant_field = (f'<input type="text" name="tenant" placeholder="Organización (vacío = plataforma)" '
+                            f'autocomplete="organization" value="{_h(value)}">')
+        html = (template.replace("__ERROR__", err_html).replace("__CSRF__", csrf_token)
+                .replace("__TENANT__", tenant_field))
         response = web.Response(text=html, content_type="text/html")
         # Inyectar cookie con Secure correcto según si hay TLS
         CsrfProtection.inject_token(response, csrf_token, is_https=_is_https(request))
@@ -329,7 +358,10 @@ def setup_auth_routes(app: web.Application, cfg: AuthConfig) -> None:
         # consultaba, así que activar 2FA no protegía el login en absoluto.
         pending_token = request.cookies.get(PENDING_2FA_COOKIE)
         if pending_token:
-            pending_user = cfg.verify_pending_2fa_token(pending_token)
+            claims = cfg.pending_2fa_claims(pending_token)
+            pending_user, pending_tenant = claims if claims else (None, DEFAULT_TENANT)
+            if claims and server is not None and not await _open_tenant(server, pending_tenant):
+                pending_user = None
             if not pending_user:
                 response = web.HTTPFound(
                     "/login?error=Sesión+de+verificación+expirada.+Inicia+sesión+de+nuevo."
@@ -339,10 +371,14 @@ def setup_auth_routes(app: web.Application, cfg: AuthConfig) -> None:
 
             code = str(data.get("code", "")).strip()
             from cyberhound.core.totp import TOTPManager
-            ok, _reason = (
-                await TOTPManager(server.db).verify(pending_user, code)
-                if server else (False, "sin servidor")
-            )
+            ctx = current_tenant.set(pending_tenant)
+            try:
+                ok, _reason = (
+                    await TOTPManager(server.db).verify(pending_user, code)
+                    if server else (False, "sin servidor")
+                )
+            finally:
+                current_tenant.reset(ctx)
             if not ok:
                 blocked, block_time = await _login_rate_limiter.record_failure(ip)
                 audit_log.auth_failure(ip, f"2FA incorrecto para '{pending_user}'")
@@ -355,7 +391,7 @@ def setup_auth_routes(app: web.Application, cfg: AuthConfig) -> None:
                 raise web.HTTPFound("/login?error=Código+de+verificación+incorrecto.")
 
             await _login_rate_limiter.record_success(ip)
-            token = cfg.issue_jwt(pending_user)
+            token = cfg.issue_jwt(pending_user, pending_tenant)
             audit_log.auth_success(ip, pending_user)
             response = web.HTTPFound("/")
             response.set_cookie(
@@ -370,8 +406,21 @@ def setup_auth_routes(app: web.Application, cfg: AuthConfig) -> None:
         # ── Primer paso: verificar usuario + contraseña ─────────────────────
         username = str(data.get("username", "")).strip()[:64]
         password = str(data.get("password", ""))
+        tenant = DEFAULT_TENANT
+        if _mt_enabled(server):
+            tenant = str(data.get("tenant", "")).strip().lower()[:32] or DEFAULT_TENANT
 
-        if not await verify_credentials(cfg, server, username, password):
+        tenant_ok = server is None or await _open_tenant(server, tenant)
+        ctx = current_tenant.set(tenant if tenant_ok else DEFAULT_TENANT)
+        try:
+            valid = tenant_ok and await verify_credentials(cfg, server, username, password, tenant)
+            if not tenant_ok:
+                passwords.verify_password(password, _DUMMY_HASH)   # mismo tiempo que un fallo normal
+            db_user = await server.db.get_user(username) if (valid and server) else None
+        finally:
+            current_tenant.reset(ctx)
+
+        if not valid:
             blocked, block_time = await _login_rate_limiter.record_failure(ip)
             audit_log.auth_failure(ip, f"Login fallido para '{username}'")
             if blocked:
@@ -386,7 +435,7 @@ def setup_auth_routes(app: web.Application, cfg: AuthConfig) -> None:
         # Rehash transparente: si el hash almacenado es del formato antiguo
         # (SHA-256 sin sal), se migra a PBKDF2 ahora que tenemos la contraseña en
         # claro. Best-effort: un fallo de persistencia NUNCA debe romper el login.
-        if username == cfg.username and passwords.needs_rehash(cfg.password_hash or ""):
+        if tenant == DEFAULT_TENANT and username == cfg.username and passwords.needs_rehash(cfg.password_hash or ""):
             try:
                 new_hash = passwords.hash_password(password)
                 cfg.password_hash = new_hash
@@ -399,9 +448,8 @@ def setup_auth_routes(app: web.Application, cfg: AuthConfig) -> None:
                 logger.warning("No se pudo migrar el hash de contraseña: %s", e)
 
         # ── ¿El usuario tiene 2FA activo? Si sí, aún no se le deja entrar ────
-        db_user = await server.db.get_user(username) if server else None
         if db_user and db_user.get("totp_enabled"):
-            pending_token = cfg.issue_pending_2fa_token(username)
+            pending_token = cfg.issue_pending_2fa_token(username, tenant)
             response = web.HTTPFound("/login")
             response.set_cookie(
                 PENDING_2FA_COOKIE, pending_token,
@@ -412,7 +460,7 @@ def setup_auth_routes(app: web.Application, cfg: AuthConfig) -> None:
             return response
 
         # ── Login exitoso (sin 2FA) ──────────────────────────────────────────
-        token = cfg.issue_jwt(username)
+        token = cfg.issue_jwt(username, tenant)
         audit_log.auth_success(ip, username)
 
         response = web.HTTPFound("/")
@@ -432,6 +480,7 @@ def setup_auth_routes(app: web.Application, cfg: AuthConfig) -> None:
         response.del_cookie(AUTH_COOKIE)
         response.del_cookie(PENDING_2FA_COOKIE)
         response.del_cookie(CsrfProtection.COOKIE_NAME)
+        response.del_cookie(TENANT_COOKIE)
         return response
 
     async def health(request: web.Request) -> web.Response:
@@ -446,6 +495,22 @@ def setup_auth_routes(app: web.Application, cfg: AuthConfig) -> None:
     async def favicon(request: web.Request) -> web.Response:
         raise web.HTTPMovedPermanently("/static/favicon.svg")
     app.router.add_get("/favicon.ico", favicon)
+
+
+def _mt_enabled(server) -> bool:
+    cfg = getattr(server, "cfg", None)
+    return bool(cfg is not None and cfg.multi_tenant.enabled)
+
+
+async def _open_tenant(server, tenant: str) -> bool:
+    """True si el tenant existe y está activo (y deja su BD abierta para usarla)."""
+    if tenant == DEFAULT_TENANT:
+        return True
+    tenants = getattr(server, "tenants", None)
+    if tenants is None or not tenants.is_active(tenant):
+        return False
+    await server.tenant_dbs.ensure(tenant)
+    return True
 
 
 def _h(s: str) -> str:
@@ -484,6 +549,7 @@ _LOGIN_HTML = """<!DOCTYPE html>
   <h2>CyberHound Pro</h2>
   <form method="POST" action="/login">
     <input type="hidden" name="_csrf" value="__CSRF__">
+    __TENANT__
     <input type="text" name="username" placeholder="Usuario"
            autocomplete="username" required autofocus>
     <input type="password" name="password" placeholder="Contraseña"

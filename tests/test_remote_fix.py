@@ -162,7 +162,7 @@ async def client(tmp_path, monkeypatch):
     await srv.db.init()
     remote = _f("10.0.0.5::ssh_PermitRootLogin")
     remote.source_host = "10.0.0.5"
-    srv._findings_cache["ws"] = [remote]
+    srv._findings_cache["default:ws"] = [remote]   # caché de una conexión WS del tenant "default"
     c = TestClient(TestServer(srv.build_app()))
     await c.start_server()
     await c.get("/login")

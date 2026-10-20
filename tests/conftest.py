@@ -25,6 +25,8 @@ def _postgres_limpio():
         async def reset():
             conn = await asyncpg.connect(url)
             try:
+                for (schema,) in await conn.fetch("SELECT nspname FROM pg_namespace WHERE nspname LIKE 'tenant\\_%'"):
+                    await conn.execute(f'DROP SCHEMA "{schema}" CASCADE')   # esquemas de tenants
                 await conn.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
             finally:
                 await conn.close()

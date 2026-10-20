@@ -130,8 +130,10 @@ class DatabasePG:
     Usa asyncpg para máximo rendimiento.
     """
 
-    def __init__(self, url: str) -> None:
+    def __init__(self, url: str, schema: str = "public") -> None:
         self.url  = url
+        # Esquema propio por tenant (multi-tenant): mismas tablas, datos separados
+        self.schema = schema
         self._pool = None
 
     async def init(self) -> None:
@@ -143,10 +145,17 @@ class DatabasePG:
             ) from e
 
         import asyncpg
+        if self.schema != "public":
+            conn = await asyncpg.connect(self.url)
+            try:
+                await conn.execute(f'CREATE SCHEMA IF NOT EXISTS "{self.schema}"')
+            finally:
+                await conn.close()
         self._pool = await asyncpg.create_pool(
             self.url,
-            min_size=2, max_size=10,
+            min_size=1 if self.schema != "public" else 2, max_size=10,
             command_timeout=30,
+            server_settings={"search_path": self.schema},
         )
         async with self._pool.acquire() as conn:
             await conn.execute(SCHEMA_PG)

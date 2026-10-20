@@ -62,11 +62,30 @@ const FN_PERMS = {
   saveAgentConfig: 'config', saveKeys: 'config', saveNotifications: 'config', saveSIEM: 'config',
   saveTicketing: 'config', testNotifications: 'config', testSIEM: 'config', testTicketing: 'config',
   activateLicense: 'config', updateYaraRules: 'config',
-  discoverOnly: 'scan', changeUserRole: 'users', createUser: 'users', deleteUser: 'users', loadUsers: 'users',
+  discoverOnly: 'scan', createTenant: 'users', deleteTenant: 'users', rotateTenantKey: 'users',
+  changeUserRole: 'users', createUser: 'users', deleteUser: 'users', loadUsers: 'users',
 };
-let USER = { username: '', role: 'admin', permissions: ['scan', 'fix', 'config', 'users', 'view'] };
+// Acciones sobre el propio servidor o su configuración global: en multi-tenant solo el
+// superadmin (HOST_TASKS y _PLATFORM_PREFIXES del servidor; lo comprueba test_consistency)
+const HOST_FNS = new Set([
+  'applyFix', 'fixAll', 'quickAudit', 'quickMalware', 'quickDocker', 'runAudit', 'runMalware', 'runDocker',
+  'runCode', 'runServicesAudit', 'runRuntimeScan', 'runDockerImageScan', 'generateSBOM', 'downloadSBOM',
+  'deleteQuarantine', 'restoreQuarantine', 'runAnsiblePlaybook', 'updateYaraRules', 'activateLicense',
+  'saveKeys', 'saveNotifications', 'testNotifications', 'saveSIEM', 'testSIEM', 'saveTicketing', 'testTicketing',
+  'toggleScheduler', 'runSchedulerNow', 'saveAgentConfig',
+  'loadKeys', 'loadMonitorStatus', 'loadSBOM', 'loadScheduler', 'loadYaraRules',   // botones "↻ Cargar"
+]);
+const HOST_PANELS = ['audit', 'malware', 'docker', 'code', 'services', 'monitor'];
+const HOST_CFG_TABS = ['keys', 'notifications', 'siem', 'ticketing', 'scheduler', 'yara', 'license', 'quarantine',
+                       'sbom', 'ansible'];
+let USER = { username: '', role: 'admin', permissions: ['scan', 'fix', 'config', 'users', 'view'],
+             host_access: true, superadmin: true, multi_tenant: false, tenant: 'default' };
 
-function canDo(fn) { const p = FN_PERMS[fn]; return !p || USER.permissions.includes(p); }
+function hostAccess() { return USER.host_access !== false; }
+function canDo(fn) {
+  const p = FN_PERMS[fn];
+  return (!p || USER.permissions.includes(p)) && (hostAccess() || !HOST_FNS.has(fn));
+}
 
 function applyRole(root = document) {
   if (!root.querySelectorAll) return;
@@ -78,6 +97,16 @@ function applyRole(root = document) {
     el.title = `Tu rol (${USER.role}) no permite esta acción`;
   });
   if (!USER.permissions.includes('users')) document.querySelectorAll('[data-cfg="users"]').forEach(el => el.hidden = true);
+  if (!hostAccess()) {
+    HOST_PANELS.forEach(n => document.querySelectorAll(`.nav-tab[data-panel="${n}"]`).forEach(el => el.hidden = true));
+    HOST_CFG_TABS.forEach(n => document.querySelectorAll(`[data-cfg="${n}"]`).forEach(el => el.hidden = true));
+    const mode = document.getElementById('agent-mode-card'); if (mode) mode.hidden = true;
+    const sys = document.getElementById('dash-system-status')?.closest('.dash-card'); if (sys) sys.hidden = true;
+    // un grupo del menú sin entradas visibles tampoco se muestra
+    document.querySelectorAll('.nav-group').forEach(g => {
+      g.hidden = ![...g.querySelectorAll('.nav-tab')].some(t => !t.hidden);
+    });
+  }
 }
 
 async function loadMe() {
@@ -88,8 +117,13 @@ async function loadMe() {
   } catch { return; }
   document.body.dataset.role = USER.role;
   const who = document.getElementById('user-role-badge');
-  if (who) who.textContent = `${USER.username} · ${USER.role}`;
+  if (who) who.textContent = USER.multi_tenant
+    ? `${USER.username} · ${USER.role} · ${USER.tenant_name}` : `${USER.username} · ${USER.role}`;
   applyRole();
+  if (USER.multi_tenant && USER.superadmin) {
+    document.querySelectorAll('[data-cfg="tenants"]').forEach(el => el.hidden = false);
+    loadTenantSwitch();
+  }
   new MutationObserver(ms => ms.forEach(m => m.addedNodes.forEach(n => applyRole(n.parentNode || n))))
     .observe(document.body, { childList: true, subtree: true });
 }
@@ -111,6 +145,7 @@ function btn(id, disabled, label) {
 
 // ── Navegación ────────────────────────────────────────────────────────────
 function showPanel(name) {
+  if (!hostAccess() && HOST_PANELS.includes(name)) name = 'dashboard';
   document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-tab').forEach(b => b.classList.remove('active'));
   document.getElementById('panel-' + name)?.classList.add('active');
@@ -120,7 +155,15 @@ function showPanel(name) {
   const _panelLoaders = {
     dashboard: () => loadDashboard(),
     history:   () => { loadHistory(); loadAgentFilterOptions(); },
-    settings:  () => { loadKeys(); loadNotifications(); loadScheduler(); loadSuppressions(); loadUsers(); },
+    settings:  () => {
+      loadKeys(); loadNotifications(); loadScheduler(); loadSuppressions(); loadUsers();
+      // si la pestaña activa no está disponible para este usuario, abrir la primera que sí
+      const act = document.querySelector('#panel-settings .cfg-tab.active');
+      if (!act || act.hidden) {
+        const first = [...document.querySelectorAll('#panel-settings .cfg-tab')].find(t => !t.hidden);
+        if (first) showCfgTab(first.dataset.cfg);
+      }
+    },
     monitor:   () => { loadMonitorStatus(); loadMonitorHistory(); },
   };
   _panelLoaders[name]?.();
@@ -140,7 +183,8 @@ function showCfgTab(name) {
     scheduler:    () => loadScheduler(),
     '2fa':        () => load2FAStatus(),
     yara:         () => loadYaraRules(),
-    agents:       () => { loadAgents(); loadAgentConfig(); },
+    agents:       () => { loadAgents(); loadAgentConfig(); loadTenantAgentKey(); },
+    tenants:      () => loadTenants(),
     license:      () => loadLicenseInfo(),
     quarantine:   () => loadQuarantine(),
     ansible:      () => loadAnsibleJobs(),
@@ -843,6 +887,7 @@ function searchTable(tbodyId, q) {
 
 // ── Scheduler ─────────────────────────────────────────────────────────────
 async function loadScheduler() {
+  if (!hostAccess()) return;   // de la plataforma: un tenant recibiría 403
   try {
     const data = await fetch('/api/scheduler').then(r => r.json());
     const container = document.getElementById('scheduler-list');
@@ -1002,6 +1047,7 @@ async function removeSuppression(pattern) {
 
 // ── API Keys ──────────────────────────────────────────────────────────────
 async function loadKeys() {
+  if (!hostAccess()) return;   // de la plataforma: un tenant recibiría 403
   try {
     const d = await fetch('/api/config/keys').then(r => r.json());
     const map = {shodan:'key-shodan', virustotal:'key-vt', abuseipdb:'key-abuse', greynoise:'key-grey', hibp:'key-hibp'};
@@ -1031,6 +1077,7 @@ async function saveKeys() {
 
 // ── Notificaciones ────────────────────────────────────────────────────────
 async function loadNotifications() {
+  if (!hostAccess()) return;   // de la plataforma: un tenant recibiría 403
   try {
     const d = await fetch('/api/config/notifications').then(r => r.json());
     document.getElementById('notif-email-enabled')?.removeAttribute('checked');
@@ -1148,10 +1195,10 @@ function sevBadge(sev) {
 const _sevBadge = sevBadge; // alias para compatibilidad
 
 // ── Init ──────────────────────────────────────────────────────────────────
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
   setStatus('idle', 'Listo');
   appendLog('info', 'CyberHound Pro iniciado.');
-  loadMe();
+  await loadMe();   // antes de cargar nada: decide qué puede ver este usuario
   loadDashboard();
   loadKeys();
   // Polling del dashboard cada 5 minutos (respaldo del WS push)
@@ -1185,6 +1232,7 @@ function renderDockerChips(findings) {
 
 // ── SIEM config ───────────────────────────────────────────────────────────────
 async function loadSIEM() {
+  if (!hostAccess()) return;   // de la plataforma: un tenant recibiría 403
   const r = await fetch('/api/config/siem');
   const d = await r.json();
   document.getElementById('siem-wazuh-enabled').checked = d.wazuh_enabled;
@@ -1241,6 +1289,7 @@ async function testSIEM() {
 
 // ── Ticketing config (Jira / ServiceNow) ────────────────────────────────────────
 async function loadTicketing() {
+  if (!hostAccess()) return;   // de la plataforma: un tenant recibiría 403
   const r = await fetch('/api/config/ticketing');
   const d = await r.json();
   document.getElementById('tkt-jira-enabled').checked  = d.jira_enabled;
@@ -2161,6 +2210,7 @@ async function updateYaraRules() {
 }
 
 async function loadYaraRules() {
+  if (!hostAccess()) return;   // de la plataforma: un tenant recibiría 403
   const r = await fetch('/api/yara/rules');
   if (!r.ok) return;
   const rules = await r.json();
@@ -2252,6 +2302,7 @@ function _toggleAgentFields() {
 
 // Carga la configuración actual del modo agente en el formulario.
 async function loadAgentConfig() {
+  if (!hostAccess()) return;   // de la plataforma: un tenant recibiría 403
   try {
     const a = await fetch('/api/config/agent').then(r => r.json());
     const sel = document.getElementById('agent-mode');         if (sel) sel.value = a.mode || 'standalone';
@@ -2414,6 +2465,7 @@ function handlePushEvent(msg) {
 
 // ── Licencias ─────────────────────────────────────────────────────────────────
 async function loadLicenseInfo() {
+  if (!hostAccess()) return;   // de la plataforma: un tenant recibiría 403
   try {
     const r = await fetch('/api/license');
     if (!r.ok) return;
@@ -2516,6 +2568,7 @@ async function runLDAPScan() {
 
 // ── Cuarentena ────────────────────────────────────────────────────────────────
 async function loadQuarantine() {
+  if (!hostAccess()) return;   // de la plataforma: un tenant recibiría 403
   const [items, stats] = await Promise.all([
     fetch('/api/quarantine').then(r=>r.json()).catch(()=>[]),
     fetch('/api/quarantine/stats').then(r=>r.json()).catch(()=>({})),
@@ -2683,6 +2736,7 @@ async function downloadSBOM() {
 }
 
 async function loadSBOM() {
+  if (!hostAccess()) return;   // de la plataforma: un tenant recibiría 403
   const r = await fetch('/api/sbom/latest');
   if (!r.ok) { toast('Sin SBOM generado todavía — genera uno primero'); return; }
   const d = await r.json();
@@ -2836,6 +2890,7 @@ async function loadComplianceSummary() {
 
 // ── Monitor status ────────────────────────────────────────────────────────────
 async function loadMonitorStatus() {
+  if (!hostAccess()) return;   // de la plataforma: un tenant recibiría 403
   try {
     const r = await fetch('/api/monitor/status');
     if (!r.ok) return;
@@ -2859,6 +2914,7 @@ async function loadMonitorStatus() {
 
 // ── Historial de eventos del monitor ─────────────────────────────────────────
 async function loadMonitorHistory() {
+  if (!hostAccess()) return;   // de la plataforma: un tenant recibiría 403
   try {
     const r = await fetch('/api/history?type=monitor&limit=50');
     if (!r.ok) return;
@@ -3016,6 +3072,7 @@ async function runAnsiblePlaybook() {
 }
 
 async function loadAnsibleJobs() {
+  if (!hostAccess()) return;   // de la plataforma: un tenant recibiría 403
   try {
     const r = await fetch('/api/ansible/jobs');
     const jobs = await r.json();
@@ -3383,6 +3440,7 @@ window._wsPushHandler = function(event) {
 
 // ── Panel de estado del sistema ────────────────────────────────────────────────
 async function loadSystemStatus() {
+  if (!hostAccess()) return;   // de la plataforma: un tenant recibiría 403
   try {
     const [monR, licR, schedR] = await Promise.all([
       fetch('/api/monitor/status'),
@@ -3756,4 +3814,91 @@ async function importAuditFile() {
   } finally {
     if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'Importar'; }
   }
+}
+
+
+// ── Multi-tenant ──────────────────────────────────────────────────────────────
+async function loadTenantSwitch() {
+  const sel = document.getElementById('tenant-switch');
+  if (!sel) return;
+  try {
+    const r = await fetch('/api/tenants');
+    if (!r.ok) return;
+    const tenants = await r.json();
+    sel.innerHTML = '<option value="default">Plataforma</option>' +
+      tenants.map(t => `<option value="${esc(t.slug)}">${esc(t.name)}</option>`).join('');
+    sel.value = USER.tenant;
+    sel.hidden = false;
+  } catch { /* sin selector */ }
+}
+
+async function switchTenant(slug) {
+  const r = await fetch('/api/tenant/switch', {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({slug}),
+  });
+  if (r.ok) location.reload();
+  else toast('Error: ' + ((await r.json()).error || r.status), 'error');
+}
+
+async function loadTenants() {
+  const tbody = document.getElementById('tenants-tbody');
+  if (!tbody || !(USER.multi_tenant && USER.superadmin)) return;
+  try {
+    const tenants = await fetch('/api/tenants').then(r => r.json());
+    tbody.innerHTML = tenants.length ? tenants.map(t => `<tr>
+        <td style="font-family:monospace">${esc(t.slug)}</td><td>${esc(t.name)}</td><td>${esc(t.plan)}</td>
+        <td style="font-size:.78rem;color:var(--text2)">${fmt(t.created_at)}</td>
+        <td style="white-space:nowrap">
+          <button class="btn-secondary small" ${on('click', 'rotateTenantKey', t.slug)}>Nueva clave</button>
+          <button class="btn-secondary small danger" ${on('click', 'deleteTenant', t.slug)}>Dar de baja</button>
+        </td></tr>`).join('')
+      : '<tr><td colspan="5" style="color:var(--text2)">Sin organizaciones todavía.</td></tr>';
+  } catch (e) { tbody.innerHTML = `<tr><td colspan="5">Error: ${esc(e.message)}</td></tr>`; }
+}
+
+async function createTenant() {
+  const val = id => document.getElementById(id)?.value.trim() || '';
+  const msg = document.getElementById('tenant-msg');
+  const body = { slug: val('tenant-slug').toLowerCase(), name: val('tenant-name'), admin_email: val('tenant-email'),
+                 plan: val('tenant-plan') || 'starter', admin_username: val('tenant-admin-user'),
+                 admin_password: document.getElementById('tenant-admin-pass')?.value || '' };
+  const r = await fetch('/api/tenants', {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body),
+  });
+  const d = await r.json();
+  if (!r.ok) { msg.style.color = 'var(--red)'; msg.textContent = '✗ ' + (d.error || r.status); return; }
+  msg.style.color = 'var(--green)';
+  msg.innerHTML = `✓ Creada <b>${esc(d.slug)}</b>. Clave de agente (guárdala, no se vuelve a mostrar aquí):` +
+                  `<br><code style="word-break:break-all">${esc(d.api_key)}</code>`;
+  ['tenant-slug', 'tenant-name', 'tenant-email', 'tenant-admin-user', 'tenant-admin-pass']
+    .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+  loadTenants(); loadTenantSwitch();
+}
+
+async function deleteTenant(slug) {
+  if (!confirm(`¿Dar de baja la organización "${slug}"? Sus usuarios dejarán de poder entrar; los datos se archivan.`)) return;
+  const r = await fetch(`/api/tenants/${encodeURIComponent(slug)}`, {method: 'DELETE'});
+  if (r.ok) { toast('✓ Organización dada de baja'); loadTenants(); loadTenantSwitch(); }
+  else toast('Error: ' + ((await r.json()).error || r.status), 'error');
+}
+
+async function rotateTenantKey(slug) {
+  const r = await fetch(`/api/tenants/${encodeURIComponent(slug)}/rotate-key`, {method: 'POST'});
+  const d = await r.json();
+  const msg = document.getElementById('tenant-msg');
+  if (!r.ok) { toast('Error: ' + (d.error || r.status), 'error'); return; }
+  msg.style.color = 'var(--green)';
+  msg.innerHTML = `✓ Nueva clave de agente de <b>${esc(slug)}</b> (la anterior deja de valer):` +
+                  `<br><code style="word-break:break-all">${esc(d.api_key)}</code>`;
+}
+
+async function loadTenantAgentKey() {
+  const card = document.getElementById('tenant-agent-key-card');
+  if (!card || !USER.multi_tenant || USER.tenant === 'default' || USER.role !== 'admin') return;
+  try {
+    const r = await fetch('/api/tenant/agent-key');
+    if (!r.ok) return;
+    document.getElementById('tenant-agent-key').textContent = (await r.json()).api_key;
+    card.hidden = false;
+  } catch { /* sin clave */ }
 }

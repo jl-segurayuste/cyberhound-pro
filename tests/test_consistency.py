@@ -55,22 +55,36 @@ def _fn_perms() -> dict[str, str]:
     return dict(re.findall(r"(\w+): '(\w+)'", block))
 
 
+def _js_function(fn: str) -> str | None:
+    """Cuerpo de una función de app.js, contando llaves desde la que la abre."""
+    m = re.search(rf"^(?:async )?function {fn}\s*\([^)]*\)\s*\{{", APP_JS, re.M)
+    if not m:
+        return None
+    depth, i = 1, m.end()
+    while depth and i < len(APP_JS):
+        depth += {"{": 1, "}": -1}.get(APP_JS[i], 0)
+        i += 1
+    return APP_JS[m.start():i]
+
+
 def _write_endpoints(fn: str, seen=None) -> set[tuple[str, str]]:
     """Endpoints de escritura (y /ws) que usa una función de app.js, siguiendo las que llama."""
     seen = seen or set()
     if fn in seen:
         return set()
     seen.add(fn)
-    m = re.search(rf"^(?:async )?function {fn}\s*\(.*?(?=^(?:async )?function |\Z)", APP_JS, re.S | re.M)
-    if not m:
+    body = _js_function(fn)
+    if body is None:
         return set()
-    body, out = m.group(0), set()
+    out = set()
     for call in re.finditer(r"fetch\(\s*[`'\"]([^`'\"]+)[`'\"](?:\s*,\s*\{([^}]*)\})?", body):
         method = re.search(r"method:\s*'(\w+)'", call.group(2) or "")
         path = re.sub(r"\$\{[^}]+\}", "x", call.group(1)).split("?")[0]
         out.add((method.group(1) if method else "GET", path))
-    if "wsRun(" in body:
+    if "wsRun(" in body or "wsRunWithActivity(" in body:
         out.add(("GET", "/ws"))
+    for task in re.findall(r"wsRun(?:WithActivity)?\('(\w+)'", body):
+        out.add(("WS", task))
     for callee in set(re.findall(r"\b([a-zA-Z_]\w*)\(", body)) - {fn}:
         if callee in ("appendLog", "toast", "showPanel", "showCfgTab", "loadDashboard", "esc", "on"):
             continue
@@ -85,7 +99,7 @@ def test_permisos_de_la_ui_coinciden_con_el_servidor():
     # showCfgTab abre cualquier pestaña de Ajustes: la de Usuarios la oculta applyRole() a quien no es admin
     # showPanel carga Ajustes y loadUsers se salta sola si el rol no es admin
     for fn in sorted(handlers - {"showCfgTab", "showPanel"}):
-        needed = {_required_permission(m, p) for m, p in _write_endpoints(fn)} - {"view"}
+        needed = {_required_permission(m, p) for m, p in _write_endpoints(fn) if m != "WS"} - {"view"}
         # la UI debe pedir al menos el permiso más alto que exige el servidor
         if needed:
             assert fn in perms, f"{fn} usa {needed} pero no está en FN_PERMS"
@@ -99,3 +113,28 @@ def test_permisos_de_la_ui_coinciden_con_el_servidor():
     assert set(perms.values()) <= set(ROLE_PERMISSIONS["admin"])
     assert "applyRole" in APP_JS and '[data-cfg="users"]' in APP_JS
     assert re.search(r"async function loadUsers\(\) \{\n  if \(!USER\.permissions\.includes\('users'\)\) return;", APP_JS)
+
+
+def test_acciones_sobre_el_servidor_coinciden_con_el_servidor():
+    """Multi-tenant: lo que la UI oculta a un tenant (HOST_FNS) = lo que el servidor le niega."""
+    from cyberhound.api.server import HOST_TASKS, _platform_only
+    host_fns = set(re.findall(r"'(\w+)'", re.search(r"const HOST_FNS = new Set\(\[(.*?)\]\);", APP_JS, re.S).group(1)))
+    handlers = set(re.findall(r'data-on-[a-z]+="(\w+)"', (ROOT / "cyberhound/ui/static/index.html").read_text()))
+    handlers |= set(re.findall(r"on\('[a-z]+', '(\w+)'", APP_JS))
+    for fn in sorted(handlers - {"showCfgTab", "showPanel"}):
+        eps = _write_endpoints(fn)
+        touches_host = any((m == "WS" and p in HOST_TASKS) or (m != "WS" and _platform_only(p)) for m, p in eps)
+        if fn in ("createTenant", "deleteTenant", "rotateTenantKey", "switchTenant"):
+            continue   # gestión de tenants: solo se muestra al superadmin
+        assert touches_host == (fn in host_fns), f"{fn}: toca el servidor={touches_host}, en HOST_FNS={fn in host_fns}"
+
+
+def test_loaders_de_plataforma_no_se_lanzan_para_un_tenant():
+    for name in re.findall(r"^(?:async )?function (load\w+)\(\)", APP_JS, re.M):
+        body = _js_function(name).split("{", 1)[1]
+        paths = {re.sub(r"\$\{[^}]+\}", "x", u).split("?")[0] for u in re.findall(r"fetch\(\s*[`'\"]([^`'\"]+)", body)}
+        from cyberhound.api.server import _platform_only
+        if name in ("loadTenants", "loadTenantSwitch"):
+            continue   # comprueban superadmin
+        if any(_platform_only(p) for p in paths):
+            assert body.lstrip().startswith("if (!hostAccess()) return;"), name

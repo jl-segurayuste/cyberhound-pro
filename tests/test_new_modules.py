@@ -15,7 +15,7 @@ import pytest
 
 from cyberhound.core.ansible_integration import _finding_to_task, generate_playbook
 from cyberhound.core.models import Finding
-from cyberhound.core.multitenancy import Tenant, TenantMiddleware, TenantStore
+from cyberhound.core.multitenancy import Tenant, TenantStore, tenant_from_host
 from cyberhound.core.openapi import ENDPOINT_DOCS, SWAGGER_UI_HTML, build_openapi_spec
 from cyberhound.scanners.runtime_scan import (
     SUSPICIOUS_PROCS,
@@ -96,7 +96,6 @@ class TestTenant:
     def test_valid_slug(self):
         t = Tenant(slug="acme", name="ACME Corp")
         assert t.slug == "acme"
-        assert t.db_prefix == "acme_"
         assert t.pg_schema == "tenant_acme"
 
     def test_invalid_slug_raises(self):
@@ -204,34 +203,24 @@ class TestTenantStore:
         assert store2.get("acme").name == "ACME"
 
 
-class TestTenantMiddleware:
+class TestTenantDetection:
 
-    @pytest.fixture
-    def store(self, tmp_path):
-        s = TenantStore(path=tmp_path / "t.json")
-        s.create("acme", "ACME Corp")
-        return s
+    def test_subdominio(self):
+        assert tenant_from_host("acme.cyberhound.empresa.com") == "acme"
+        assert tenant_from_host("acme.cyberhound.empresa.com:8443") == "acme"
 
-    def test_detects_header(self, store):
-        mw = TenantMiddleware(store)
-        req = MagicMock()
-        req.headers = {"X-Tenant": "acme", "Host": "localhost"}
-        req.rel_url.query = {}
-        assert mw._detect_tenant(req) == "acme"
+    def test_sin_subdominio_o_reservado(self):
+        assert tenant_from_host("localhost:8443") == ""
+        assert tenant_from_host("www.empresa.com") == ""
+        assert tenant_from_host("192.168.1.10") == ""
 
-    def test_detects_subdomain(self, store):
-        mw = TenantMiddleware(store)
-        req = MagicMock()
-        req.headers = {"Host": "acme.cyberhound.empresa.com"}
-        req.rel_url.query = {}
-        assert mw._detect_tenant(req) == "acme"
-
-    def test_defaults_to_default(self, store):
-        mw = TenantMiddleware(store)
-        req = MagicMock()
-        req.headers = {"Host": "localhost:8443"}
-        req.rel_url.query = {}
-        assert mw._detect_tenant(req) == "default"
+    def test_slugs_reservados_no_se_crean(self, tmp_path):
+        store = TenantStore(path=tmp_path / "t.json")
+        for slug in ("default", "admin", "static"):
+            with pytest.raises(ValueError):
+                store.create(slug, "X")
+        with pytest.raises(ValueError):
+            store.create("acme", "   ")
 
 
 # ── Ansible playbook generation ───────────────────────────────────────────────

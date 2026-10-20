@@ -24,12 +24,19 @@ from aiohttp import web
 from cyberhound import __version__
 from cyberhound.api.routes.intel_routes import register_routes as register_intel_routes
 from cyberhound.core import passwords
-from cyberhound.core.auth import AGENT_ROUTES, AuthConfig, auth_middleware, setup_auth_routes
+from cyberhound.core.auth import AGENT_ROUTES, TENANT_COOKIE, AuthConfig, auth_middleware, setup_auth_routes
 from cyberhound.core.config import CyberHoundConfig
 from cyberhound.core.database import AssetRecord, UserRecord
 from cyberhound.core.licensing import license_manager
 from cyberhound.core.logging import audit_log, get_logger
 from cyberhound.core.models import Finding, ScanReport
+from cyberhound.core.multitenancy import (
+    DEFAULT_TENANT,
+    TenantDatabases,
+    TenantRouter,
+    TenantStore,
+    current_tenant,
+)
 from cyberhound.core.notifications import NotificationConfig, NotificationManager
 from cyberhound.core.scheduler import Scheduler, build_scheduler
 from cyberhound.core.security import (
@@ -147,6 +154,62 @@ def _required_permission(method: str, path: str) -> str:
     return "view"
 
 
+# WS tasks y rutas que actúan sobre ESTE servidor o su configuración global: en
+# multi-tenant solo las usa el superadmin (un tenant no puede auditar ni tocar la
+# máquina que comparte con los demás, ni leer las credenciales de la plataforma)
+HOST_TASKS = {"audit", "malware", "docker", "services", "code"}
+_PLATFORM_PREFIXES = (
+    "/api/tenants", "/api/fix/local", "/api/rollback", "/api/quarantine", "/api/scan/runtime",
+    "/api/scan/docker-image", "/api/sbom", "/api/yara", "/api/monitor", "/api/ansible",
+    "/api/license/activate", "/api/config/", "/api/scheduler", "/metrics",
+)
+
+
+def _platform_only(path: str) -> bool:
+    return path.startswith(_PLATFORM_PREFIXES)
+
+
+@web.middleware
+async def tenant_middleware(request: web.Request, handler):
+    """Fija el tenant de la petición (current_tenant) y con él la BD que usa self.db.
+
+    Sale del JWT, que firma el login: un usuario de un tenant no puede cambiarlo. El
+    superadmin (admin de config.yaml en "default") puede mirar otro con X-Tenant o
+    la cookie ch_tenant. Los agentes se identifican con la API key de su tenant.
+    """
+    server = request.app["server"]
+    slug, superadmin = DEFAULT_TENANT, False
+    user = request.get("auth_user")
+    if user:
+        superadmin = request.get("auth_tenant", DEFAULT_TENANT) == DEFAULT_TENANT and user == server.cfg.auth.username
+    if server.cfg.multi_tenant.enabled:
+        if request.path in AGENT_ROUTES:
+            tenant = server.tenants.get_by_api_key(
+                server.agent_manager.extract_agent_key(request.headers.get("Authorization", "")))
+            if tenant:
+                slug = tenant.slug
+                request["tenant_agent_key"] = True
+        elif user:
+            slug = request.get("auth_tenant", DEFAULT_TENANT)
+            if superadmin:
+                wanted = request.headers.get("X-Tenant") or request.cookies.get(TENANT_COOKIE) or DEFAULT_TENANT
+                if wanted != DEFAULT_TENANT and server.tenants.is_active(wanted):
+                    slug = wanted
+            elif not server.tenants.is_active(slug):
+                return web.json_response({"error": "Organización desactivada"}, status=401)
+    elif user and request.get("auth_tenant", DEFAULT_TENANT) != DEFAULT_TENANT:
+        # Sesión de un tenant con el modo multi-tenant ya desactivado: no vale en "default"
+        return web.json_response({"error": "Sesión de una organización: el modo multi-tenant está desactivado"},
+                                 status=401)
+    request["tenant"], request["superadmin"] = slug, superadmin
+    await server.tenant_dbs.ensure(slug)
+    ctx = current_tenant.set(slug)
+    try:
+        return await handler(request)
+    finally:
+        current_tenant.reset(ctx)
+
+
 @web.middleware
 async def rbac_middleware(request: web.Request, handler):
     """Aplica ROLE_PERMISSIONS. Antes los roles se guardaban pero ningún endpoint los comprobaba."""
@@ -154,7 +217,9 @@ async def rbac_middleware(request: web.Request, handler):
     if not user or request.path in AGENT_ROUTES:   # modo sin auth, rutas públicas o agentes
         return await handler(request)
     server = request.app["server"]
-    if user == server.cfg.auth.username:
+    if server.cfg.multi_tenant.enabled and not request.get("superadmin") and _platform_only(request.path):
+        return web.json_response({"error": "Reservado al administrador de la plataforma"}, status=403)
+    if request.get("superadmin"):
         role = "admin"   # el admin de config.yaml nunca puede quedarse sin acceso
     else:
         db_user = await server.db.get_user(user)
@@ -265,14 +330,19 @@ class CyberHoundServer:
         self.cfg = cfg
         set_trusted_proxies(cfg.server.trusted_proxies)
         self._app: web.Application | None = None
+        # Hallazgos y scan de cada conexión WS. La clave es "<tenant>:<aleatorio>": antes era
+        # str(id(ws)), que Python reutiliza, y una conexión nueva heredaba la entrada de otra.
         self._findings_cache: dict[str, list[Finding]] = {}
         self._scan_id_cache:  dict[str, int] = {}
-        self._push_clients:   set = set()  # WebSocket push connections   # ws_id → scan_id en BD
+        self._push_clients:   dict = {}   # WebSocket push → tenant que recibe sus eventos
 
-        # Inicializar DB, notificaciones y scheduler
+        # BD: self.db enruta cada llamada a la BD del tenant de la petición ("default" sin multi-tenant)
         from cyberhound.core.database_pg import create_database
         db_url = getattr(cfg, "db_url", "") or ""
-        self.db = create_database(db_url=db_url, db_path=cfg.db_path)
+        self.tenant_dbs = TenantDatabases(create_database(db_url=db_url, db_path=cfg.db_path),
+                                          db_url=db_url, db_path=str(cfg.db_path))
+        self.db = TenantRouter(self.tenant_dbs)
+        self.tenants = TenantStore(Path(cfg.config_path).parent / "tenants.json")
         self.notification_manager = NotificationManager(
             NotificationConfig(
                 email_enabled=cfg.notifications.email_enabled,
@@ -323,7 +393,6 @@ class CyberHoundServer:
         self.scheduler: Scheduler | None = None
         self._sbom_cache: dict | None = None
         self._ansible_jobs: list = []
-        self._tenant_store = None
         self._ebpf_monitor = None
 
         # Modo agente
@@ -347,7 +416,8 @@ class CyberHoundServer:
         app = web.Application(
             middlewares=[
                 security_headers_middleware, request_logger_middleware,
-                CsrfProtection().middleware_factory(is_https=True), auth_middleware, rbac_middleware,
+                CsrfProtection().middleware_factory(is_https=True), auth_middleware, tenant_middleware,
+                rbac_middleware,
             ],
             client_max_size=10 * 1024 * 1024,
         )
@@ -451,6 +521,9 @@ class CyberHoundServer:
         app.router.add_get ("/api/tenants/{slug}",     self.api_tenant_get)
         app.router.add_patch("/api/tenants/{slug}",    self.api_tenant_update)
         app.router.add_delete("/api/tenants/{slug}",   self.api_tenant_delete)
+        app.router.add_post("/api/tenants/{slug}/rotate-key", self.api_tenant_rotate_key)
+        app.router.add_post("/api/tenant/switch",      self.api_tenant_switch)
+        app.router.add_get ("/api/tenant/agent-key",   self.api_tenant_agent_key)
 
         # ── Runtime container scan ────────────────────────────────────────────────
         app.router.add_post("/api/scan/runtime",       self.api_runtime_scan)
@@ -489,6 +562,10 @@ class CyberHoundServer:
         app.router.add_post("/api/yara/update",        self.api_yara_update)
         app.router.add_get ("/api/yara/rules",         self.api_yara_list)
 
+        async def _close_tenant_dbs(_app):
+            await self.tenant_dbs.close()
+        app.on_cleanup.append(_close_tenant_dbs)
+
         self._app = app
         return app
 
@@ -507,7 +584,7 @@ class CyberHoundServer:
     async def websocket_handler(self, request: web.Request) -> web.WebSocketResponse:
         ws = web.WebSocketResponse(heartbeat=30)
         await ws.prepare(request)
-        ws_id = str(id(ws))
+        ws_id = self._new_ws_id()
         user = request.get("auth_user", "anonymous")
         logger.info("WS conectado: %s user=%s", ws_id, user)
 
@@ -536,6 +613,11 @@ class CyberHoundServer:
             return ws
 
         task = msg["task"]
+        if task in HOST_TASKS and not self._may_touch_host(request):
+            await send({"type": "error", "text": "Ese análisis actúa sobre el propio servidor: "
+                                                  "solo lo puede lanzar el administrador de la plataforma"})
+            await ws.close()
+            return ws
         audit_log.scan_started(msg.get("target", "localhost"), task, user)
 
         # Crear scan en BD
@@ -939,7 +1021,7 @@ class CyberHoundServer:
                         fix_message=msg or finding.remediation,
                         actions=fixer.rollback_actions,
                     ))
-                for ws_id, findings in self._findings_cache.items():
+                for ws_id, findings in self._own_caches():
                     if any(f.id == fid for f in findings):
                         scan_id = self._scan_id_cache.get(ws_id)
                         if scan_id:
@@ -1211,6 +1293,8 @@ class CyberHoundServer:
                 updates["password_hash"] = passwords.hash_password(body["password"])
             if "active" in body:
                 updates["active"] = int(bool(body["active"]))
+            if not await self._user_exists(username):
+                return web.json_response({"error": "Usuario no encontrado"}, status=404)
             if updates:
                 await self.db.update_user(username, **updates)
             return web.json_response({"ok": True})
@@ -1222,8 +1306,14 @@ class CyberHoundServer:
         current  = request.get("auth_user", "")
         if username in (current, self.cfg.auth.username):
             return web.json_response({"error": "No puedes eliminar tu propio usuario ni el admin principal"}, status=400)
+        if not await self._user_exists(username):
+            return web.json_response({"error": "Usuario no encontrado"}, status=404)
         await self.db.update_user(username, active=0)
         return web.json_response({"ok": True})
+
+    async def _user_exists(self, username: str) -> bool:
+        """Incluye desactivados (se pueden reactivar). Antes un usuario inexistente daba 200."""
+        return any(u["username"] == username for u in await self.db.list_users())
 
     # ── Scheduler ─────────────────────────────────────────────────────────────
 
@@ -1235,8 +1325,17 @@ class CyberHoundServer:
     async def api_me(self, request: web.Request) -> web.Response:
         """Usuario de la sesión, su rol y permisos (la UI desactiva lo que daría 403)."""
         role = request.get("user_role", "admin")   # sin auth (localhost) todo está permitido
-        return web.json_response({"username": request.get("auth_user", ""), "role": role,
-                                  "permissions": sorted(ROLE_PERMISSIONS.get(role, set()))})
+        slug = current_tenant.get()
+        tenant = self.tenants.get(slug)
+        return web.json_response({
+            "username": request.get("auth_user", ""), "role": role,
+            "permissions": sorted(ROLE_PERMISSIONS.get(role, set())),
+            "multi_tenant": self.cfg.multi_tenant.enabled,
+            "tenant": slug, "tenant_name": tenant.name if tenant else "Plataforma",
+            "superadmin": bool(request.get("superadmin")) or not request.get("auth_user"),
+            # False = la UI oculta lo que actúa sobre el servidor o es configuración global
+            "host_access": self._may_touch_host(request),
+        })
 
     async def api_scheduler_run(self, request: web.Request) -> web.Response:
         name = request.match_info["name"]
@@ -1429,7 +1528,7 @@ class CyberHoundServer:
         """
         ws = web.WebSocketResponse(heartbeat=30)
         await ws.prepare(request)
-        self._push_clients.add(ws)
+        self._push_clients[ws] = current_tenant.get()
         logger.info("Push WS conectado: %d clientes activos", len(self._push_clients))
         try:
             # Enviar estado inicial al conectar
@@ -1442,7 +1541,7 @@ class CyberHoundServer:
         except Exception:
             pass
         finally:
-            self._push_clients.discard(ws)
+            self._push_clients.pop(ws, None)
         return ws
 
     async def _broadcast_push(self, event_type: str, data: dict) -> None:
@@ -1450,13 +1549,14 @@ class CyberHoundServer:
         if not self._push_clients:
             return
         message = {"type": event_type, "data": data, "ts": asyncio.get_event_loop().time()}
-        dead = set()
-        for ws in self._push_clients:
+        tenant = current_tenant.get()   # el del escaneo que genera el evento
+        for ws, ws_tenant in list(self._push_clients.items()):
+            if ws_tenant != tenant:
+                continue
             try:
                 await ws.send_json(message)
             except Exception:
-                dead.add(ws)
-        self._push_clients -= dead
+                self._push_clients.pop(ws, None)
 
     # ── OpenAPI / Swagger ─────────────────────────────────────────────────────
 
@@ -1544,55 +1644,85 @@ class CyberHoundServer:
 
     # ── Multi-tenant ──────────────────────────────────────────────────────────
 
-    def _get_tenant_store(self):
-        if not self._tenant_store:
-            from cyberhound.core.multitenancy import TenantStore
-            self._tenant_store = TenantStore()
-        return self._tenant_store
-
     async def api_tenants_list(self, request: web.Request) -> web.Response:
-        store = self._get_tenant_store()
-        return web.json_response([t.to_dict() for t in store.list()])
+        return web.json_response([t.to_dict() for t in self.tenants.list()])
 
     async def api_tenants_create(self, request: web.Request) -> web.Response:
+        """Crea el tenant, su BD y (opcional) su primer administrador."""
         try:
-            body   = await _read_json(request)
-            store  = self._get_tenant_store()
-            tenant = store.create(
-                slug=body.get("slug",""),
-                name=body.get("name",""),
-                admin_email=body.get("admin_email",""),
-                plan=body.get("plan","starter"),
+            body = await _read_json(request)
+            admin_user = str(body.get("admin_username") or "").strip()
+            admin_pw = str(body.get("admin_password") or "")
+            if admin_user and len(admin_pw) < 8:
+                return web.json_response({"error": "La contraseña del administrador necesita 8 caracteres"},
+                                         status=400)
+            tenant = self.tenants.create(
+                slug=str(body.get("slug", "")).strip().lower(), name=str(body.get("name", "")),
+                admin_email=str(body.get("admin_email", "")), plan=str(body.get("plan", "starter")),
             )
-            logger.info("Tenant creado por %s: %s", request.get("auth_user"), tenant.slug)
-            return web.json_response(tenant.to_dict(include_key=True), status=201)
         except ValueError as e:
             return web.json_response({"error": str(e)}, status=400)
-        except Exception as e:
-            return web.json_response({"error": str(e)}, status=500)
+        await self.tenant_dbs.ensure(tenant.slug)
+        if admin_user:
+            ctx = current_tenant.set(tenant.slug)
+            try:
+                await self.db.create_user(UserRecord(username=admin_user, role="admin",
+                                                     password_hash=passwords.hash_password(admin_pw)))
+            finally:
+                current_tenant.reset(ctx)
+        logger.info("Tenant creado por %s: %s", request.get("auth_user"), tenant.slug)
+        return web.json_response(tenant.to_dict(include_key=True), status=201)
 
     async def api_tenant_get(self, request: web.Request) -> web.Response:
-        slug   = request.match_info["slug"]
-        store  = self._get_tenant_store()
-        tenant = store.get(slug)
-        if not tenant:
-            return web.json_response({"error": f"Tenant '{slug}' no encontrado"}, status=404)
+        tenant = self.tenants.get(request.match_info["slug"])
+        if not tenant or not tenant.active:
+            return web.json_response({"error": "Tenant no encontrado"}, status=404)
         return web.json_response(tenant.to_dict())
 
     async def api_tenant_update(self, request: web.Request) -> web.Response:
-        slug  = request.match_info["slug"]
-        store = self._get_tenant_store()
-        body  = await _read_json(request)
-        t     = store.update(slug, **body)
+        try:
+            t = self.tenants.update(request.match_info["slug"], **(await _read_json(request)))
+        except ValueError as e:
+            return web.json_response({"error": str(e)}, status=400)
         if not t:
-            return web.json_response({"error": "No encontrado"}, status=404)
+            return web.json_response({"error": "Tenant no encontrado"}, status=404)
         return web.json_response(t.to_dict())
 
     async def api_tenant_delete(self, request: web.Request) -> web.Response:
-        slug  = request.match_info["slug"]
-        store = self._get_tenant_store()
-        ok    = store.delete(slug)
-        return web.json_response({"ok": ok})
+        """Baja: el tenant deja de funcionar y sus datos se archivan (no se borran)."""
+        slug = request.match_info["slug"]
+        if not self.tenants.delete(slug):
+            return web.json_response({"error": "Tenant no encontrado"}, status=404)
+        await self.tenant_dbs.archive(slug)
+        logger.info("Tenant dado de baja por %s: %s", request.get("auth_user"), slug)
+        return web.json_response({"ok": True})
+
+    async def api_tenant_rotate_key(self, request: web.Request) -> web.Response:
+        key = self.tenants.rotate_api_key(request.match_info["slug"])
+        if not key:
+            return web.json_response({"error": "Tenant no encontrado"}, status=404)
+        return web.json_response({"api_key": key})
+
+    async def api_tenant_agent_key(self, request: web.Request) -> web.Response:
+        """API key del tenant actual, para configurar sus agentes. Solo su administrador."""
+        tenant = self.tenants.get(current_tenant.get())
+        if not self.cfg.multi_tenant.enabled or not tenant:
+            return web.json_response({"error": "Solo en una organización (modo multi-tenant)"}, status=404)
+        if request.get("user_role") != "admin":
+            return web.json_response({"error": "Solo el administrador de la organización"}, status=403)
+        return web.json_response({"tenant": tenant.slug, "api_key": tenant.api_key})
+
+    async def api_tenant_switch(self, request: web.Request) -> web.Response:
+        """El superadmin elige qué tenant mira la UI (cookie ch_tenant)."""
+        if not self.cfg.multi_tenant.enabled or not request.get("superadmin"):
+            return web.json_response({"error": "Solo el administrador de la plataforma"}, status=403)
+        slug = str((await _read_json(request)).get("slug") or DEFAULT_TENANT)
+        if slug != DEFAULT_TENANT and not self.tenants.is_active(slug):
+            return web.json_response({"error": "Tenant no encontrado"}, status=404)
+        resp = web.json_response({"ok": True, "tenant": slug})
+        resp.set_cookie(TENANT_COOKIE, slug, httponly=True, samesite="Strict", secure=request.secure,
+                        max_age=int(self.cfg.auth.token_ttl_hours) * 3600)
+        return resp
 
     # ── Runtime container scan ────────────────────────────────────────────────
 
@@ -2025,12 +2155,15 @@ class CyberHoundServer:
         # Verificar clave del agente (no JWT)
         auth  = request.headers.get("Authorization", "")
         key   = self.agent_manager.extract_agent_key(auth)
-        if not self.agent_manager.verify_agent_key(key):
+        # Clave global (tenant "default") o la API key del tenant (la reconoce tenant_middleware)
+        if not (request.get("tenant_agent_key") or self.agent_manager.verify_agent_key(key)):
             return web.json_response({"error": "Clave de agente inválida"}, status=401)
         try:
             payload = await _read_json(request)
             result  = await self.agent_manager.receive_report(payload)
             return web.json_response(result)
+        except ValueError as e:
+            return web.json_response({"error": str(e)}, status=400)
         except Exception as e:
             logger.error("api_agent_report: %s", e, exc_info=True)
             return web.json_response({"error": str(e)}, status=500)
@@ -2038,7 +2171,7 @@ class CyberHoundServer:
     async def api_agent_heartbeat(self, request: web.Request) -> web.Response:
         auth = request.headers.get("Authorization", "")
         key  = self.agent_manager.extract_agent_key(auth)
-        if not self.agent_manager.verify_agent_key(key):
+        if not (request.get("tenant_agent_key") or self.agent_manager.verify_agent_key(key)):
             return web.json_response({"error": "Clave inválida"}, status=401)
         payload = await _read_json(request)
         await self.agent_manager.receive_heartbeat(payload)
@@ -2148,8 +2281,24 @@ class CyberHoundServer:
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
+    def _new_ws_id(self) -> str:
+        # Solo se guardan las últimas conexiones: antes la caché crecía sin límite
+        for old in list(self._findings_cache)[:-200]:
+            self._findings_cache.pop(old, None)
+            self._scan_id_cache.pop(old, None)
+        return f"{current_tenant.get()}:{secrets.token_hex(8)}"
+
+    def _own_caches(self):
+        """Cachés de WS del tenant actual (nunca las de otro)."""
+        prefix = current_tenant.get() + ":"
+        return [(k, v) for k, v in self._findings_cache.items() if k.startswith(prefix)]
+
+    def _may_touch_host(self, request: web.Request) -> bool:
+        """Lo que actúa sobre este servidor: en multi-tenant solo el superadmin."""
+        return not self.cfg.multi_tenant.enabled or bool(request.get("superadmin"))
+
     def _find_cached(self, finding_id: str) -> Finding | None:
-        for fl in self._findings_cache.values():
+        for _ws, fl in self._own_caches():
             for f in fl:
                 if f.id == finding_id:
                     return f
@@ -2165,8 +2314,8 @@ class CyberHoundServer:
             for err in errors:
                 print(f"   • {err}")
             print(
-                "\n   Edita la configuración: sudo cyberhound setup\n"
-                "   O directamente: nano ~/.cyberhound/config.yaml\n"
+                f"\n   Edita la configuración: cyberhound setup --config {self.cfg.config_path}\n"
+                f"   O directamente: {self.cfg.config_path}\n"
             )
             raise SystemExit(1)
 

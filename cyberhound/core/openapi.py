@@ -266,7 +266,11 @@ ENDPOINT_DOCS: dict[str, dict] = {
     "POST /api/ansible/run":   {"summary": "Lanzar playbook Ansible", "tags": ["Ansible"]},
     "GET /api/ansible/jobs":   {"summary": "Listar jobs Ansible recientes", "tags": ["Ansible"]},
     "GET /api/tenants":        {"summary": "Listar tenants (modo multi-tenant)", "tags": ["MultiTenant"]},
-    "POST /api/tenants":       {"summary": "Crear tenant", "tags": ["MultiTenant"]},
+    "POST /api/tenants":       {"summary": "Crear tenant (y opcionalmente su primer admin)", "tags": ["MultiTenant"],
+                                "requestBody": {"required": True, "properties": {
+                                    "slug": {"type": "string"}, "name": {"type": "string"},
+                                    "admin_email": {"type": "string"}, "plan": {"type": "string"},
+                                    "admin_username": {"type": "string"}, "admin_password": {"type": "string"}}}},
 
     # ── Sesión y plataforma ──────────────────────────────────────────────────
     "POST /login":             {"summary": "Iniciar sesión (formulario: username, password, _csrf; luego 2FA si está activo)",
@@ -331,7 +335,11 @@ ENDPOINT_DOCS: dict[str, dict] = {
     # ── Multi-tenant ─────────────────────────────────────────────────────────
     "GET /api/tenants/{slug}":    {"summary": "Detalle de un tenant", "tags": ["MultiTenant"]},
     "PATCH /api/tenants/{slug}":  {"summary": "Modificar tenant", "tags": ["MultiTenant"]},
-    "DELETE /api/tenants/{slug}": {"summary": "Desactivar tenant", "tags": ["MultiTenant"]},
+    "DELETE /api/tenants/{slug}": {"summary": "Dar de baja un tenant (sus datos se archivan)", "tags": ["MultiTenant"]},
+    "POST /api/tenants/{slug}/rotate-key": {"summary": "Nueva API key del tenant (la de sus agentes)", "tags": ["MultiTenant"]},
+    "GET /api/tenant/agent-key": {"summary": "API key de la organización para sus agentes (su admin)", "tags": ["MultiTenant"]},
+    "POST /api/tenant/switch": {"summary": "Superadmin: tenant que muestra la UI", "tags": ["MultiTenant"],
+                                "requestBody": {"properties": {"slug": {"type": "string"}}}},
 }
 
 TAGS = [

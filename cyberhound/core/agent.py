@@ -153,7 +153,12 @@ class AgentManager:
     def __init__(self, db, cfg: AgentConfig) -> None:
         self.db  = db
         self.cfg = cfg
-        self._agents: dict[str, dict] = {}   # agent_name → info
+        # tenant → agent_name → info: en multi-tenant cada organización ve solo sus agentes
+        self._agents: dict[str, dict[str, dict]] = {}
+
+    def _mine(self) -> dict[str, dict]:
+        from cyberhound.core.multitenancy import current_tenant
+        return self._agents.setdefault(current_tenant.get(), {})
 
     def verify_agent_key(self, key: str) -> bool:
         """Verifica la clave API del agente."""
@@ -170,10 +175,14 @@ class AgentManager:
 
     async def receive_report(self, payload: dict) -> dict:
         """Procesa un report de un agente y lo guarda en BD."""
-        agent_name = payload.get("agent_name", "unknown")
-        scan_type  = payload.get("scan_type", "audit")
+        agent_name = _clean_name(payload.get("agent_name"))
+        scan_type  = str(payload.get("scan_type", "audit"))[:32]
         findings_raw = payload.get("findings", [])
+        if not isinstance(findings_raw, list):
+            raise ValueError("'findings' debe ser una lista")
         score      = payload.get("score")
+        if score is not None and not (isinstance(score, int | float) and 0 <= score <= 100):
+            raise ValueError("'score' debe estar entre 0 y 100")
         timestamp  = payload.get("timestamp", datetime.now(UTC).isoformat())
 
         # Reconstruir objetos Finding con source_host = agent_name
@@ -182,7 +191,7 @@ class AgentManager:
             f = Finding(
                 id=f"{agent_name}::{fd.get('id', fd.get('finding_id', ''))}",
                 category=fd.get("category", "unknown"),
-                severity=fd.get("severity", "info"),
+                severity=fd.get("severity") if fd.get("severity") in _SEVERITIES else "info",
                 title=fd.get("title", ""),
                 description=fd.get("description", ""),
                 remediation=fd.get("remediation", ""),
@@ -200,7 +209,7 @@ class AgentManager:
         await self.db.complete_scan(scan_id, findings, score=score)
 
         # Actualizar registro del agente
-        self._agents[agent_name] = {
+        self._mine()[agent_name] = {
             "name":        agent_name,
             "hostname":    payload.get("hostname", agent_name),
             "last_seen":   timestamp,
@@ -216,9 +225,10 @@ class AgentManager:
         return {"ok": True, "scan_id": scan_id, "received": len(findings)}
 
     async def receive_heartbeat(self, payload: dict) -> None:
-        agent_name = payload.get("agent_name", "unknown")
-        self._agents[agent_name] = {
-            **self._agents.get(agent_name, {}),
+        agent_name = _clean_name(payload.get("agent_name"))
+        agents = self._mine()
+        agents[agent_name] = {
+            **agents.get(agent_name, {}),
             "name":      agent_name,
             "hostname":  payload.get("hostname", agent_name),
             "last_seen": payload.get("timestamp", datetime.now(UTC).isoformat()),
@@ -226,4 +236,14 @@ class AgentManager:
         }
 
     def list_agents(self) -> list[dict]:
-        return list(self._agents.values())
+        return list(self._mine().values())
+
+
+_SEVERITIES = {"critical", "high", "medium", "low", "info"}
+
+
+def _clean_name(name) -> str:
+    """Nombre de agente acotado y sin caracteres de control (va a la UI y a la BD)."""
+    import re
+    name = re.sub(r"[^\w.@:-]", "_", str(name or "unknown"))[:64]
+    return name or "unknown"

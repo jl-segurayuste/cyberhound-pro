@@ -140,6 +140,12 @@ class NotificationSettings:
 
 
 @dataclass
+class MultiTenantSettings:
+    # Varias organizaciones aisladas en una instancia (ver cyberhound/core/multitenancy.py)
+    enabled: bool = False
+
+
+@dataclass
 class AgentSettings:
     mode:               str        = "standalone"   # standalone | agent | manager
     manager_url:        str        = ""
@@ -164,6 +170,7 @@ class CyberHoundConfig:
     siem:          SIEMSettings         = field(default_factory=SIEMSettings)
     ticketing:     TicketingSettings    = field(default_factory=TicketingSettings)
     agent:         AgentSettings        = field(default_factory=AgentSettings)
+    multi_tenant:  MultiTenantSettings  = field(default_factory=MultiTenantSettings)
     db_path:       str = field(default_factory=lambda: str(DEFAULT_DB_PATH))
     # PostgreSQL opcional (postgresql://usuario:clave@host:5432/bd). Vacío = SQLite en db_path.
     db_url:        str = field(default_factory=lambda: os.environ.get("CH_DB_URL", ""))
@@ -317,6 +324,9 @@ class CyberHoundConfig:
             agent_name=ag.get("agent_name", ""),
         )
 
+        mt = raw.get("multi_tenant") or {}
+        cfg.multi_tenant = MultiTenantSettings(enabled=bool(mt.get("enabled", False)))
+
         return cfg
 
     def save(self, path: Path | None = None) -> None:
@@ -358,6 +368,7 @@ class CyberHoundConfig:
                 "agent_name": self.agent.agent_name,
                 "agent_key": own(self.agent.agent_key, "CH_AGENT_KEY"),
             },
+            "multi_tenant": section(self.multi_tenant),
             "siem": section(self.siem, {"wazuh_api_pass": "CH_WAZUH_PASS", "elk_pass": "CH_ELK_PASS",
                                         "elk_api_key": "CH_ELK_API_KEY", "splunk_hec_token": "CH_SPLUNK_TOKEN"}),
             "ticketing": section(self.ticketing, {"jira_api_token": "CH_JIRA_TOKEN",

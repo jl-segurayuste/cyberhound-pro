@@ -850,3 +850,5 @@ kbd {
 .user-role-badge { font-size: .72rem; color: var(--text2); white-space: nowrap; }
 .user-role-badge:empty { display: none; }
 @media (max-width: 640px) { .user-role-badge { display: none; } }
+.tenant-switch { font-size: .72rem; padding: 3px 6px; background: var(--bg2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; max-width: 160px; }
+[hidden] { display: none !important; }
