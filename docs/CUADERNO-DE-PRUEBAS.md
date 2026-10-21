@@ -3,9 +3,9 @@
 Checklist de aceptación que **complementa** la suite automática. Se ejecuta antes de publicar una
 versión; casi todo está automatizado en [`scripts/e2e/`](../scripts/e2e/README.md).
 
-- **Última ejecución:** 2026-10-21 · v6.5.0 · `master`
+- **Última ejecución:** 2026-10-21 · v6.6.0 · `master`
 - **Entorno:** Ubuntu 24.04, Python 3.12, Chromium (Playwright), SQLite y PostgreSQL 16; Docker 27 para el stack de producción
-- **Resultado global:** ✅ Apto — ver la [revisión de seguridad](REVISION-SEGURIDAD.md#8-revisión-de-2026-10-21-v650-cuentas-organizaciones-y-deshacer) para lo encontrado y corregido en esta ronda
+- **Resultado global:** ✅ Apto — ver la [revisión de seguridad](REVISION-SEGURIDAD.md#9-revisión-de-2026-10-21-v660-credenciales-ssh-y-playbooks-de-ansible) para lo encontrado y corregido en esta ronda
 
 Leyenda: ✅ pasa · ⚠️ pasa con observación · ❌ falla
 
@@ -13,9 +13,11 @@ Leyenda: ✅ pasa · ⚠️ pasa con observación · ❌ falla
 
 | ID | Qué | Cómo | Resultado | Estado |
 |----|-----|------|-----------|--------|
-| TC-AUTO-01 | Tests unitarios, de integración y de coherencia (SQLite) | `pytest tests/` | 728 pasan (1 omitido: solo PostgreSQL) | ✅ |
-| TC-AUTO-02 | La misma suite contra PostgreSQL 16 | `CH_DB_URL=postgresql://… pytest tests/` | 729 pasan | ✅ |
+| TC-AUTO-01 | Tests unitarios, de integración y de coherencia (SQLite) | `pytest tests/` | 736 pasan (1 omitido: solo PostgreSQL) | ✅ |
+| TC-AUTO-02 | La misma suite contra PostgreSQL 16 | `CH_DB_URL=postgresql://… pytest tests/` | 737 pasan | ✅ |
 | TC-AUTO-03 | Lint | `ruff check cyberhound tests` | sin avisos | ✅ |
+| TC-AUTO-05 | Migración de una BD 6.5.0 (v7) a v8 | BD creada con el código publicado y abierta con el nuevo, en SQLite y PostgreSQL | Los programados se conservan y admiten credencial | ✅ |
+| TC-AUTO-06 | Playbook con `ansible-playbook` real | Contenedor Debian 12 con sshd, drop-in de cloud-init y un bloque `Match` | `sshd -T` con valores seguros, `Match` intacto, 2ª pasada `changed=0` | ✅ |
 | TC-AUTO-04 | CI | GitHub Actions: lint, Python 3.11 y 3.12, PostgreSQL, análisis de seguridad, imagen | verde | ✅ |
 
 ## 2. Interfaz (navegador real) — `scripts/e2e/ui.py`
@@ -24,9 +26,9 @@ Leyenda: ✅ pasa · ⚠️ pasa con observación · ❌ falla
 |----|------|--------------------|--------|
 | TC-UI-01 | Los 19 paneles en escritorio (1440×900), tablet (1024×768) y móvil (390×844) | Sin desbordamiento horizontal; scroll vertical cuando el contenido lo pide | ✅ 57 paneles×viewport |
 | TC-UI-02 | Menú: cada entrada abre su panel; botón ☰ en móvil | Panel activo correcto | ✅ |
-| TC-UI-03 | Un clic en cada botón, selector, fila y pestaña de Configuración | Sin errores JS ni de consola, sin 5xx ni peticiones fallidas | ✅ 199 controles |
+| TC-UI-03 | Un clic en cada botón, selector, fila y pestaña de Configuración | Sin errores JS ni de consola, sin 5xx ni peticiones fallidas | ✅ 203 controles |
 | TC-UI-04 | Cabecera: búsqueda global, Log, API (Swagger), Salir | Funcionan; tras salir la API pide sesión | ✅ |
-| TC-UI-05 | Incidencias esperadas | Intel sin API keys (400 claro), el admin no puede quitarse su rol (400), SBOM aún no generado (404) | ✅ |
+| TC-UI-05 | Incidencias esperadas | Intel sin API keys (400 claro), el admin no puede quitarse su rol (400), SBOM aún no generado (404), guardar una credencial SSH sin nombre (400) | ✅ |
 
 ## 3. Roles — `scripts/e2e/roles.py`
 
@@ -45,14 +47,15 @@ Leyenda: ✅ pasa · ⚠️ pasa con observación · ❌ falla
 | TC-MT-03 | La admin de la organización entra con el campo Organización | Sin menú Sistema ni Monitor ni pestañas de plataforma; ve su clave de agente | ✅ |
 | TC-MT-04 | Pulsar todo como admin de la organización | Ningún 401/403/500 ni error JS | ✅ |
 | TC-MT-05 | Baja desde la UI | Corta su sesión al instante | ✅ |
-| TC-MT-06 | Aislamiento (datos, usuarios, supresiones, agentes, caché, push, rutas de plataforma, WS, reutilización del identificador, 2FA, tokens, programados, fixes remotos) | Nada cruza de una organización a otra, en SQLite y PostgreSQL | ✅ 21 escenarios |
+| TC-MT-06 | Aislamiento (datos, usuarios, supresiones, agentes, caché, push, rutas de plataforma, WS, reutilización del identificador, 2FA, tokens, programados, fixes remotos, credenciales SSH) | Nada cruza de una organización a otra, en SQLite y PostgreSQL | ✅ 22 escenarios |
 | TC-MT-07 | Ámbito desde la UI: el superadmin fija redes y dominios; la organización programa dentro y fuera | Dentro se guarda; fuera se rechaza con el motivo; sin ámbito no analiza nada; un dominio que resuelve a la LAN se rechaza | ✅ |
 | TC-MT-08 | Integraciones de la organización | Las suyas, sin tocar las de la plataforma; destinos internos (127.0.0.1, LAN) rechazados | ✅ |
 
 ## 5. Funcional contra el backend — `scripts/e2e/functional.py`
 
 Análisis reales sobre **objetivos controlados** que se generan en cada ejecución (`targets.py`: una
-webshell, secretos falsos, `shell=True` y una web local con `.git`/`.env` expuestos).
+webshell, secretos falsos, `shell=True` y una web local con `.git`/`.env` expuestos) y un servidor
+SSH local de pruebas (`sshd.py`).
 
 | ID | Área | Casos | Estado |
 |----|------|-------|--------|
@@ -69,9 +72,12 @@ webshell, secretos falsos, `shell=True` y una web local con `.git`/`.env` expues
 | TC-F-12 | Auditoría | Registra el login; el filtro de fallos solo devuelve fallos | ✅ |
 | TC-F-13 | Integraciones en caliente | El servidor SMTP guardado se aplica sin reiniciar; la contraseña no se devuelve | ✅ |
 | TC-F-14 | Programados | Crear, rechazar tareas no programables, lanzar ahora, su análisis queda en el historial, pausar, borrar | ✅ |
+| TC-F-15 | Credenciales SSH | Contraseña y par generado (sin devolver el secreto), clave inválida rechazada; la clave generada no entra hasta autorizarla y después audita por SSH real; credencial inexistente rechazada | ✅ |
+| TC-F-16 | Programado SSH | Sin credencial rechazado; con credencial se ejecuta y deja hallazgos reales; la credencial en uso no se borra; último uso registrado | ✅ |
+| TC-F-17 | Playbook de Ansible | Un play por host y nada del texto del hallazgo (ni comandos ni plantillas `{{ }}`) | ✅ |
 | TC-F-09 | Robustez | Ninguna respuesta 5xx en toda la API | ✅ |
 
-Resultado: **126/126** pruebas.
+Resultado: **163/163** pruebas.
 
 ## 6. Despliegue
 

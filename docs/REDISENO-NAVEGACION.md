@@ -81,6 +81,9 @@ Funcional verificado:
 - **Pendiente (pre-existente, no introducido aquí):** la CSP permite
   `'unsafe-inline'` en `script-src`, lo que debilita la defensa anti-XSS. Mejora
   futura: migrar a CSP basada en `nonce`/hash y eliminar los `onclick` inline.
+  - **Resuelto (2026-10-20):** ya no hay manejadores inline (eventos `data-on-*` con un
+    dispatcher delegado) y la CSP es `script-src 'self' 'nonce-…'` con
+    `script-src-attr 'none'`. Detalle en `docs/REVISION-SEGURIDAD.md`, §4.
 
 ## 5. Archivos
 
@@ -123,3 +126,6 @@ scroll en navegador headless.
 
 > Nota: el panel arrastra un `id="history-trend-wrap"` **duplicado** (dos
 > elementos ocultos). No afecta al render; pendiente de limpieza menor futura.
+>
+> **Resuelto:** ya no hay ids duplicados; lo vigila `test_no_duplicate_element_ids`
+> (`tests/test_frontend_integrity.py`).

@@ -99,6 +99,11 @@ cambios de firewall, SSH o montajes **pueden afectar a servicios** en producció
   el estado anterior del host; **Configuración › Fixes remotos** lista los aplicados y permite
   deshacerlos más tarde (usa las credenciales SSH del panel Red).
 - Activar el firewall abre antes SSH y el puerto de CyberHound, para no dejarte fuera.
+- **Playbook de Ansible**: en **Informes** se descarga un playbook con las correcciones de los
+  hallazgos (un play por host; lo que no se puede automatizar aparece comentado al principio).
+  Revísalo y pruébalo con `ansible-playbook --check --diff` antes de aplicarlo; necesita las
+  colecciones `ansible.posix` y `community.general` (vienen con el paquete `ansible`). Desde
+  **Configuración › Ansible** se lanza en este mismo servidor, solo con sus propios hallazgos, o en AWX.
 - Todo queda en el log de auditoría (`security_audit.log`).
 - **Supresiones**: lo que sea un falso positivo se suprime con un patrón y un motivo
   (Configuración › Supresiones); deja de aparecer en los análisis siguientes.
@@ -119,7 +124,25 @@ scripts: `curl -H "Authorization: Bearer cht_…" https://<servidor>/api/history
 una sola vez, nunca tiene más permisos que tu rol y no sirve para cambiar contraseñas, 2FA ni sesiones.
 
 **Configuración › Auditoría** (solo admin) muestra quién hizo qué y desde qué IP: inicios de sesión
-(también los fallidos), usuarios, contraseñas, 2FA, tokens, fixes remotos y programaciones.
+(también los fallidos), usuarios, contraseñas, 2FA, tokens, credenciales SSH, fixes remotos y
+programaciones.
+
+### Credenciales SSH guardadas
+
+En **Configuración › Credenciales SSH** (crear y borrar, solo admin) se guardan las credenciales para
+entrar por SSH en tus equipos sin escribirlas cada vez:
+
+1. Ponle un nombre, el usuario y el puerto.
+2. Elige el tipo. Lo recomendable es **Generar un par de claves**: CyberHound crea una clave ed25519 y
+   te enseña la **clave pública**, que tienes que añadir a `~/.ssh/authorized_keys` de ese usuario en
+   cada equipo (la privada no sale del servidor). También puedes **pegar una clave privada** (con su
+   frase de paso si la tiene) o guardar una **contraseña**.
+3. En el panel **Red**, elige la credencial en *Credencial SSH*: se usa para auditar, para corregir
+   y para deshacer fixes remotos.
+
+El secreto se guarda cifrado y no se vuelve a mostrar; la tabla enseña la huella y la clave pública.
+Un operador puede usar las credenciales pero no verlas. No se puede borrar una credencial que use un
+análisis programado.
 
 ## 6. Organizaciones (multi-tenant)
 
@@ -140,8 +163,10 @@ destinos públicos o dentro de su ámbito. Detalle en el [README](../README.md#m
   semanal (lunes 03:00), red diaria 04:00 y actualización semanal de reglas YARA. Se pueden pausar
   (queda guardado en `config.yaml`) o lanzar al momento.
 - **Análisis programados** (Configuración › Programados): cualquier organización, y la plataforma,
-  programa análisis de red, cabeceras web, exposición, API/CORS, TLS, DNS, subdominios o Nuclei a la
-  hora y los días que elija. Cada fila muestra la última ejecución y su resultado; se pueden lanzar
+  programa análisis de red, auditoría SSH, cabeceras web, exposición, API/CORS, TLS, DNS, subdominios
+  o Nuclei a la hora y los días que elija. La auditoría SSH necesita una **credencial SSH guardada**;
+  un análisis de red con credencial audita además por SSH los equipos que encuentra (sin ella, solo
+  descubre equipos y puertos). Cada fila muestra la última ejecución y su resultado; se pueden lanzar
   ahora, pausar o borrar. Los hallazgos quedan en el Historial y los críticos se notifican.
 - **Monitor en tiempo real** (Gestión › Monitor): comandos sospechosos y cambios en ficheros críticos;
   usa `bpftrace` (eBPF) o, si no está, `auditd`. Necesita privilegios y kernel real (no funciona en un

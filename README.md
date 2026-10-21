@@ -4,7 +4,7 @@
 
 > Analiza tu red, servidores, contenedores, webs y código. Detecta vulnerabilidades, malware y configuraciones inseguras, corrige con un clic (y deshace) y vigila en tiempo real. Una instancia o varias organizaciones aisladas (multi-tenant).
 
-[![Versión](https://img.shields.io/badge/versión-v6.5.0-blue.svg)](cyberhound/__init__.py)
+[![Versión](https://img.shields.io/badge/versión-v6.6.0-blue.svg)](cyberhound/__init__.py)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://python.org)
 [![Tests](https://img.shields.io/badge/tests-729%20passed-green.svg)](#tests)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
@@ -180,7 +180,7 @@ HTML, PDF, playbook Ansible, JSON para SIEM, compliance e importación de audito
 
 ### Gestión › Configuración
 
-API keys, notificaciones, SIEM, ticketing, scheduler, usuarios, supresiones, 2FA, YARA, agentes, LDAP, cuarentena, SBOM, Ansible, mi cuenta (contraseña, sesiones y tokens de API), análisis programados, fixes remotos aplicados, registro de auditoría y organizaciones (multi-tenant).
+API keys, notificaciones, SIEM, ticketing, scheduler, usuarios, supresiones, 2FA, YARA, agentes, LDAP, cuarentena, SBOM, Ansible, mi cuenta (contraseña, sesiones y tokens de API), credenciales SSH, análisis programados, fixes remotos aplicados, registro de auditoría y organizaciones (multi-tenant).
 
 <img src="docs/img/capturas/settings.png" alt="Gestión › Configuración">
 
@@ -294,7 +294,7 @@ y se gestionan en **Configuración › Organizaciones** (alta con su primer admi
 - **Datos separados**: cada organización tiene su propia base de datos (un fichero SQLite en `<dir de la BD>/tenants/<slug>.db` o un esquema `tenant_<slug>` en PostgreSQL): escaneos, hallazgos, activos, supresiones, usuarios, 2FA y agentes. La organización "Plataforma" es la BD de siempre, así que activarlo no mueve datos.
 - **Login por organización**: el formulario pide la organización (o la toma del subdominio, `acme.cyberhound.ejemplo-demo.es`). La sesión queda ligada a ella y no se puede cambiar.
 - **Superadmin**: el admin de `config.yaml` (organización vacía en el login) gestiona las organizaciones y puede ver cualquiera con el selector de la cabecera.
-- **Ámbito de análisis**: cada organización solo puede analizar las redes, IPs y dominios que el superadmin le permite (un dominio incluye sus subdominios); sin ámbito no puede lanzar análisis activos. Se comprueba en cada análisis, en el descubrimiento de red, LDAP, los fixes remotos y los programados. Un dominio permitido que resuelve a una IP interna fuera del ámbito se rechaza, para que no sirva de puente a la red del servidor. Una organización tampoco puede usar claves SSH guardadas en el servidor.
+- **Ámbito de análisis**: cada organización solo puede analizar las redes, IPs y dominios que el superadmin le permite (un dominio incluye sus subdominios); sin ámbito no puede lanzar análisis activos. Se comprueba en cada análisis, en el descubrimiento de red, LDAP, los fixes remotos y los programados. Un dominio permitido que resuelve a una IP interna fuera del ámbito se rechaza, para que no sirva de puente a la red del servidor. Una organización tampoco puede usar las claves SSH del servidor (ni sus ficheros ni las que asyncssh probaría por defecto): entra con su contraseña o con sus credenciales SSH guardadas.
 - **Integraciones propias**: cada organización configura su correo, webhook, SIEM y Jira/ServiceNow, y recibe solo sus avisos. Sus destinos deben ser públicos o estar en su ámbito (se comprueba al guardar y antes de cada envío).
 - **Reservado a la plataforma**: lo que actúa sobre el propio servidor o es configuración global (auditoría local, malware, Docker, servicios, código, fixes locales, cuarentena, YARA, SBOM, monitor, Ansible, scheduler de la plataforma, API keys de threat intel, modo agente). Una organización usa los análisis de red, web, DNS, intel, SSH remoto, LDAP, importación y sus propios análisis programados.
 - **Agentes**: cada organización tiene su clave de agente (la ve su admin en Configuración › Agentes); sus informes solo llegan a ella.
@@ -343,6 +343,7 @@ Los hallazgos con ⚡ se corrigen con un clic, en local o en el host remoto dond
 
 - **Deshacer** (fixes locales): cada fix guarda en un journal lo necesario para revertirlo (copia del fichero, permisos previos, estado del servicio o comando inverso) y el botón pasa a **↶ Deshacer**. Las instalaciones de paquetes se marcan como no reversibles: no se desinstala nada a ciegas.
 - **Corrección remota**: el comando lo construye CyberHound a partir del hallazgo (nunca se ejecuta lo que devuelve el host auditado) y se lanza por SSH sin shell, con `sudo -n` si está disponible.
+- **Credenciales SSH guardadas** (Configuración › Credenciales SSH): un par de claves ed25519 que genera CyberHound (solo hay que añadir la clave pública a `authorized_keys` de cada equipo), una clave privada pegada o una contraseña. El secreto se guarda cifrado con una clave derivada del secreto de la instancia y de la organización, y la API nunca lo devuelve. Se eligen en el panel Red para auditar, corregir y deshacer, y son las que usan los análisis SSH programados. Un operador puede usarlas pero no verlas; crearlas o borrarlas es de administrador.
 - **Deshacer** (fixes remotos): al aplicarlo, el host devuelve su estado anterior (la línea de `sshd_config`, el valor del sysctl, si el servicio estaba activo, los permisos del fichero, si ufw estaba apagado) y CyberHound guarda la acción inversa, validada porque viene del host. Se deshace desde el propio botón o desde **Configuración › Fixes remotos**, que lista los aplicados en la organización.
 
 ### Threat intelligence
@@ -355,9 +356,10 @@ Busca IPs, dominios, hashes (MD5/SHA1/SHA256) o emails en las fuentes con API ke
 - **SBOM**: CycloneDX 1.4 y SPDX 2.3 de paquetes pip/npm/del sistema, con diferencias entre versiones.
 - **Compliance**: cumplimiento de ENS, ISO 27001, PCI-DSS y CIS a partir de los hallazgos, en el informe PDF y con aviso si baja de un día a otro.
 - **Informes**: HTML, PDF, JSON y playbook de Ansible con las correcciones.
+- **Playbook de remediación (Ansible)**: un play por host (los hallazgos remotos en el host donde se encontraron) con el mismo catálogo que los fixes de CyberHound, en módulos FQCN y sin texto del hallazgo dentro de las tareas. Lo que no se puede automatizar va como comentario al principio. En sshd cambia la sección global y los `sshd_config.d/*.conf` (sshd usa el primer valor), valida con `sshd -t` y no toca los bloques `Match`. Se descarga desde Informes o se ejecuta desde Configuración › Ansible (en local solo con los hallazgos del propio servidor) o en AWX.
 - **Importación**: Nessus, OpenSCAP/XCCDF (RHEL STIG/CIS), CSV y JSON.
 - **Supresiones**: patrones de falsos positivos con motivo y caducidad.
-- **Análisis programados** (Configuración › Programados): red, cabeceras web, exposición, API/CORS, TLS, DNS, subdominios o Nuclei a la hora y los días elegidos, para la plataforma o para cada organización dentro de su ámbito. Se pueden lanzar a mano, pausar y borrar; los críticos avisan por las notificaciones de quien los programó. Aparte, el scheduler de la plataforma hace la auditoría diaria, el malware semanal y la red diaria del propio servidor.
+- **Análisis programados** (Configuración › Programados): red, auditoría SSH, cabeceras web, exposición, API/CORS, TLS, DNS, subdominios o Nuclei a la hora y los días elegidos (los de SSH, con una credencial SSH guardada; la de red con credencial audita además por SSH los equipos que encuentra), para la plataforma o para cada organización dentro de su ámbito. Se pueden lanzar a mano, pausar y borrar; los críticos avisan por las notificaciones de quien los programó. Aparte, el scheduler de la plataforma hace la auditoría diaria, el malware semanal y la red diaria del propio servidor.
 - **Explicación con IA**: un LLM local (Ollama) explica un hallazgo en lenguaje llano (opcional).
 
 ---
@@ -386,6 +388,7 @@ cyberhound/
 │   ├── integrations.py      # notificaciones/SIEM/ticketing por organización, con control de destinos
 │   ├── accounts_db.py       # sesiones, tokens de API y auditoría (SQLite y PostgreSQL)
 │   ├── schedules.py · remote_fixes.py   # análisis programados · fixes remotos que se pueden deshacer
+│   ├── ssh_credentials.py   # credenciales SSH guardadas (cifradas por organización)
 │   ├── scoring.py · scheduler.py · notifications.py · siem.py · ticketing.py
 │   ├── agent.py · rollback.py · quarantine.py · ebpf_monitor.py · llm.py
 │   ├── ansible_integration.py · openapi.py · executor.py · logging.py · models.py
@@ -494,6 +497,7 @@ La referencia completa está en **`/api/docs`** (Swagger UI, servida por la prop
 | `POST` | `/api/fix/local` · `/api/fix/remote` · `/api/rollback/local` | Corregir y deshacer (local) |
 | `GET` · `POST` | `/api/fix/remote/history` · `/api/fix/remote/undo` | Fixes remotos aplicados y deshacerlos |
 | `GET` · `POST` · `PATCH` · `DELETE` | `/api/schedules` · `/api/schedules/{id}` · `/api/schedules/{id}/run` | Análisis programados |
+| `GET` · `POST` · `PATCH` · `DELETE` | `/api/config/ssh-credentials` · `/api/config/ssh-credentials/{id}` | Credenciales SSH guardadas (nunca devuelve el secreto) |
 | `POST` | `/api/report/{html\|ansible\|json}` · `/api/report/pdf` | Informes |
 | `POST` · `GET` | `/api/intel/scan` · `/api/intel/lookup` | Threat intelligence |
 | `GET` · `POST` | `/api/config/{keys\|notifications\|siem\|ticketing\|agent}` | Configuración |
@@ -507,6 +511,7 @@ La referencia completa está en **`/api/docs`** (Swagger UI, servida por la prop
 { "task": "malware", "skip": ["hash"], "web_roots": ["/var/www"] }
 { "task": "network", "networks": "192.168.1.0/24", "ssh_audit": true }
 { "task": "ssh", "hosts": "192.168.1.10,192.168.1.20", "ssh_user": "root" }
+{ "task": "ssh", "hosts": "192.168.1.10", "ssh_credential": "0a1b2c3d" }
 { "task": "docker", "scan_images_cve": true, "scan_k8s": true }
 { "task": "code", "path": "/var/www/html" }
 { "task": "services" }
@@ -542,7 +547,8 @@ La referencia completa está en **`/api/docs`** (Swagger UI, servida por la prop
 
 ### Ejecución
 - Ningún `shell=True` ni `os.system`. La corrección remota no ejecuta texto que venga del host auditado: construye la acción desde el id del hallazgo, la pasa como dato y el script remoto va por stdin (nada en `/tmp` que otro usuario pueda sustituir antes del `sudo`).
-- Un hallazgo de otro host no se puede corregir en local por error, y el fix remoto se aplica en el host del hallazgo, no en el que diga la petición.
+- Un hallazgo de otro host no se puede corregir en local por error (tampoco con el playbook de Ansible en modo local), y el fix remoto se aplica en el host del hallazgo, no en el que diga la petición.
+- Los playbooks de Ansible se construyen como datos y se vuelcan con el `SafeDumper` de PyYAML: el título, la remediación o el id que manda un host auditado nunca acaban en una tarea (ni como comando ni como plantilla `{{ }}`, que Ansible evaluaría en la máquina de control).
 
 ### TLS
 - Certificado RSA 4096 autofirmado en el primer arranque (o el tuyo con `server.tls_cert`/`tls_key`), TLS 1.2+ y cifrados modernos.
@@ -647,7 +653,7 @@ Los secretos que llegan por entorno no se copian al fichero.
 
 ## Tests
 
-**729 tests** en 53 ficheros (`tests/test_*.py`), que el CI ejecuta en Python 3.11 y 3.12 y otra vez contra PostgreSQL 16.
+**737 tests** en 55 ficheros (`tests/test_*.py`), que el CI ejecuta en Python 3.11 y 3.12 y otra vez contra PostgreSQL 16.
 
 ```bash
 pip install -e ".[test]"
@@ -659,7 +665,7 @@ Además de las pruebas unitarias hay tests de extremo a extremo sobre la aplicac
 
 ### Batería E2E en navegador
 
-[`scripts/e2e/`](scripts/e2e/) levanta instancias de demo con datos ficticios y las recorre con Chromium: los 19 paneles en escritorio, tablet y móvil (scroll y desbordamiento), cada botón y control, los roles, el multi-tenant y la API con análisis reales contra objetivos controlados. Ver su [README](scripts/e2e/README.md).
+[`scripts/e2e/`](scripts/e2e/) levanta instancias de demo con datos ficticios y las recorre con Chromium: los 19 paneles en escritorio, tablet y móvil (scroll y desbordamiento), cada botón y control, los roles, el multi-tenant y la API con análisis reales contra objetivos controlados (una web y un servidor SSH locales). Ver su [README](scripts/e2e/README.md).
 
 ---
 
@@ -680,11 +686,11 @@ Además de las pruebas unitarias hay tests de extremo a extremo sobre la aplicac
 
 ## Roadmap
 
-### ✅ Implementado (v6.5)
+### ✅ Implementado (v6.6)
 
 Los cambios de cada versión están en [CHANGELOG.md](CHANGELOG.md).
 
-Todo lo descrito arriba: hardening con fixes y deshacer, red, SSH remoto, malware y cuarentena, Docker/K8s/imágenes/runtime, código y secretos, web (TLS, cabeceras, exposición, API/CORS, Nuclei), DNS y subdominios, threat intelligence, scoring, compliance, SBOM, LDAP/AD (6 checks: AS-REP roasting, admins del dominio, cuentas sin caducidad…), monitor, 2FA, roles, sesiones revocables, tokens de API, auditoría, multi-tenant con ámbito e integraciones por organización, análisis programados, deshacer fixes remotos, agentes, SIEM, ticketing, AWX, OpenAPI, SQLite y PostgreSQL, interfaz responsive (escritorio, tablet y móvil).
+Todo lo descrito arriba: hardening con fixes y deshacer, red, SSH remoto, malware y cuarentena, Docker/K8s/imágenes/runtime, código y secretos, web (TLS, cabeceras, exposición, API/CORS, Nuclei), DNS y subdominios, threat intelligence, scoring, compliance, SBOM, LDAP/AD (6 checks: AS-REP roasting, admins del dominio, cuentas sin caducidad…), monitor, 2FA, roles, sesiones revocables, tokens de API, auditoría, multi-tenant con ámbito e integraciones por organización, análisis programados (también SSH), credenciales SSH guardadas, deshacer fixes remotos, playbooks de remediación, agentes, SIEM, ticketing, AWX, OpenAPI, SQLite y PostgreSQL, interfaz responsive (escritorio, tablet y móvil).
 
 ### 🔜 Ideas para futuras versiones
 

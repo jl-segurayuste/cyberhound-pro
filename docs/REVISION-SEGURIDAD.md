@@ -128,3 +128,31 @@ Además se arreglaron bugs funcionales: la recarga en caliente de notificaciones
 (servidor SMTP, credenciales de Wazuh/ELK, índice de Splunk), el interruptor del scheduler no se
 guardaba y las notificaciones del navegador para críticos nunca saltaban (el manejador no estaba
 conectado al canal push).
+
+## 9. Revisión de 2026-10-21 (v6.6.0: credenciales SSH y playbooks de Ansible)
+
+Al añadir las credenciales SSH guardadas (y con ellas los análisis SSH programados) y rehacer el
+generador de playbooks se encontraron y corrigieron estos problemas, cada uno con su test:
+
+| # | Severidad | Hallazgo | Corrección |
+|---|---|---|---|
+| 1 | **Alta** | **Claves SSH del servidor con contraseña de una organización**: con usuario y contraseña, asyncssh prueba antes las claves de `~/.ssh/id_*` y el agente del proceso. Si un host del ámbito de la organización confiaba en esa clave, entraba con la identidad de la plataforma aunque la contraseña fuera incorrecta. Además `client_keys=[]` no lo evita: también carga las de por defecto. | En una organización `client_keys=None` y sin agente: solo su contraseña o su credencial guardada. `test_una_organizacion_no_entra_con_la_clave_de_la_plataforma` (servidor SSH real en el test). |
+| 2 | **Alta** | **El playbook descargable ejecutaba la remediación del hallazgo**: `ansible.builtin.shell` con la primera línea de la remediación, `become` y `hosts: all`. En los hallazgos remotos ese texto lo escribe el host auditado. | El export usa el generador nuevo: tareas solo del catálogo de CyberHound, nunca texto del hallazgo. `tests/test_ansible_playbook.py`. |
+| 3 | **Alta** | **Inyección de plantillas en el playbook**: el título del hallazgo iba a un f-string del YAML (`name:` y `debug`). Una comilla rompía el YAML y un `{{ lookup('pipe', …) }}` en el título de un hallazgo remoto se ejecutaba en la máquina de control (el propio servidor en modo local). | Playbook construido como datos y volcado con el `SafeDumper` de PyYAML; rutas, servicios, usuarios y hosts validados; lo manual va en comentarios de una sola línea. |
+| 4 | **Media** | **El modo local de Ansible corregía en el servidor los hallazgos de otros hosts** (los cargaba de la BD sin `source_host`). | En modo local solo entran los hallazgos del propio servidor; el resto, por AWX o con el playbook descargado (un play por host). |
+| 5 | **Media** | **Las correcciones de sshd del playbook no surtían efecto**: `lineinfile` cambia la última línea, pero sshd usa la primera (Debian trae `X11Forwarding yes` de serie) y lee antes `sshd_config.d/*.conf` (cloud-init deja `PasswordAuthentication yes`). | Se cambian todas las líneas de la sección global y las de `sshd_config.d`, se añade antes del primer `Match` si falta y se valida con `sshd -t`. Probado con `ansible-playbook` real en Debian 12: `sshd -T` da los valores seguros y la segunda pasada no cambia nada. |
+
+Credenciales SSH guardadas: el secreto va cifrado (Fernet) con una clave derivada de `auth.secret` y
+del identificador de la organización, así que copiado a la BD de otra organización no se descifra; la
+API nunca lo devuelve. Una credencial que usa un programado no se puede borrar.
+
+Además se arreglaron bugs funcionales: los parámetros sysctl locales nunca generaban tarea de Ansible
+(se buscaba `kernel_aslr`, que no existe), una contraseña SSH incorrecta se informaba como "host
+inalcanzable" (`PermissionDenied` es subclase de `DisconnectError` y se capturaba después) y las claves
+OpenSSH con frase de paso no se podían importar (faltaba `bcrypt`).
+
+**Pendiente (observado, no corregido en esta versión):** el fix local y el remoto de sshd tienen la
+misma limitación que tenía el playbook con `sshd_config.d/*.conf`. Si un drop-in fija
+`PasswordAuthentication yes`, el fix cambia `sshd_config` pero el valor efectivo sigue siendo el
+inseguro, y la auditoría, que solo lee `sshd_config`, tampoco lo detecta. Lo correcto es auditar con
+`sshd -T` (configuración efectiva) y corregir también los drop-ins.

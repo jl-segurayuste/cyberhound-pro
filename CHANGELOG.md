@@ -4,6 +4,40 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/); v
 [SemVer](https://semver.org/lang/es/). Cada versión publicada tiene su etiqueta `vX.Y.Z` y su
 release en GitHub, con la imagen Docker correspondiente en GHCR.
 
+## [6.6.0] — 2026-10-21
+
+### Añadido
+- **Credenciales SSH guardadas** (Configuración › Credenciales SSH y `/api/config/ssh-credentials`):
+  un par ed25519 que genera CyberHound (se muestra la clave pública para `authorized_keys`), una clave
+  privada pegada (también con frase de paso) o una contraseña. Se guardan cifradas con una clave
+  derivada de `auth.secret` y de la organización, y la API nunca devuelve el secreto. Se eligen en el
+  panel Red para auditar, corregir y deshacer fixes remotos.
+- **Auditoría SSH programada**: la tarea `ssh` en Programados, con una credencial guardada; un
+  análisis de red programado con credencial audita además por SSH los equipos que encuentra.
+- **Playbook de remediación nuevo**: un play por host (los hallazgos remotos, en su host), el mismo
+  catálogo que los fixes de CyberHound en módulos FQCN, y lo que no se puede automatizar como
+  comentario al principio. En sshd cambia todas las líneas de la sección global y de
+  `sshd_config.d/*.conf`, valida con `sshd -t` y no toca los bloques `Match`.
+- La batería E2E levanta un servidor SSH local de pruebas y audita por SSH de verdad con las
+  credenciales guardadas, a mano y programado.
+
+### Cambiado
+- `asyncssh[bcrypt]`: hace falta para las claves OpenSSH protegidas con frase de paso.
+- En modo local, Ansible solo corrige los hallazgos del propio servidor.
+- «▶ Ahora» en Programados se desactiva mientras la programación está en curso.
+
+### Corregido
+- Una organización que entraba por SSH con usuario y contraseña podía acabar autenticada con las
+  claves por defecto del servidor (`~/.ssh/id_*`) o su agente.
+- El playbook descargable ejecutaba con `shell` y `become` el texto de remediación del hallazgo, que
+  en los remotos escribe el host auditado; y el título se pegaba en el YAML, donde una plantilla
+  `{{ … }}` se evaluaba en la máquina de control.
+- El modo local de Ansible aplicaba en el servidor las correcciones de hallazgos de otros hosts.
+- Las tareas de sshd del playbook no surtían efecto si el valor inseguro estaba en una línea anterior
+  o en `sshd_config.d`; los parámetros sysctl locales nunca generaban tarea.
+- Una contraseña SSH incorrecta se informaba como "host inalcanzable".
+- `docs/REDISENO-NAVEGACION.md` daba por pendientes dos cosas ya resueltas (CSP con nonce e id duplicado).
+
 ## [6.5.0] — 2026-10-21
 
 ### Añadido
@@ -70,5 +104,6 @@ release en GitHub, con la imagen Docker correspondiente en GHCR.
 
 Las versiones anteriores no tienen registro de cambios; su historia está en `git log`.
 
+[6.6.0]: https://github.com/jl-segurayuste/cyberhound-pro/releases/tag/v6.6.0
 [6.5.0]: https://github.com/jl-segurayuste/cyberhound-pro/releases/tag/v6.5.0
 [6.4.0]: https://github.com/jl-segurayuste/cyberhound-pro/releases/tag/v6.4.0
