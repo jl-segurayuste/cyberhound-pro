@@ -485,6 +485,7 @@ function discoverOnly() {
   fetch('/api/network/discover' + (networks ? '?networks='+encodeURIComponent(networks) : ''))
     .then(r => r.json())
     .then(d => {
+      if (d.error) { toast('✗ ' + d.error, 'error'); return; }
       if (d.hosts?.length) {
         toast(`✓ ${d.hosts.length} dispositivos encontrados`);
         appendLog('ok', `Descubiertos: ${d.hosts.join(', ')}`);
@@ -3923,7 +3924,8 @@ async function loadSessions() {
   if (!tbody) return;
   const r = await fetch('/api/sessions');
   if (!r.ok) { tbody.innerHTML = '<tr><td colspan="4" style="color:var(--text2)">Solo con una sesión de navegador</td></tr>'; return; }
-  const rows = await r.json();
+  const rows = await r.json().catch(() => null);
+  if (!Array.isArray(rows)) { tbody.innerHTML = ''; return; }
   tbody.innerHTML = rows.map(s => `<tr>
       <td style="font-size:.78rem">${fmt(s.last_seen)}${s.current ? ' <b>(esta)</b>' : ''}</td>
       <td style="font-family:monospace;font-size:.78rem">${esc(s.ip)}</td>
@@ -3952,7 +3954,8 @@ async function loadApiTokens() {
   if (!tbody) return;
   const r = await fetch('/api/tokens');
   if (!r.ok) { tbody.innerHTML = ''; return; }
-  const rows = await r.json();
+  const rows = await r.json().catch(() => null);
+  if (!Array.isArray(rows)) { tbody.innerHTML = ''; return; }
   tbody.innerHTML = rows.map(t => `<tr>
       <td>${esc(t.name)}</td><td>${esc(t.role)}</td>
       <td style="font-size:.78rem">${t.expires_at ? fmt(t.expires_at) : 'nunca'}</td>
@@ -3994,7 +3997,8 @@ async function loadSchedules() {
   if (!tbody) return;
   const r = await fetch('/api/schedules');
   if (!r.ok) { tbody.innerHTML = ''; return; }
-  const rows = await r.json();
+  const rows = await r.json().catch(() => null);
+  if (!Array.isArray(rows)) { tbody.innerHTML = ''; return; }
   const pad = n => String(n).padStart(2, '0');
   tbody.innerHTML = rows.map(s => `<tr>
       <td>${esc(s.name)}<div style="font-size:.72rem;color:var(--text2)">${esc(s.targets.join(', '))}</div></td>
@@ -4051,7 +4055,8 @@ async function loadRemoteFixes() {
   if (!tbody || !USER.permissions.includes('fix')) return;
   const r = await fetch('/api/fix/remote/history');
   if (!r.ok) { tbody.innerHTML = ''; return; }
-  const rows = await r.json();
+  const rows = await r.json().catch(() => null);
+  if (!Array.isArray(rows)) { tbody.innerHTML = ''; return; }
   tbody.innerHTML = rows.map(f => `<tr>
       <td style="font-size:.78rem">${fmt(f.ts)}</td>
       <td style="font-family:monospace">${esc(f.host)}</td>
@@ -4075,7 +4080,8 @@ async function loadAudit() {
   if (document.getElementById('auditlog-failures')?.checked) q.set('failures', '1');
   const r = await fetch('/api/audit?' + q.toString());
   if (!r.ok) { tbody.innerHTML = ''; return; }
-  const rows = await r.json();
+  const rows = await r.json().catch(() => null);
+  if (!Array.isArray(rows)) { tbody.innerHTML = ''; return; }
   tbody.innerHTML = rows.map(e => `<tr style="${e.ok ? '' : 'color:var(--red)'}">
       <td style="font-size:.75rem;white-space:nowrap">${fmt(e.ts)}</td><td>${esc(e.username)}</td>
       <td style="font-family:monospace;font-size:.78rem">${esc(e.action)}${e.ok ? '' : ' ✗'}</td>

@@ -81,7 +81,8 @@ class TestRateLimiter:
         from cyberhound.core.security import RateLimiter
         rl = RateLimiter(max_attempts=5, window_seconds=900)
         for _ in range(4):
-            ok, _ = await rl.is_allowed("192.168.1.1"); assert ok is True
+            ok, _ = await rl.is_allowed("192.168.1.1")
+            assert ok is True
 
     @pytest.mark.asyncio
     async def test_blocks_after_max(self):
@@ -89,7 +90,8 @@ class TestRateLimiter:
         rl = RateLimiter(max_attempts=3, window_seconds=900)
         for _ in range(3):
             await rl.record_failure("192.168.1.100")
-        ok, _ = await rl.is_allowed("192.168.1.100"); assert ok is False
+        ok, _ = await rl.is_allowed("192.168.1.100")
+        assert ok is False
 
     @pytest.mark.asyncio
     async def test_localhost_exempt(self):
@@ -98,7 +100,8 @@ class TestRateLimiter:
         for _ in range(10):
             await rl.record_failure("127.0.0.1")
         # localhost nunca se bloquea
-        ok, _ = await rl.is_allowed("127.0.0.1"); assert ok is True
+        ok, _ = await rl.is_allowed("127.0.0.1")
+        assert ok is True
 
     @pytest.mark.asyncio
     async def test_different_ips_independent(self):
@@ -106,8 +109,10 @@ class TestRateLimiter:
         rl = RateLimiter(max_attempts=2, window_seconds=900)
         for _ in range(2):
             await rl.record_failure("10.0.0.1")
-        ok1, _ = await rl.is_allowed("10.0.0.1"); assert ok1 is False
-        ok2, _ = await rl.is_allowed("10.0.0.2"); assert ok2 is True
+        ok1, _ = await rl.is_allowed("10.0.0.1")
+        assert ok1 is False
+        ok2, _ = await rl.is_allowed("10.0.0.2")
+        assert ok2 is True
 
 
 # ── Input Validator ───────────────────────────────────────────────────────────

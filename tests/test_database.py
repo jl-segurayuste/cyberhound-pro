@@ -41,7 +41,7 @@ class TestScans:
 
     @pytest.mark.asyncio
     async def test_scan_starts_as_running(self, database):
-        scan_id = await database.create_scan("audit")
+        await database.create_scan("audit")
         history = await database.get_scan_history()
         assert history[0]["status"] == "running"
 

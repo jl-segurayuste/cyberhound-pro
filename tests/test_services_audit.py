@@ -199,10 +199,6 @@ class TestServicesAuditor:
         """Solo audita los servicios especificados."""
         redis_finding_found = []
 
-        original_redis = __import__(
-            'cyberhound.scanners.services_audit', fromlist=['audit_redis']
-        ).audit_redis
-
         async def mock_redis():
             redis_finding_found.append(True)
             return []

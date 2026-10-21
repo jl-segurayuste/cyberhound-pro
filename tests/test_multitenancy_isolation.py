@@ -313,7 +313,7 @@ async def test_ambito_de_analisis_por_organizacion(env):
     msg = await ws_error(env.contoso, web)                     # el ámbito de acme no vale para contoso
     assert msg["type"] == "error"
     assert (await env.acme.get("/api/network/discover?networks=192.168.1.0/24")).status == 403
-    assert (await env.acme.get("/api/network/discover")).status == 403
+    assert (await env.acme.get("/api/network/discover")).status == 400     # faltan las redes
     assert (await env.acme.post("/api/scan/ldap", json={"uri": "ldap://192.168.1.5"})).status == 403
     # dentro del ámbito el análisis arranca (no hay servidor en 10.10.0.9: sale info, no error de ámbito)
     msg = await ws_error(env.acme, web)

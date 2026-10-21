@@ -1,4 +1,5 @@
 """Tests del análisis profundo de filesystem de imágenes Docker."""
+import os
 import tarfile
 import tempfile
 from io import BytesIO
@@ -146,7 +147,7 @@ class TestTarScan:
             findings = _scan_tar(tar_path, "myapp:1.0")
             assert any("sensitive_file" in f.id or ".env" in f.title for f in findings)
         finally:
-            import os; os.unlink(tar_path)
+            os.unlink(tar_path)
 
     def test_detects_aws_key_pattern(self):
         content = b"export AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE\nexport AWS_SECRET=secret\n"
@@ -155,7 +156,7 @@ class TestTarScan:
             findings = _scan_tar(tar_path, "myapp:1.0")
             assert any("aws_key" in f.id for f in findings)
         finally:
-            import os; os.unlink(tar_path)
+            os.unlink(tar_path)
 
     def test_no_findings_for_clean_image(self):
         content = b"# Normal Python code\nprint('Hello World')\n"
@@ -164,7 +165,7 @@ class TestTarScan:
             findings = _scan_tar(tar_path, "myapp:1.0")
             assert all(f.severity != "critical" for f in findings)
         finally:
-            import os; os.unlink(tar_path)
+            os.unlink(tar_path)
 
     def test_skips_large_files(self):
         # Fichero de 600KB con "secret" — debe saltarse por tamaño
@@ -175,7 +176,7 @@ class TestTarScan:
             # No debe detectar secretos en ficheros grandes
             assert not any("secret" in f.id and "bigfile" in f.evidence for f in findings)
         finally:
-            import os; os.unlink(tar_path)
+            os.unlink(tar_path)
 
     def test_detects_github_token(self):
         token = "ghp_" + "a" * 36
@@ -185,7 +186,7 @@ class TestTarScan:
             findings = _scan_tar(tar_path, "myapp:1.0")
             assert any("github_token" in f.id for f in findings)
         finally:
-            import os; os.unlink(tar_path)
+            os.unlink(tar_path)
 
 
 class TestSecretPatterns:

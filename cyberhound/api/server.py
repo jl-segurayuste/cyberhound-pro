@@ -188,6 +188,14 @@ WS_RUNNERS = {
 }
 
 
+NO_TARGETS = "Indica qué redes o equipos analizar (dentro del ámbito de la organización)"
+
+
+def _scope_status(err: str) -> int:
+    """400 si faltan o no valen los objetivos (error de entrada); 403 si están fuera del ámbito."""
+    return 400 if err == NO_TARGETS or err.startswith("Objetivo no válido") else 403
+
+
 def _platform_only(path: str) -> bool:
     return path.startswith(_PLATFORM_PREFIXES)
 
@@ -677,7 +685,7 @@ class CyberHoundServer:
             return ("Esta organización todavía no tiene redes ni dominios permitidos: "
                     "pídeselo al administrador de la plataforma")
         if not targets:
-            return "Indica qué redes o equipos analizar (dentro del ámbito de la organización)"
+            return NO_TARGETS
         return await Scope(allowed).check_all(targets)
 
     async def _emit_findings(
@@ -1276,7 +1284,7 @@ class CyberHoundServer:
             networks_raw = request.rel_url.query.get("networks", "")
             networks = [n.strip() for n in networks_raw.split(",") if n.strip()] or None
             if err := await self._out_of_scope(networks or []):
-                return web.json_response({"error": err}, status=403)
+                return web.json_response({"error": err}, status=_scope_status(err))
             from cyberhound.scanners.network import NetworkScanner
             ips = await NetworkScanner().discover_hosts(networks=networks)
             return web.json_response({"hosts": ips})
@@ -2399,7 +2407,7 @@ class CyberHoundServer:
             body   = await _read_json(request)
             user   = request.get("auth_user", "unknown")
             if err := await self._out_of_scope([body.get("uri", "")]):
-                return web.json_response({"error": err}, status=403)
+                return web.json_response({"error": err}, status=_scope_status(err))
             from cyberhound.scanners.ldap_audit import LDAPAuditor
             scan_id = await self.db.create_scan("ldap", triggered_by=user)
             findings = await LDAPAuditor.full_audit(

@@ -40,6 +40,10 @@ with sync_playwright() as p:
     R["crear_msg"] = sa.locator("#tenant-msg").inner_text()[:60]
     R["tabla"] = sa.locator("#tenants-tbody tr").count()
     R["selector"] = sa.evaluate("[...document.querySelectorAll('#tenant-switch option')].map(o => o.textContent)")
+    # ámbito de análisis desde la tabla de organizaciones
+    sa.fill("#scope-acme-demo", "10.10.0.0/24, ejemplo-demo.es")
+    sa.locator("#tenants-tbody button", has_text="Guardar").first.click(); sa.wait_for_timeout(800)
+    R["ambito_guardado"] = sa.evaluate("fetch('/api/tenants/acme-demo').then(r => r.json()).then(t => t.allowed_targets)")
     # cambiar a la organización con el selector
     sa.select_option("#tenant-switch", "acme-demo"); sa.wait_for_load_state("networkidle"); sa.wait_for_timeout(1200)
     R["sa_badge_tras_cambio"] = sa.locator("#user-role-badge").inner_text()
@@ -56,6 +60,16 @@ with sync_playwright() as p:
     t.evaluate("showPanel('settings')"); t.wait_for_timeout(700)
     R["tabs_visibles"] = t.evaluate("[...document.querySelectorAll('#panel-settings .cfg-tab')].filter(e => !e.hidden).map(e => e.dataset.cfg)")
     R["tab_activa"] = t.evaluate("document.querySelector('#panel-settings .cfg-tab.active')?.dataset.cfg")
+    # sus propias integraciones y análisis programados, dentro de su ámbito
+    t.locator('[data-cfg="notifications"]').click(); t.wait_for_timeout(500)
+    t.locator('[data-cfg="schedules"]').click(); t.wait_for_timeout(500)
+    for target, key in (("http://10.10.0.9", "programado_en_ambito"), ("http://192.168.1.1", "programado_fuera")):
+        t.fill("#sched-name", "Cabeceras " + key); t.fill("#sched-targets", target)
+        t.locator("#cfg-schedules button", has_text="Programar").click(); t.wait_for_timeout(700)
+        R[key] = t.locator("#sched-msg").inner_text()[:80]
+    R["programados_tabla"] = t.locator("#schedules-tbody tr").count()
+    t.locator('[data-cfg="account"]').click(); t.wait_for_timeout(600)
+    R["mis_sesiones"] = t.locator("#sessions-tbody tr").count()
     t.locator('[data-cfg="agents"]').click(); t.wait_for_timeout(700)
     R["clave_agente_visible"] = t.locator("#tenant-agent-key-card").is_visible() and len(t.locator("#tenant-agent-key").inner_text()) > 20
     R["modo_agente_oculto"] = not t.locator("#agent-mode-card").is_visible()
@@ -90,16 +104,21 @@ with sync_playwright() as p:
     b.close()
 # los 401 del tenant tras la baja son lo esperado
 R["errores"] = [e for e in R["errores"] if not ("jefa" in e and "401" in e)]
+ok_ambito = R.get("programado_en_ambito", "").startswith("✓") and "fuera" in R.get("programado_fuera", "")
 print(json.dumps(R, indent=1, ensure_ascii=False))
 esperado = {
     "sa_tab_orgs_visible": True, "tabla": 1, "tenant_url": "/", "grupo_sistema_oculto": True,
-    "tab_activa": "users", "clave_agente_visible": True, "modo_agente_oculto": True,
+    "tab_activa": "notifications", "clave_agente_visible": True, "programados_tabla": 1, "mis_sesiones": 1,
+    "ambito_guardado": ["10.10.0.0/24", "ejemplo-demo.es"], "modo_agente_oculto": True,
     "selector_oculto_tenant": True, "sa_historial_acme": 0, "tenant_tras_baja": 401,
 }
 fallos = [f"{k}: {R.get(k)!r} (esperado {v!r})" for k, v in esperado.items() if R.get(k) != v] + R["errores"]
 if set(R["nav_visibles"]) & {"audit", "malware", "docker", "code", "services", "monitor"}:
     fallos.append(f"el tenant ve paneles del servidor: {R['nav_visibles']}")
-if set(R["tabs_visibles"]) != {"users", "suppressions", "2fa", "agents", "ldap"}:
+if not ok_ambito:
+    fallos.append(f"programar dentro/fuera del ámbito: {R.get('programado_en_ambito')!r} / {R.get('programado_fuera')!r}")
+if set(R["tabs_visibles"]) != {"users", "suppressions", "2fa", "agents", "ldap", "notifications", "siem", "ticketing",
+                               "account", "schedules", "remotefixes", "audit"}:
     fallos.append(f"pestañas del tenant: {R['tabs_visibles']}")
 if not R["sa_historial_default"]:
     fallos.append("el superadmin no ve los datos de la plataforma")

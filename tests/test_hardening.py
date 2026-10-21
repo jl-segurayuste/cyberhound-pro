@@ -244,7 +244,6 @@ class TestCheckNTP:
 
     @pytest.mark.asyncio
     async def test_detects_missing_ntp(self):
-        proc_inactive = make_proc(stdout="inactive")
         proc_timedatectl = make_proc(stdout="NTP service: inactive")
         with patch("cyberhound.scanners.hardening.command_exists", return_value=False), \
              patch("cyberhound.scanners.hardening.run_command",

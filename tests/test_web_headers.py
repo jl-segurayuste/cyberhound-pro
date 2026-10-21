@@ -15,7 +15,7 @@ class TestSecurityHeadersConfig:
             assert h in SECURITY_HEADERS
 
     def test_each_header_has_validator(self):
-        for header, (sev, rem, validator) in SECURITY_HEADERS.items():
+        for sev, rem, validator in SECURITY_HEADERS.values():
             assert sev in ("high", "medium", "low")
             assert callable(validator)
             assert len(rem) > 0

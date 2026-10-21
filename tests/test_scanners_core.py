@@ -144,7 +144,10 @@ class TestNetworkScanner:
         """nmap que falla devuelve lista vacía."""
         from cyberhound.scanners.network import NetworkScanner
         scanner = NetworkScanner()
-        proc = MagicMock(); proc.returncode = 1; proc.stdout = ""; proc.stderr = ""
+        proc = MagicMock()
+        proc.returncode = 1
+        proc.stdout = ""
+        proc.stderr = ""
         with patch("cyberhound.scanners.network.command_exists", return_value=True):
             with patch("cyberhound.scanners.network.run_command",
                        new_callable=AsyncMock, return_value=proc):

@@ -26,7 +26,7 @@ class TestCompliance:
 
     def test_empty_findings_full_compliance(self):
         results = analyze_compliance([])
-        for fw, res in results.items():
+        for res in results.values():
             assert res.score_pct == 100.0
             assert res.failed == 0
 

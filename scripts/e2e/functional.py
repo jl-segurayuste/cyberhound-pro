@@ -266,6 +266,59 @@ with sync_playwright() as p:
     r = pg.evaluate("async () => { const r = await fetch('/metrics'); return {s: r.status, t: (await r.text()).slice(0, 400)}; }")
     check("métricas Prometheus", r["s"] == 200 and "# TYPE" in r["t"], r)
 
+    # ── Mi cuenta, tokens de API, auditoría ────────────────────────────────
+    call("sesiones: listar (incluye la actual)", "GET", "/api/sessions",
+         pred=lambda d: isinstance(d, list) and any(s.get("current") for s in d) and all("jti" not in s for s in d))
+    tok = call("tokens: crear (viewer, 30 días)", "POST", "/api/tokens", {"name": "e2e", "role": "viewer", "expires_days": 30},
+               ok_status=(201,), pred=lambda d: d.get("token", "").startswith("cht_default."))
+    if tok.get("token"):
+        tc = mk()
+        h = {"Authorization": f"Bearer {tok['token']}"}
+        r = tc.request.get(f"{BASE}/api/me", headers=h)
+        check("token: autentica con el rol del token", r.status == 200 and r.json().get("role") == "viewer", r.status)
+        r = tc.request.post(f"{BASE}/api/suppressions", headers=h, data={"pattern": "x", "reason": "y"})
+        check("token: no supera su rol", r.status == 403, r.status)
+        r = tc.request.post(f"{BASE}/api/tokens", headers=h, data={"name": "otro"})
+        check("token: no gestiona credenciales", r.status == 403, r.status)
+        call("tokens: listar sin hash", "GET", "/api/tokens", pred=lambda d: any(t["id"] == tok["id"] for t in d)
+             and all("token_hash" not in t for t in d))
+        call("tokens: revocar", "DELETE", f"/api/tokens/{tok['id']}")
+        r = tc.request.get(f"{BASE}/api/me", headers=h)
+        check("token revocado ya no vale", r.status == 401, r.status)
+        tc.close()
+    call("contraseña: actual errónea rechazada", "POST", "/api/me/password", {"current": "mala", "new": "x" * 12}, ok_status=(400,))
+    call("auditoría: registra el login", "GET", "/api/audit?action=login", pred=lambda d: any(e["username"] == "admin" for e in d))
+    call("auditoría: filtro de fallos", "GET", "/api/audit?failures=1", pred=lambda d: all(e["ok"] == 0 for e in d))
+    call("fixes remotos: historial", "GET", "/api/fix/remote/history", pred=lambda d: isinstance(d, list))
+
+    # ── Integraciones: lo guardado se aplica sin reiniciar ────────────────
+    call("notificaciones: guardar servidor SMTP", "POST", "/api/config/notifications",
+         {"smtp_host": "smtp.ejemplo-demo.es", "smtp_password": "clave-smtp-demo"})
+    call("notificaciones: se lee lo guardado sin devolver la contraseña", "GET", "/api/config/notifications",
+         pred=lambda d: d.get("smtp_host") == "smtp.ejemplo-demo.es" and "smtp_password" not in d
+         and "smtp_password" in d.get("secrets_set", []))
+
+    # ── Análisis programados ──────────────────────────────────────────────
+    sched = call("programados: crear (cabeceras web)", "POST", "/api/schedules",
+                 {"name": "E2E cabeceras", "task": "web_headers", "targets": [WEB], "hour": 3, "minute": 0},
+                 ok_status=(201,), pred=lambda d: d.get("id"))
+    call("programados: tarea no programable rechazada", "POST", "/api/schedules",
+         {"name": "x", "task": "audit", "targets": ["a"]}, ok_status=(400,))
+    if sched.get("id"):
+        call("programados: lanzar ahora", "POST", f"/api/schedules/{sched['id']}/run", {}, ok_status=(202,))
+        done = None
+        for _ in range(60):
+            rows = api("GET", "/api/schedules")["data"]
+            row = next((x for x in rows if x["id"] == sched["id"]), {})
+            if row.get("last_status", "").startswith(("ok", "error")) and not row.get("running"):
+                done = row; break
+            time.sleep(1)
+        check("programados: se ejecuta y deja su análisis en el historial", done and done["last_status"].startswith("ok")
+              and done.get("last_scan_id"), done)
+        call("programados: pausar", "PATCH", f"/api/schedules/{sched['id']}", {"enabled": False},
+             pred=lambda d: d.get("enabled") is False)
+        call("programados: borrar", "DELETE", f"/api/schedules/{sched['id']}")
+
     # ── 2FA de extremo a extremo ───────────────────────────────────────────
     call("2fa: estado inicial", "GET", "/api/auth/2fa/status")
     setup = call("2fa: setup", "POST", "/api/auth/2fa/setup", {})

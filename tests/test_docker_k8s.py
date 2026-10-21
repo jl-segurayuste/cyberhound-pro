@@ -94,10 +94,6 @@ class TestDockerContainersAsRoot:
 
     @pytest.mark.asyncio
     async def test_detects_root_container(self):
-        containers_json = json.dumps([{"ID": "abc123", "Names": "myapp"}])
-        inspect = docker_inspect_container(user="")  # sin usuario = root
-        proc_ps = MagicMock(returncode=0, stdout=containers_json)
-
         with patch("cyberhound.scanners.docker_scan._docker_json") as mock_dj:
             async def side_effect(args):
                 if "ps" in args:

@@ -21,7 +21,8 @@ SKIP_TEXT = {"Salir"}
 PREFILL = {"net-networks": "10.10.0.0/24", "subenum-domains": "ejemplo-demo.es", "dnssec-domains": "ejemplo-demo.es",
            "code-path": "/srv/demo-app", "tls-targets": "www.ejemplo-demo.es", "webhdr-urls": "https://www.ejemplo-demo.es",
            "webexp-urls": "https://www.ejemplo-demo.es", "apisec-urls": "https://api.ejemplo-demo.es",
-           "nuclei-urls": "https://intranet.ejemplo-demo.es"}  # logout se prueba aparte
+           "nuclei-urls": "https://intranet.ejemplo-demo.es", "token-name": "barrido", "sched-name": "Barrido",
+           "sched-targets": "https://www.ejemplo-demo.es"}  # logout se prueba aparte
 
 issues = []
 stats = {"por_panel": {}, "paneles": 0, "controles_clicados": 0, "dialogos": [], "stubs": []}
@@ -201,6 +202,7 @@ EXPECTED = (
     ("http_400", "PATCH /api/users/admin"),     # el admin no puede quitarse su propio rol
     ("http_404", "/api/sbom/latest"),           # aún no se ha generado ningún SBOM
     ("clic_fallido", "✓ Listo"),                # botón ya desactivado tras aplicar el fix
+    ("http_400", "/api/me/password"),           # cambiar contraseña con el formulario vacío
 )
 
 
