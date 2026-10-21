@@ -6,7 +6,7 @@
 
 [![Versión](https://img.shields.io/badge/versión-v6.5.0-blue.svg)](cyberhound/__init__.py)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://python.org)
-[![Tests](https://img.shields.io/badge/tests-690%20passed-green.svg)](#tests)
+[![Tests](https://img.shields.io/badge/tests-729%20passed-green.svg)](#tests)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
 
 ---
@@ -647,7 +647,7 @@ Los secretos que llegan por entorno no se copian al fichero.
 
 ## Tests
 
-**690 tests** en 48 ficheros (`tests/test_*.py`), que el CI ejecuta en Python 3.11 y 3.12 y otra vez contra PostgreSQL 16.
+**729 tests** en 53 ficheros (`tests/test_*.py`), que el CI ejecuta en Python 3.11 y 3.12 y otra vez contra PostgreSQL 16.
 
 ```bash
 pip install -e ".[test]"
