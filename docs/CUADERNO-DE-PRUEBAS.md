@@ -13,11 +13,12 @@ Leyenda: ✅ pasa · ⚠️ pasa con observación · ❌ falla
 
 | ID | Qué | Cómo | Resultado | Estado |
 |----|-----|------|-----------|--------|
-| TC-AUTO-01 | Tests unitarios, de integración y de coherencia (SQLite) | `pytest tests/` | 736 pasan (1 omitido: solo PostgreSQL) | ✅ |
-| TC-AUTO-02 | La misma suite contra PostgreSQL 16 | `CH_DB_URL=postgresql://… pytest tests/` | 737 pasan | ✅ |
+| TC-AUTO-01 | Tests unitarios, de integración y de coherencia (SQLite) | `pytest tests/` | 745 pasan (1 omitido: solo PostgreSQL) | ✅ |
+| TC-AUTO-02 | La misma suite contra PostgreSQL 16 | `CH_DB_URL=postgresql://… pytest tests/` | 746 pasan | ✅ |
 | TC-AUTO-03 | Lint | `ruff check cyberhound tests` | sin avisos | ✅ |
 | TC-AUTO-05 | Migración de una BD 6.5.0 (v7) a v8 | BD creada con el código publicado y abierta con el nuevo, en SQLite y PostgreSQL | Los programados se conservan y admiten credencial | ✅ |
 | TC-AUTO-06 | Playbook con `ansible-playbook` real | Contenedor Debian 12 con sshd, drop-in de cloud-init y un bloque `Match` | `sshd -T` con valores seguros, `Match` intacto, 2ª pasada `changed=0` | ✅ |
+| TC-AUTO-07 | Scripts remotos con Python 3.6 (RHEL 8) | Contenedor `python:3.6` con un drop-in de cloud-init y un `Match` | Auditoría con todos los checks; los 5 tipos de fix y su deshacer; sshd idéntico al original | ✅ |
 | TC-AUTO-04 | CI | GitHub Actions: lint, Python 3.11 y 3.12, PostgreSQL, análisis de seguridad, imagen | verde | ✅ |
 
 ## 2. Interfaz (navegador real) — `scripts/e2e/ui.py`

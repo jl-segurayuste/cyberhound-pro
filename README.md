@@ -343,6 +343,7 @@ Los hallazgos con ⚡ se corrigen con un clic, en local o en el host remoto dond
 
 - **Deshacer** (fixes locales): cada fix guarda en un journal lo necesario para revertirlo (copia del fichero, permisos previos, estado del servicio o comando inverso) y el botón pasa a **↶ Deshacer**. Las instalaciones de paquetes se marcan como no reversibles: no se desinstala nada a ciegas.
 - **Corrección remota**: el comando lo construye CyberHound a partir del hallazgo (nunca se ejecuta lo que devuelve el host auditado) y se lanza por SSH sin shell, con `sudo -n` si está disponible.
+- **sshd**: la auditoría mira el valor efectivo (el primero que lee sshd, también en `sshd_config.d/*.conf`, sin contar los bloques `Match`) y el fix cambia todas las líneas que mandan, valida con `sshd -t` y comprueba que el valor efectivo queda bien; si no, deja los ficheros como estaban. Los scripts remotos funcionan con el Python 3.6 de RHEL 8.
 - **Credenciales SSH guardadas** (Configuración › Credenciales SSH): un par de claves ed25519 que genera CyberHound (solo hay que añadir la clave pública a `authorized_keys` de cada equipo), una clave privada pegada o una contraseña. El secreto se guarda cifrado con una clave derivada del secreto de la instancia y de la organización, y la API nunca lo devuelve. Se eligen en el panel Red para auditar, corregir y deshacer, y son las que usan los análisis SSH programados. Un operador puede usarlas pero no verlas; crearlas o borrarlas es de administrador.
 - **Deshacer** (fixes remotos): al aplicarlo, el host devuelve su estado anterior (la línea de `sshd_config`, el valor del sysctl, si el servicio estaba activo, los permisos del fichero, si ufw estaba apagado) y CyberHound guarda la acción inversa, validada porque viene del host. Se deshace desde el propio botón o desde **Configuración › Fixes remotos**, que lista los aplicados en la organización.
 
@@ -653,7 +654,7 @@ Los secretos que llegan por entorno no se copian al fichero.
 
 ## Tests
 
-**737 tests** en 55 ficheros (`tests/test_*.py`), que el CI ejecuta en Python 3.11 y 3.12 y otra vez contra PostgreSQL 16.
+**746 tests** en 56 ficheros (`tests/test_*.py`), que el CI ejecuta en Python 3.11 y 3.12 y otra vez contra PostgreSQL 16.
 
 ```bash
 pip install -e ".[test]"

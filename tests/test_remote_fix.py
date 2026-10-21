@@ -199,11 +199,16 @@ async def test_fix_remoto_usa_el_host_del_hallazgo(client, monkeypatch):
 def test_accion_inversa_solo_con_estado_previo_valido():
     ua = RemoteAuditor.undo_action
     ssh = {"action": "ssh_param", "param": "PermitRootLogin", "value": "no"}
-    assert ua(ssh, {"line": "PermitRootLogin yes"}) == {"action": "ssh_param_undo", "param": "PermitRootLogin",
-                                                        "line": "PermitRootLogin yes"}
-    assert ua(ssh, {"line": None})["line"] is None                  # no estaba: se quita la línea
-    assert ua(ssh, {"line": "PermitRootLogin yes\nMatch all"}) is None
-    assert ua(ssh, {"line": "PasswordAuthentication yes"}) is None   # otra directiva: el host miente
+    ch = {"file": "sshd_config.d/50-cloud-init.conf", "old": "PermitRootLogin yes", "new": "PermitRootLogin no"}
+    assert ua(ssh, {"changes": [ch]}) == {"action": "ssh_param_undo", "param": "PermitRootLogin", "changes": [ch]}
+    added = {**ch, "file": "sshd_config", "old": None}               # no estaba: al deshacer se quita
+    assert ua(ssh, {"changes": [added]})["changes"][0]["old"] is None
+    for bad in ({**ch, "old": "PermitRootLogin yes\nMatch all"},
+                {**ch, "old": "PasswordAuthentication yes"},         # otra directiva: el host miente
+                {**ch, "file": "../../etc/passwd"}, {**ch, "file": "/etc/shadow"},
+                {**ch, "new": "PermitRootLogin yes"}):               # la línea nueva la pone CyberHound
+        assert ua(ssh, {"changes": [bad]}) is None, bad
+    assert ua(ssh, {"changes": []}) is None and ua(ssh, {"line": "PermitRootLogin yes"}) is None
     assert ua({"action": "ufw_enable"}, {"active": False}) == {"action": "ufw_disable"}
     assert ua({"action": "ufw_enable"}, {"active": True}) is None   # ya estaba activo: nada que deshacer
     sysctl = {"action": "sysctl", "param": "net.ipv4.ip_forward", "value": "0"}
@@ -260,3 +265,69 @@ def test_deshacer_ssh_param_con_el_script_real(tmp_path):
         assert res["ok"] and f"{param} no" in conf.read_text()
         assert run(RemoteAuditor.undo_action(action, res["before"]))["ok"]
         assert conf.read_text().strip() == start.strip(), param
+
+
+def test_fix_ssh_remoto_con_drop_in_y_match(tmp_path):
+    """El valor de cloud-init en sshd_config.d manda sobre sshd_config: el fix lo cambia ahí, respeta el
+    bloque Match y al deshacerlo todo queda como estaba. Antes cambiaba sshd_config y decía "aplicado"."""
+    import json
+    import os
+    import subprocess
+    import sys
+
+    from cyberhound.core import sshd_config
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for tool in ("sshd", "systemctl"):
+        (bin_dir / tool).write_text("#!/bin/sh\nexit 0\n")
+        (bin_dir / tool).chmod(0o755)
+    conf, dropins = tmp_path / "sshd_config", tmp_path / "sshd_config.d"
+    dropins.mkdir()
+    main = "Include sshd_config.d/*.conf\nPasswordAuthentication no\n\nMatch User deploy\n    PasswordAuthentication yes\n"
+    cloud = "PasswordAuthentication yes\n"
+    conf.write_text(main)
+    (dropins / "50-cloud-init.conf").write_text(cloud)
+    assert sshd_config.effective(str(conf))["passwordauthentication"][0] == "yes"     # manda el drop-in
+
+    def run(a):
+        payload = RemoteAuditor._fix_payload(a).replace("/etc/ssh/sshd_config", str(conf))
+        env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}"}
+        out = subprocess.run([sys.executable, "-"], input=payload, capture_output=True, text=True, timeout=30, env=env)
+        return json.loads(out.stdout.strip().splitlines()[-1])
+    action = {"action": "ssh_param", "param": "PasswordAuthentication", "value": "no"}
+    res = run(action)
+    assert res["ok"], res
+    assert sshd_config.effective(str(conf))["passwordauthentication"][0] == "no"
+    assert (dropins / "50-cloud-init.conf").read_text() == "PasswordAuthentication no\n"
+    assert "    PasswordAuthentication yes" in conf.read_text()                        # el Match, intacto
+    undo = RemoteAuditor.undo_action(action, res["before"])
+    assert undo["changes"] == [{"file": "sshd_config.d/50-cloud-init.conf", "old": "PasswordAuthentication yes",
+                                "new": "PasswordAuthentication no"}]
+    assert run(undo)["ok"]
+    assert conf.read_text() == main and (dropins / "50-cloud-init.conf").read_text() == cloud
+
+    # opción que no estaba: se añade antes del primer Match, no al final (quedaría dentro del bloque)
+    res = run({"action": "ssh_param", "param": "X11Forwarding", "value": "no"})
+    text = conf.read_text()
+    assert res["ok"] and text.index("X11Forwarding no") < text.index("Match User deploy")
+
+
+def test_fix_ssh_remoto_deshace_lo_guardado_por_versiones_anteriores(tmp_path):
+    """Los fixes aplicados con 6.5 guardaron {"line": ...}: se siguen pudiendo deshacer."""
+    import json
+    import os
+    import subprocess
+    import sys
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for tool in ("sshd", "systemctl"):
+        (bin_dir / tool).write_text("#!/bin/sh\nexit 0\n")
+        (bin_dir / tool).chmod(0o755)
+    conf = tmp_path / "sshd_config"
+    conf.write_text("Port 22\nPermitRootLogin no\n")
+    undo = {"action": "ssh_param_undo", "param": "PermitRootLogin", "line": "PermitRootLogin yes"}
+    payload = RemoteAuditor._fix_payload(undo).replace("/etc/ssh/sshd_config", str(conf))
+    env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}"}
+    out = subprocess.run([sys.executable, "-"], input=payload, capture_output=True, text=True, timeout=30, env=env)
+    assert json.loads(out.stdout.strip().splitlines()[-1])["ok"]
+    assert conf.read_text() == "Port 22\nPermitRootLogin yes\n"

@@ -151,8 +151,9 @@ Además se arreglaron bugs funcionales: los parámetros sysctl locales nunca gen
 inalcanzable" (`PermissionDenied` es subclase de `DisconnectError` y se capturaba después) y las claves
 OpenSSH con frase de paso no se podían importar (faltaba `bcrypt`).
 
-**Pendiente (observado, no corregido en esta versión):** el fix local y el remoto de sshd tienen la
-misma limitación que tenía el playbook con `sshd_config.d/*.conf`. Si un drop-in fija
-`PasswordAuthentication yes`, el fix cambia `sshd_config` pero el valor efectivo sigue siendo el
-inseguro, y la auditoría, que solo lee `sshd_config`, tampoco lo detecta. Lo correcto es auditar con
-`sshd -T` (configuración efectiva) y corregir también los drop-ins.
+Después, en la misma versión:
+
+| # | Severidad | Hallazgo | Corrección |
+|---|---|---|---|
+| 6 | **Media** | **El fix de sshd (local y remoto) decía "aplicado" sin surtir efecto** y la auditoría no veía el valor real: solo se leía y cambiaba `sshd_config`, pero un `sshd_config.d/*.conf` (cloud-init deja `PasswordAuthentication yes`) se lee antes y manda; además la opción que faltaba se añadía al final del fichero, dentro del último `Match`. | `core/sshd_config.py`: valor efectivo (primer valor, `Include`, sin `Match`) para auditar; el fix cambia todas las líneas globales en esos ficheros, inserta antes del primer `Match`, valida con `sshd -t`, comprueba el valor efectivo y si no, restaura. El deshacer guarda cada línea cambiada por fichero (validado en el servidor: rutas dentro de `/etc/ssh`, misma opción, línea nueva puesta por CyberHound). `tests/test_sshd_config.py`, `test_fix_ssh_remoto_con_drop_in_y_match`. |
+| 7 | **Media** | **Los scripts remotos no funcionaban en RHEL 8** (Python 3.6): `subprocess.run(capture_output=…, text=…)` es de 3.7 y `str.removesuffix` de 3.9. El fix remoto fallaba siempre y la auditoría se saltaba en silencio los checks que lanzan comandos. | API de 3.6 en los dos scripts y un test que lo vigila. Probado en un contenedor `python:3.6`: auditoría, los cinco tipos de fix y su deshacer (sshd vuelve a quedar idéntico). |

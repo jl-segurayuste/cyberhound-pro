@@ -11,6 +11,7 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from cyberhound.core import sshd_config
 from cyberhound.core.executor import command_exists, read_file_async, run_command
 from cyberhound.core.logging import get_logger
 from cyberhound.core.models import Finding
@@ -50,7 +51,7 @@ def _f(
 
 async def check_ssh() -> list[Finding]:
     results = []
-    path = "/etc/ssh/sshd_config"
+    path = sshd_config.SSHD_CONFIG
     content = await read_file_async(path)
     if content is None:
         return [_f("ssh_config_unreadable", "ssh", "medium",
@@ -58,6 +59,8 @@ async def check_ssh() -> list[Finding]:
                    "No se pudo leer /etc/ssh/sshd_config",
                    "Verificar permisos y SELinux/AppArmor")]
 
+    # Valor efectivo: primer valor, con los Include (sshd_config.d) y sin los bloques Match
+    eff = await asyncio.to_thread(sshd_config.effective, path)
     dangerous = {
         "PermitRootLogin":      ("yes",  "high"),
         "PasswordAuthentication": ("yes", "high"),
@@ -65,19 +68,20 @@ async def check_ssh() -> list[Finding]:
         "X11Forwarding":        ("yes",  "medium"),
     }
     for param, (bad_val, sev) in dangerous.items():
-        if re.search(rf"^\s*{param}\s+{bad_val}\s*$", content, re.MULTILINE | re.IGNORECASE):
+        val, src = eff.get(param.lower(), ("", ""))
+        if val.lower() == bad_val:
             results.append(_f(
                 f"ssh_{param}", "ssh", sev,
                 f"SSH: {param} = {bad_val}",
-                f"El parámetro {param} tiene un valor inseguro ({bad_val}).",
-                f"Editar /etc/ssh/sshd_config → establecer {param} no",
-                evidence=f"{param} {bad_val}", auto_fix=True,
+                f"El parámetro {param} tiene un valor inseguro ({bad_val}), fijado en {src}.",
+                f"Editar {src} → establecer {param} no",
+                evidence=f"{param} {val} ({src})", auto_fix=True,
             ))
 
     # MaxAuthTries
-    m = re.search(r"^\s*MaxAuthTries\s+(\d+)", content, re.MULTILINE | re.IGNORECASE)
-    if not m or int(m.group(1)) > 4:
-        val = m.group(1) if m else "6 (por defecto)"
+    val, _src = eff.get("maxauthtries", ("", ""))
+    if not val.isdigit() or int(val) > 4:
+        val = val or "6 (por defecto)"
         results.append(_f(
             "ssh_MaxAuthTries", "ssh", "medium",
             "SSH: MaxAuthTries demasiado alto",
@@ -87,7 +91,7 @@ async def check_ssh() -> list[Finding]:
         ))
 
     # Protocol (solo relevante en sistemas legacy)
-    if re.search(r"^\s*Protocol\s+1", content, re.MULTILINE):
+    if "1" in eff.get("protocol", ("", ""))[0].split(","):
         results.append(_f(
             "ssh_protocol1", "ssh", "critical",
             "SSH Protocol 1 habilitado",
@@ -1016,28 +1020,34 @@ class HardeningFixer:
         if fid not in param_map:
             return False, f"SSH param desconocido: {fid}"
         param, value = param_map[fid]
-        # Reversión: restaurar el fichero y recargar sshd. Se registra el reload
-        # ANTES del snapshot para que, al revertir en orden inverso, primero se
-        # restaure el fichero y luego se recargue el servicio.
-        self._record(command_undo(["systemctl", "reload", "sshd"], "recargar sshd"))
-        self._record(snapshot_file("/etc/ssh/sshd_config"))
+        path = sshd_config.SSHD_CONFIG
         if param is None:
-            # Eliminar Protocol 1
-            ok, err = await self._run(["sed", "-i", r"/^\s*Protocol\s*1/d", "/etc/ssh/sshd_config"])
-        else:
-            path = "/etc/ssh/sshd_config"
-            # Reemplazar si existe, añadir si no
-            ok, err = await self._run(
-                ["sed", "-i", rf"s/^\s*{param}\s.*/{param} {value}/", path]
-            )
-            # Verificar que se aplicó; si no existía, añadir
-            content = await read_file_async(path) or ""
-            if f"{param} {value}" not in content:
-                with open(path, "a") as f:
-                    f.write(f"\n{param} {value}\n")
-        if ok:
-            await self._run(["systemctl", "reload", "sshd"], timeout=15)
-        return ok, err
+            # Reversión: restaurar el fichero y recargar sshd (el reload se registra antes del
+            # snapshot para que, al revertir en orden inverso, primero se restaure el fichero)
+            self._record(command_undo(["systemctl", "reload", "sshd"], "recargar sshd"))
+            self._record(snapshot_file(path))
+            ok, err = await self._run(["sed", "-i", r"/^\s*Protocol\s*1/d", path])
+            if ok:
+                await self._run(["systemctl", "reload", "sshd"], timeout=15)
+            return ok, err
+        # Todas las líneas globales de la opción, también en sshd_config.d (sshd usa el primer valor)
+        new_texts, _changes = sshd_config.plan_set(param, value)
+        if not new_texts:
+            return True, "Ya estaba así"
+        self._record(command_undo(["systemctl", "reload", "sshd"], "recargar sshd"))
+        old_texts = {}
+        for f, text in new_texts.items():
+            self._record(snapshot_file(f))
+            old_texts[f] = Path(f).read_text()
+            Path(f).write_text(text)
+        ok, err = await self._run(["sshd", "-t"])
+        effective = sshd_config.effective().get(param.lower(), ("", ""))
+        if not ok or effective[0] != value:
+            for f, text in old_texts.items():
+                Path(f).write_text(text)
+            return False, err if not ok else f"El valor efectivo seguiría siendo '{effective[0]}' ({effective[1]})"
+        await self._run(["systemctl", "reload", "sshd"], timeout=15)
+        return True, ", ".join(sorted(new_texts))
 
     async def _fix_firewall(self, fid: str) -> tuple[bool, str]:
         if command_exists("ufw"):

@@ -36,6 +36,15 @@ release en GitHub, con la imagen Docker correspondiente en GHCR.
 - Las tareas de sshd del playbook no surtían efecto si el valor inseguro estaba en una línea anterior
   o en `sshd_config.d`; los parámetros sysctl locales nunca generaban tarea.
 - Una contraseña SSH incorrecta se informaba como "host inalcanzable".
+- **sshd, auditoría y fix (local y remoto)**: se leía y cambiaba solo `sshd_config`. Ahora se usa el
+  valor efectivo (primer valor, con los `Include` de `sshd_config.d` y sin los bloques `Match`), el fix
+  cambia todas las líneas globales de la opción en esos ficheros, añade la que falta antes del primer
+  `Match` (antes al final, dentro del último bloque), valida con `sshd -t` y comprueba que el valor
+  efectivo queda bien; si no, lo restaura. Deshacer devuelve cada fichero a como estaba (los fixes
+  guardados con versiones anteriores se siguen pudiendo deshacer).
+- Los scripts remotos no funcionaban con Python 3.6 (RHEL 8): `subprocess.run(capture_output=…)` y
+  `str.removesuffix` son de 3.7 y 3.9. El fix remoto fallaba siempre y la auditoría se saltaba sin
+  avisar los checks que lanzan comandos (servicios, ficheros con permisos de escritura para todos, ufw).
 - `docs/REDISENO-NAVEGACION.md` daba por pendientes dos cosas ya resueltas (CSP con nonce e id duplicado).
 
 ## [6.5.0] — 2026-10-21

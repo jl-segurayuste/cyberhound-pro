@@ -14,6 +14,7 @@ import json
 import re
 import time
 from dataclasses import dataclass
+from pathlib import Path
 
 try:
     import asyncssh
@@ -21,6 +22,7 @@ try:
 except ImportError:
     ASYNCSSH_AVAILABLE = False
 
+from cyberhound.core import sshd_config
 from cyberhound.core.logging import get_logger
 from cyberhound.core.models import Finding, HostResult
 
@@ -35,6 +37,8 @@ REMOTE_SYSCTL = {
 }
 REMOTE_SERVICES = ("telnet", "rsh", "nis", "finger", "tftp")
 REMOTE_WW_DIRS = ("/etc/", "/usr/bin/", "/usr/sbin/", "/bin/", "/sbin/")
+# Los scripts remotos llevan delante core/sshd_config.py tal cual (configuración efectiva de sshd)
+_SSHD_LIB = Path(sshd_config.__file__).read_text() + "\n"
 
 
 @dataclass
@@ -106,7 +110,7 @@ from pathlib import Path
 
 def run(cmd, timeout=30):
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        r = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=timeout)
         return r.stdout, r.stderr, r.returncode
     except Exception as e:
         return "", str(e), -1
@@ -121,15 +125,15 @@ def add(fid, cat, sev, title, desc, rem, evidence="", auto_fix=False, file_path=
         "passed": False, "line_number": 0, "code_snippet": "",
     })
 
-# SSH
-sshd = Path("/etc/ssh/sshd_config")
-if sshd.exists():
-    c = sshd.read_text()
+# SSH: valor efectivo (primer valor, con los Include de sshd_config.d y sin los bloques Match)
+if Path(SSHD_CONFIG).exists():
+    eff = effective()
     for param, bad in [("PermitRootLogin","yes"),("PasswordAuthentication","yes"),
                        ("PermitEmptyPasswords","yes"),("X11Forwarding","yes")]:
-        if re.search(rf"^\\s*{param}\\s+{bad}", c, re.MULTILINE|re.IGNORECASE):
-            add(f"ssh_{param}","ssh","high",f"{param} inseguro",f"Valor: {bad}",
-                f"Establecer {param} no en sshd_config", auto_fix=True)
+        val, src = eff.get(param.lower(), ("", ""))
+        if val.lower() == bad:
+            add(f"ssh_{param}","ssh","high",f"{param} inseguro",f"Valor: {bad} (en {src})",
+                f"Establecer {param} no en sshd_config", evidence=f"{param} {val} en {src}", auto_fix=True)
 
 # Firewall
 ufw = shutil.which("ufw")
@@ -172,7 +176,7 @@ for scan_dir in ["/etc","/usr/bin","/usr/sbin","/bin","/sbin"]:
 # bloque completo: "nis" hacia substring coincidia con la palabra "finishes"
 # en la descripcion de plymouth-quit-wait.service - falso positivo puro)
 out,_,_ = run(["systemctl","list-units","--type=service","--state=active","--no-pager","--plain","--no-legend"])
-unit_names = {ln.split()[0].lower().removesuffix(".service") for ln in out.splitlines() if ln.strip()}
+unit_names = {re.sub(r"\\.service$", "", ln.split()[0].lower()) for ln in out.splitlines() if ln.strip()}
 for svc in ["telnet","rsh","nis","finger","tftp"]:
     if any(name == svc or name.startswith(svc + "-") or name.startswith(svc + "@") for name in unit_names):
         add(f"svc_{svc}","services","high",f"Servicio inseguro: {svc}","",
@@ -190,6 +194,7 @@ for sf in ["/etc/sudoers"]+list(Path("/etc/sudoers.d").glob("*") if Path("/etc/s
 
 print(json.dumps(findings))
 '''
+    REMOTE_AUDIT_SCRIPT = _SSHD_LIB + REMOTE_AUDIT_SCRIPT
 
     def __init__(self, credentials: SSHCredentials) -> None:
         if not ASYNCSSH_AVAILABLE:
@@ -319,37 +324,61 @@ print(json.dumps(findings))
     REMOTE_FIX_SCRIPT = '''
 import json, os, re, shutil, stat, subprocess, sys
 def run(cmd):
-    r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+    r = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=60)
     return r.returncode == 0, (r.stderr or r.stdout).strip()[:300]
 def done(ok, msg="", before=None):
     print(json.dumps({"ok": ok, "msg": msg, "before": before})); sys.exit(0)
-def sshd_apply(new, old, before):
-    path = "/etc/ssh/sshd_config"
-    open(path, "w").write(new)
+def sshd_write(new_texts, check=None):
+    """Escribe los ficheros; si sshd -t los rechaza o la opción no queda con su valor, los restaura."""
+    old_texts = {p: open(p).read() for p in new_texts if os.path.exists(p)}
+    def restore():
+        for p in new_texts:
+            if p in old_texts:
+                open(p, "w").write(old_texts[p])
+    for p, text in new_texts.items():
+        if p not in old_texts:
+            continue
+        shutil.copy2(p, p + ".cyberhound.bak")
+        open(p, "w").write(text)
     ok, err = run(["sshd", "-t"]) if shutil.which("sshd") else run(["/usr/sbin/sshd", "-t"])
     if not ok:
-        open(path, "w").write(old); done(False, "sshd -t rechaza el cambio, restaurado: " + err)
+        restore(); done(False, "sshd -t rechaza el cambio, restaurado: " + err)
+    if check:
+        val, src = effective().get(check[0].lower(), ("", ""))
+        if val != check[1]:
+            restore(); done(False, "el valor efectivo seguiría siendo '%s' (%s), restaurado" % (val, src))
+def sshd_reload(before):
     for unit in ("ssh", "sshd"):
         if run(["systemctl", "reload", unit])[0]:
             done(True, "", before)
     done(True, "aplicado; recarga sshd a mano", before)
+def sshd_apply(new, old, before):
+    path = SSHD_CONFIG
+    open(path, "w").write(new)
+    ok, err = run(["sshd", "-t"]) if shutil.which("sshd") else run(["/usr/sbin/sshd", "-t"])
+    if not ok:
+        open(path, "w").write(old); done(False, "sshd -t rechaza el cambio, restaurado: " + err)
+    sshd_reload(before)
 act = A["action"]
-if act in ("ssh_param", "ssh_param_undo"):
-    path = "/etc/ssh/sshd_config"; old = open(path).read()
+if act == "ssh_param":
+    new_texts, changes = plan_set(A["param"], A["value"])
+    sshd_write(new_texts, (A["param"], A["value"]))
+    sshd_reload({"changes": changes})
+if act == "ssh_param_undo" and "changes" in A:
+    sshd_write(plan_undo(A["changes"]))
+    sshd_reload(None)
+if act == "ssh_param_undo":
+    # deshacer guardado por 6.5/6.6 (solo sshd_config): {"line": línea anterior o None}
+    path = SSHD_CONFIG; old = open(path).read()
     pat = re.compile(r"^\\s*" + re.escape(A["param"]) + r"\\s+.*$", re.M | re.I)
     m = pat.search(old)
-    if act == "ssh_param":
-        line = A["param"] + " " + A["value"]
-        new = pat.sub(line, old, count=1) if m else old.rstrip("\\n") + "\\n" + line + "\\n"
-        shutil.copy2(path, path + ".cyberhound.bak")
-        sshd_apply(new, old, {"line": m.group(0) if m else None})
     if A.get("line") is None:
         new = pat.sub("", old, count=1).replace("\\n\\n\\n", "\\n\\n") if m else old
     else:
         new = pat.sub(lambda _m: A["line"], old, count=1) if m else old.rstrip("\\n") + "\\n" + A["line"] + "\\n"
     sshd_apply(new, old, None)
 if act == "ufw_enable":
-    was_active = "Status: active" in subprocess.run(["ufw", "status"], capture_output=True, text=True).stdout
+    was_active = "Status: active" in subprocess.run(["ufw", "status"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True).stdout
     ports = re.findall(r"^\\s*Port\\s+(\\d+)", open("/etc/ssh/sshd_config").read(), re.M) or ["22"]
     for p in ports:
         run(["ufw", "allow", p + "/tcp"])
@@ -361,7 +390,7 @@ if act in ("sysctl", "sysctl_undo"):
     conf = "/etc/sysctl.d/99-cyberhound.conf"
     cur = open(conf).read() if os.path.exists(conf) else ""
     if act == "sysctl":
-        prev = subprocess.run(["sysctl", "-n", A["param"]], capture_output=True, text=True).stdout.strip()
+        prev = subprocess.run(["sysctl", "-n", A["param"]], stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True).stdout.strip()
         ok, err = run(["sysctl", "-w", A["param"] + "=" + A["value"]])
         added = False
         if ok and A["param"] not in cur:
@@ -373,7 +402,7 @@ if act in ("sysctl", "sysctl_undo"):
         open(conf, "w").write("".join(keep))
     done(ok, err)
 if act == "svc_disable":
-    q = lambda *c: subprocess.run(["systemctl", *c, A["svc"]], capture_output=True, text=True).stdout.strip()
+    q = lambda *c: subprocess.run(["systemctl", *c, A["svc"]], stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True).stdout.strip()
     before = {"active": q("is-active") == "active", "enabled": q("is-enabled") == "enabled"}
     ok, err = run(["systemctl", "disable", "--now", A["svc"]])
     done(ok, err, before)
@@ -395,6 +424,7 @@ if act in ("chmod_ow", "chmod_restore"):
     done(True, "", {"mode": mode} if act == "chmod_ow" else None)
 done(False, "acción desconocida")
 '''
+    REMOTE_FIX_SCRIPT = _SSHD_LIB + REMOTE_FIX_SCRIPT
 
     @staticmethod
     def undo_action(action: dict, before) -> dict | None:
@@ -406,11 +436,26 @@ done(False, "acción desconocida")
             return None
         act = action.get("action")
         if act == "ssh_param":
-            line = before.get("line")
-            if line is not None and not (isinstance(line, str) and len(line) < 200 and re.fullmatch(
-                    r"\s*" + re.escape(action["param"]) + r"\s+[\w .,:@/=+-]*", line, re.I)):
+            # Cada cambio: fichero (relativo a /etc/ssh, dentro de él), línea anterior de la misma
+            # opción (o None si se añadió) y la línea que puso el fix
+            changes = before.get("changes")
+            if not isinstance(changes, list) or not 0 < len(changes) <= 32:
                 return None
-            return {"action": "ssh_param_undo", "param": action["param"], "line": line}
+            option = re.compile(r"\s*" + re.escape(action["param"]) + r"(\s+|\s*=\s*)[\w .,:@/=+-]*", re.I)
+            new_line = f"{action['param']} {action['value']}"
+            ok = []
+            for ch in changes:
+                if not isinstance(ch, dict):
+                    return None
+                file, old = ch.get("file"), ch.get("old")
+                if not (isinstance(file, str) and re.fullmatch(r"[\w.+-]+(/[\w.+-]+)*", file) and ".." not in file):
+                    return None
+                if old is not None and not (isinstance(old, str) and len(old) < 200 and option.fullmatch(old)):
+                    return None
+                if ch.get("new") != new_line:
+                    return None
+                ok.append({"file": file, "old": old, "new": new_line})
+            return {"action": "ssh_param_undo", "param": action["param"], "changes": ok}
         if act == "ufw_enable":
             return None if before.get("active") is not False else {"action": "ufw_disable"}
         if act == "sysctl":
