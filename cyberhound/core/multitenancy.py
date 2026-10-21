@@ -180,6 +180,11 @@ class TenantStore:
         self._save()
         return tenant
 
+    def set_setting(self, slug: str, key: str, value) -> None:
+        tenant = self._tenants[slug]
+        tenant.settings[key] = value
+        self._save()
+
     def delete(self, slug: str) -> bool:
         tenant = self._tenants.get(slug)
         if not tenant or not tenant.active:

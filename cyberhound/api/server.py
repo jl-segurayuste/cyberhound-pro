@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import dataclasses
 import json
 import re
 import secrets
@@ -24,7 +25,7 @@ from aiohttp import web
 
 from cyberhound import __version__
 from cyberhound.api.routes.intel_routes import register_routes as register_intel_routes
-from cyberhound.core import passwords
+from cyberhound.core import integrations, passwords
 from cyberhound.core.auth import (
     AGENT_ROUTES,
     TENANT_COOKIE,
@@ -45,7 +46,6 @@ from cyberhound.core.multitenancy import (
     TenantStore,
     current_tenant,
 )
-from cyberhound.core.notifications import NotificationConfig, NotificationManager
 from cyberhound.core.paths import YARA_DIR
 from cyberhound.core.scheduler import Scheduler, build_scheduler
 from cyberhound.core.scope import Scope, ws_targets
@@ -171,7 +171,7 @@ HOST_TASKS = {"audit", "malware", "docker", "services", "code"}
 _PLATFORM_PREFIXES = (
     "/api/tenants", "/api/fix/local", "/api/rollback", "/api/quarantine", "/api/scan/runtime",
     "/api/scan/docker-image", "/api/sbom", "/api/yara", "/api/monitor", "/api/ansible",
-    "/api/config/", "/api/scheduler", "/metrics",
+    "/api/config/keys", "/api/config/agent", "/api/scheduler", "/metrics",
 )
 
 
@@ -382,53 +382,8 @@ class CyberHoundServer:
                                           db_url=db_url, db_path=str(cfg.db_path))
         self.db = TenantRouter(self.tenant_dbs)
         self.tenants = TenantStore(Path(cfg.config_path).parent / "tenants.json")
-        self.notification_manager = NotificationManager(
-            NotificationConfig(
-                email_enabled=cfg.notifications.email_enabled,
-                smtp_host=cfg.notifications.smtp_host,
-                smtp_port=cfg.notifications.smtp_port,
-                smtp_user=cfg.notifications.smtp_user,
-                smtp_password=cfg.notifications.smtp_password,
-                email_from=cfg.notifications.email_from,
-                email_to=cfg.notifications.email_to,
-                webhook_enabled=cfg.notifications.webhook_enabled,
-                webhook_url=cfg.notifications.webhook_url,
-                min_level=cfg.notifications.min_level,
-            ),
-            db=self.db,
-        )
-        # SIEM integration
-        from cyberhound.core.siem import SIEMConfig, SIEMIntegration
-        self.siem = SIEMIntegration(SIEMConfig(
-            wazuh_enabled=cfg.siem.wazuh_enabled,
-            wazuh_host=cfg.siem.wazuh_host,
-            wazuh_port=cfg.siem.wazuh_port,
-            wazuh_api_url=cfg.siem.wazuh_api_url,
-            elk_enabled=cfg.siem.elk_enabled,
-            elk_url=cfg.siem.elk_url,
-            elk_index=cfg.siem.elk_index,
-            elk_api_key=cfg.siem.elk_api_key,
-            splunk_enabled=cfg.siem.splunk_enabled,
-            splunk_hec_url=cfg.siem.splunk_hec_url,
-            splunk_hec_token=cfg.siem.splunk_hec_token,
-            min_severity=cfg.siem.min_severity,
-        ))
-        # Ticketing integration (Jira / ServiceNow)
-        from cyberhound.core.ticketing import TicketingConfig, TicketingIntegration
-        self.ticketing = TicketingIntegration(TicketingConfig(
-            jira_enabled=cfg.ticketing.jira_enabled,
-            jira_url=cfg.ticketing.jira_url,
-            jira_email=cfg.ticketing.jira_email,
-            jira_api_token=cfg.ticketing.jira_api_token,
-            jira_project_key=cfg.ticketing.jira_project_key,
-            jira_issue_type=cfg.ticketing.jira_issue_type,
-            servicenow_enabled=cfg.ticketing.servicenow_enabled,
-            servicenow_instance_url=cfg.ticketing.servicenow_instance_url,
-            servicenow_user=cfg.ticketing.servicenow_user,
-            servicenow_password=cfg.ticketing.servicenow_password,
-            servicenow_table=cfg.ticketing.servicenow_table,
-            min_severity=cfg.ticketing.min_severity,
-        ))
+        # Notificaciones, SIEM y ticketing: de la plataforma o de cada organización (ver _integration)
+        self._integrations: dict[tuple[str, str], object] = {}
         self.scheduler: Scheduler | None = None
         self._sbom_cache: dict | None = None
         self._ansible_jobs: list = []
@@ -755,9 +710,8 @@ class CyberHoundServer:
         for f in sorted(findings, key=lambda x: sev_order.get(x.severity, 5)):
             await send({"type": "finding", "data": f.to_dict()})
             # Enviar al SIEM en background (no bloquea si falla)
-            if any([self.cfg.siem.wazuh_enabled,
-                    self.cfg.siem.elk_enabled,
-                    self.cfg.siem.splunk_enabled]):
+            siem_cfg = self._integration_settings("siem")
+            if siem_cfg.wazuh_enabled or siem_cfg.elk_enabled or siem_cfg.splunk_enabled:
                 asyncio.ensure_future(
                     self.siem.send_finding(f, self._scan_id_cache.get(ws_id, "unknown"))
                 )
@@ -1593,146 +1547,96 @@ class CyberHoundServer:
         except Exception as e:
             return web.json_response({"ok": False, "error": str(e)}, status=500)
 
+    # ── Integraciones: notificaciones, SIEM y ticketing ─────────────────────────
+
+    def _tenant_obj(self):
+        slug = current_tenant.get()
+        if not self.cfg.multi_tenant.enabled or slug == DEFAULT_TENANT:
+            return None
+        return self.tenants.get(slug)
+
+    def _integration_settings(self, kind: str):
+        """Ajustes del canal para la organización actual (la plataforma: los de config.yaml)."""
+        tenant = self._tenant_obj()
+        if tenant is None:
+            return getattr(self.cfg, kind)
+        return integrations.settings_from_dict(kind, tenant.settings.get("integrations", {}).get(kind))
+
+    def _integration(self, kind: str):
+        slug = current_tenant.get() if self._tenant_obj() else DEFAULT_TENANT
+        key = (slug, kind)
+        if key not in self._integrations:
+            settings = self._integration_settings(kind)
+            mgr = integrations.build(kind, settings, db=self.db)
+            if slug != DEFAULT_TENANT:
+                allowed = self.tenants.get(slug).settings.get("allowed_targets", [])
+                mgr = integrations.GuardedIntegration(kind, mgr, settings, allowed, logger)
+            self._integrations[key] = mgr
+        return self._integrations[key]
+
+    @property
+    def notification_manager(self):
+        return self._integration("notifications")
+
+    @property
+    def siem(self):
+        return self._integration("siem")
+
+    @property
+    def ticketing(self):
+        return self._integration("ticketing")
+
+    async def _get_integration(self, kind: str) -> web.Response:
+        return web.json_response(integrations.public_view(kind, self._integration_settings(kind)))
+
+    async def _save_integration(self, request: web.Request, kind: str) -> web.Response:
+        body = await _read_json(request)
+        settings = self._integration_settings(kind)
+        try:
+            integrations.apply_update(kind, settings, body)
+        except ValueError as e:
+            return web.json_response({"ok": False, "error": str(e)}, status=400)
+        tenant = self._tenant_obj()
+        if tenant is not None:
+            if problem := await integrations.outbound_problem(kind, settings, tenant.settings.get("allowed_targets", [])):
+                return web.json_response({"ok": False, "error": problem}, status=400)
+            self.tenants.set_setting(tenant.slug, "integrations",
+                                     {**tenant.settings.get("integrations", {}), kind: dataclasses.asdict(settings)})
+        else:
+            self.cfg.save()
+        self._integrations.pop((tenant.slug if tenant else DEFAULT_TENANT, kind), None)   # se reconstruye con todo
+        await self._audit(request, f"config_{kind}", kind)
+        return web.json_response({"ok": True})
+
+    async def _test_integration(self, kind: str) -> web.Response:
+        return web.json_response(await self._integration(kind).test())
+
     async def api_get_notifications_cfg(self, request: web.Request) -> web.Response:
-        n = self.cfg.notifications
-        return web.json_response({
-            "email_enabled":   n.email_enabled,
-            "smtp_host":       n.smtp_host,
-            "smtp_port":       n.smtp_port,
-            "smtp_user":       n.smtp_user,
-            "email_from":      n.email_from,
-            "email_to":        n.email_to,
-            "webhook_enabled": n.webhook_enabled,
-            "webhook_url":     n.webhook_url,
-            "min_level":       n.min_level,
-            # contraseña SMTP nunca se devuelve
-        })
+        return await self._get_integration("notifications")
 
     async def api_save_notifications_cfg(self, request: web.Request) -> web.Response:
-        try:
-            body = await _read_json(request)
-            n = self.cfg.notifications
-            for field in ("email_enabled","smtp_host","smtp_port","smtp_user",
-                          "email_from","email_to","webhook_enabled","webhook_url","min_level"):
-                if field in body:
-                    setattr(n, field, body[field])
-            if "smtp_password" in body and body["smtp_password"]:
-                n.smtp_password = body["smtp_password"]
-            self.cfg.save()
-            # Actualizar el notification manager en caliente
-            self.notification_manager.cfg.email_enabled   = n.email_enabled
-            self.notification_manager.cfg.webhook_enabled = n.webhook_enabled
-            self.notification_manager.cfg.webhook_url     = n.webhook_url
-            self.notification_manager.cfg.email_to        = n.email_to
-            return web.json_response({"ok": True})
-        except Exception as e:
-            return web.json_response({"ok": False, "error": str(e)}, status=500)
+        return await self._save_integration(request, "notifications")
 
     async def api_test_notifications(self, request: web.Request) -> web.Response:
-        results = await self.notification_manager.test()
-        return web.json_response(results)
+        return await self._test_integration("notifications")
 
     async def api_get_siem(self, request: web.Request) -> web.Response:
-        s = self.cfg.siem
-        return web.json_response({
-            "wazuh_enabled": s.wazuh_enabled,
-            "wazuh_host":    s.wazuh_host,
-            "wazuh_port":    s.wazuh_port,
-            "wazuh_api_url": s.wazuh_api_url,
-            "elk_enabled":   s.elk_enabled,
-            "elk_url":       s.elk_url,
-            "elk_index":     s.elk_index,
-            "splunk_enabled":   s.splunk_enabled,
-            "splunk_hec_url":   s.splunk_hec_url,
-            "splunk_index":     s.splunk_index,
-            "min_severity":     s.min_severity,
-            # Tokens/passwords nunca se devuelven
-        })
+        return await self._get_integration("siem")
 
     async def api_save_siem(self, request: web.Request) -> web.Response:
-        try:
-            body = await _read_json(request)
-            s = self.cfg.siem
-            for field in ("wazuh_enabled", "wazuh_host", "wazuh_port", "wazuh_api_url",
-                          "wazuh_api_user", "elk_enabled", "elk_url", "elk_index",
-                          "elk_user", "elk_api_key", "splunk_enabled", "splunk_hec_url",
-                          "splunk_index", "min_severity"):
-                if field in body:
-                    setattr(s, field, body[field])
-            # Passwords solo si no están vacíos
-            for env_field, cfg_field in [
-                ("wazuh_api_pass", "wazuh_api_pass"),
-                ("elk_pass", "elk_pass"),
-                ("splunk_hec_token", "splunk_hec_token"),
-            ]:
-                if body.get(env_field):
-                    setattr(s, cfg_field, body[env_field])
-            self.cfg.save()
-            # Reinicializar SIEM en caliente
-            from cyberhound.core.siem import SIEMConfig, SIEMIntegration
-            self.siem = SIEMIntegration(SIEMConfig(
-                wazuh_enabled=s.wazuh_enabled, wazuh_host=s.wazuh_host,
-                wazuh_port=s.wazuh_port, elk_enabled=s.elk_enabled,
-                elk_url=s.elk_url, elk_api_key=s.elk_api_key,
-                splunk_enabled=s.splunk_enabled, splunk_hec_url=s.splunk_hec_url,
-                splunk_hec_token=s.splunk_hec_token, min_severity=s.min_severity,
-            ))
-            return web.json_response({"ok": True})
-        except Exception as e:
-            return web.json_response({"ok": False, "error": str(e)}, status=500)
+        return await self._save_integration(request, "siem")
 
     async def api_test_siem(self, request: web.Request) -> web.Response:
-        results = await self.siem.test()
-        return web.json_response(results)
+        return await self._test_integration("siem")
 
     async def api_get_ticketing(self, request: web.Request) -> web.Response:
-        t = self.cfg.ticketing
-        return web.json_response({
-            "jira_enabled":     t.jira_enabled,
-            "jira_url":         t.jira_url,
-            "jira_email":       t.jira_email,
-            "jira_project_key": t.jira_project_key,
-            "jira_issue_type":  t.jira_issue_type,
-            "servicenow_enabled":      t.servicenow_enabled,
-            "servicenow_instance_url": t.servicenow_instance_url,
-            "servicenow_user":         t.servicenow_user,
-            "servicenow_table":        t.servicenow_table,
-            "min_severity": t.min_severity,
-            # jira_api_token / servicenow_password nunca se devuelven
-        })
+        return await self._get_integration("ticketing")
 
     async def api_save_ticketing(self, request: web.Request) -> web.Response:
-        try:
-            body = await _read_json(request)
-            t = self.cfg.ticketing
-            for field in ("jira_enabled", "jira_url", "jira_email", "jira_project_key",
-                          "jira_issue_type", "servicenow_enabled", "servicenow_instance_url",
-                          "servicenow_user", "servicenow_table", "min_severity"):
-                if field in body:
-                    setattr(t, field, body[field])
-            # Secretos solo si no están vacíos (no se sobrescriben con "")
-            if body.get("jira_api_token"):
-                t.jira_api_token = body["jira_api_token"]
-            if body.get("servicenow_password"):
-                t.servicenow_password = body["servicenow_password"]
-            self.cfg.save()
-            # Reinicializar la integración en caliente
-            from cyberhound.core.ticketing import TicketingConfig, TicketingIntegration
-            self.ticketing = TicketingIntegration(TicketingConfig(
-                jira_enabled=t.jira_enabled, jira_url=t.jira_url, jira_email=t.jira_email,
-                jira_api_token=t.jira_api_token, jira_project_key=t.jira_project_key,
-                jira_issue_type=t.jira_issue_type,
-                servicenow_enabled=t.servicenow_enabled, servicenow_instance_url=t.servicenow_instance_url,
-                servicenow_user=t.servicenow_user, servicenow_password=t.servicenow_password,
-                servicenow_table=t.servicenow_table, min_severity=t.min_severity,
-            ))
-            return web.json_response({"ok": True})
-        except Exception as e:
-            return web.json_response({"ok": False, "error": str(e)}, status=500)
+        return await self._save_integration(request, "ticketing")
 
     async def api_test_ticketing(self, request: web.Request) -> web.Response:
-        results = await self.ticketing.test()
-        return web.json_response(results)
+        return await self._test_integration("ticketing")
 
     # ── WebSocket push — notificaciones sin polling ───────────────────────────
 

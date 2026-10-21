@@ -319,3 +319,34 @@ async def test_ambito_de_analisis_por_organizacion(env):
     # el superadmin en su plataforma no tiene ámbito
     msg = await ws_error(env.sa, {"task": "web_headers", "urls": ["http://192.168.1.1"]})
     assert not (msg["type"] == "error" and "permit" in msg["text"]), msg
+
+
+async def test_integraciones_propias_de_cada_organizacion(env, monkeypatch):
+    import ipaddress
+
+    from cyberhound.core import integrations
+
+    async def fake(host):
+        return [ipaddress.ip_address({"hooks.ejemplo-demo.es": "1.2.3.4"}.get(host, "127.0.0.1"))]
+    monkeypatch.setattr(integrations, "_resolve", fake)
+    hook = {"webhook_enabled": True, "webhook_url": "https://hooks.ejemplo-demo.es/acme", "smtp_password": "p"}
+    r = await env.acme.post("/api/config/notifications", json=hook)
+    assert r.status == 200, await r.text()
+    acme = await (await env.acme.get("/api/config/notifications")).json()
+    assert acme["webhook_url"].endswith("/acme") and "smtp_password" not in acme and acme["secrets_set"] == ["smtp_password"]
+    assert (await (await env.contoso.get("/api/config/notifications")).json())["webhook_url"] == ""
+    assert (await (await env.sa.get("/api/config/notifications")).json())["webhook_url"] == ""
+    assert env.server.cfg.notifications.webhook_url == ""
+    # el gestor de la organización usa sus ajustes, no los de la plataforma
+    token = current_tenant.set("acme")
+    try:
+        assert env.server.notification_manager.cfg.webhook_url.endswith("/acme")
+    finally:
+        current_tenant.reset(token)
+    # SSRF: ni loopback ni la LAN del servidor
+    for url in ("http://127.0.0.1:8765/api/x", "http://192.168.1.67/"):
+        r = await env.acme.post("/api/config/siem", json={"elk_enabled": True, "elk_url": url})
+        assert r.status == 400 and "interna" in (await r.json())["error"], url
+    # el superadmin sí puede usar destinos internos en la plataforma
+    assert (await env.sa.post("/api/config/siem", json={"elk_enabled": True, "elk_url": "http://127.0.0.1:9200"})).status == 200
+    assert (await env.acme.get("/api/config/keys")).status == 403

@@ -71,13 +71,13 @@ const HOST_FNS = new Set([
   'applyFix', 'fixAll', 'quickAudit', 'quickMalware', 'quickDocker', 'runAudit', 'runMalware', 'runDocker',
   'runCode', 'runServicesAudit', 'runRuntimeScan', 'runDockerImageScan', 'generateSBOM', 'downloadSBOM',
   'deleteQuarantine', 'restoreQuarantine', 'runAnsiblePlaybook', 'updateYaraRules',
-  'saveKeys', 'saveNotifications', 'testNotifications', 'saveSIEM', 'testSIEM', 'saveTicketing', 'testTicketing',
+  'saveKeys',
   'toggleScheduler', 'runSchedulerNow', 'saveAgentConfig',
   'loadKeys', 'loadMonitorStatus', 'loadSBOM', 'loadScheduler', 'loadYaraRules',   // botones "↻ Cargar"
 ]);
 const HOST_PANELS = ['audit', 'malware', 'docker', 'code', 'services', 'monitor'];
-const HOST_CFG_TABS = ['keys', 'notifications', 'siem', 'ticketing', 'scheduler', 'yara', 'quarantine',
-                       'sbom', 'ansible'];
+// Notificaciones, SIEM y ticketing no están: cada organización tiene los suyos
+const HOST_CFG_TABS = ['keys', 'scheduler', 'yara', 'quarantine', 'sbom', 'ansible'];
 let USER = { username: '', role: 'admin', permissions: ['scan', 'fix', 'config', 'users', 'view'],
              host_access: true, superadmin: true, multi_tenant: false, tenant: 'default' };
 
@@ -1076,7 +1076,6 @@ async function saveKeys() {
 
 // ── Notificaciones ────────────────────────────────────────────────────────
 async function loadNotifications() {
-  if (!hostAccess()) return;   // de la plataforma: un tenant recibiría 403
   try {
     const d = await fetch('/api/config/notifications').then(r => r.json());
     document.getElementById('notif-email-enabled')?.removeAttribute('checked');
@@ -1127,6 +1126,7 @@ async function testNotifications() {
   const r = await fetch('/api/config/notifications/test', {method: 'POST'});
   const d = await r.json();
   const msg = document.getElementById('notif-msg');
+  if (msg && d.error) { msg.textContent = '✗ ' + d.error; msg.style.color = 'var(--red)'; return; }
   if (msg) {
     const results = Object.entries(d).map(([k,v]) => `${k}: ${v?'✓':'✗'}`).join(', ');
     msg.textContent = results || 'Sin canales configurados';
@@ -1231,7 +1231,6 @@ function renderDockerChips(findings) {
 
 // ── SIEM config ───────────────────────────────────────────────────────────────
 async function loadSIEM() {
-  if (!hostAccess()) return;   // de la plataforma: un tenant recibiría 403
   const r = await fetch('/api/config/siem');
   const d = await r.json();
   document.getElementById('siem-wazuh-enabled').checked = d.wazuh_enabled;
@@ -1279,6 +1278,7 @@ async function testSIEM() {
   msg.style.color = 'var(--text2)';
   const r = await fetch('/api/config/siem/test', { method: 'POST' });
   const d = await r.json();
+  if (d.error) { msg.textContent = '✗ ' + d.error; msg.style.color = 'var(--red)'; return; }
   const results = Object.entries(d).map(([k,ok]) =>
     `${ok ? '✓' : '✗'} ${k}`
   ).join(' · ');
@@ -1288,7 +1288,6 @@ async function testSIEM() {
 
 // ── Ticketing config (Jira / ServiceNow) ────────────────────────────────────────
 async function loadTicketing() {
-  if (!hostAccess()) return;   // de la plataforma: un tenant recibiría 403
   const r = await fetch('/api/config/ticketing');
   const d = await r.json();
   document.getElementById('tkt-jira-enabled').checked  = d.jira_enabled;
@@ -1334,6 +1333,7 @@ async function testTicketing() {
   msg.style.color = 'var(--text2)';
   const r = await fetch('/api/config/ticketing/test', { method: 'POST' });
   const d = await r.json();
+  if (d.error) { msg.textContent = '✗ ' + d.error; msg.style.color = 'var(--red)'; return; }
   const results = Object.entries(d).map(([k,ok]) =>
     `${ok ? '✓' : '✗'} ${k}`
   ).join(' · ');
