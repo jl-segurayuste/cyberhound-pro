@@ -325,9 +325,12 @@ ENDPOINT_DOCS: dict[str, dict] = {
     "POST /api/schedules": {"summary": "Programar un análisis (red, web, TLS, DNS… dentro del ámbito)", "tags": ["Config"],
                             "requestBody": {"properties": {
                                 "name": {"type": "string"},
-                                "task": {"type": "string", "enum": ["network", "web_headers", "web_exposure",
+                                "task": {"type": "string", "enum": ["network", "ssh", "web_headers", "web_exposure",
                                                                     "api_security", "nuclei", "tls", "dns",
                                                                     "subdomain_enum"]},
+                                "ssh_credential": {"type": "string",
+                                                   "description": "Credencial SSH guardada: obligatoria en ssh; "
+                                                                  "en network añade la auditoría SSH"},
                                 "targets": {"type": "array", "items": {"type": "string"}},
                                 "hour": {"type": "integer"}, "minute": {"type": "integer"},
                                 "days": {"type": "array", "items": {"type": "integer"},
@@ -336,6 +339,17 @@ ENDPOINT_DOCS: dict[str, dict] = {
     "PATCH /api/schedules/{sid}":  {"summary": "Modificar o pausar una programación", "tags": ["Config"]},
     "DELETE /api/schedules/{sid}": {"summary": "Borrar una programación", "tags": ["Config"]},
     "POST /api/schedules/{sid}/run": {"summary": "Lanzar ahora una programación (en segundo plano)", "tags": ["Config"]},
+    "GET /api/config/ssh-credentials": {"summary": "Credenciales SSH guardadas (sin el secreto)", "tags": ["Config"]},
+    "POST /api/config/ssh-credentials": {
+        "summary": "Guardar una credencial SSH (se cifra; generate crea un par ed25519 y devuelve la clave pública)",
+        "tags": ["Config"],
+        "requestBody": {"properties": {
+            "name": {"type": "string"}, "username": {"type": "string"}, "port": {"type": "integer"},
+            "kind": {"type": "string", "enum": ["generate", "key", "password"]},
+            "private_key": {"type": "string"}, "passphrase": {"type": "string"}, "password": {"type": "string"}}}},
+    "PATCH /api/config/ssh-credentials/{cid}": {"summary": "Modificar una credencial SSH", "tags": ["Config"]},
+    "DELETE /api/config/ssh-credentials/{cid}": {"summary": "Borrar una credencial SSH (no si la usa un programado)",
+                                                  "tags": ["Config"]},
     # ── Configuración ────────────────────────────────────────────────────────
     "GET /api/config/keys":    {"summary": "API keys configuradas (enmascaradas)", "tags": ["Config"]},
     "POST /api/config/keys":   {"summary": "Guardar API keys (shodan, virustotal, abuseipdb, greynoise, otx, hibp)", "tags": ["Config"]},

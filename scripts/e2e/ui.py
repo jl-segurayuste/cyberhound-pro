@@ -203,6 +203,7 @@ EXPECTED = (
     ("http_404", "/api/sbom/latest"),           # aún no se ha generado ningún SBOM
     ("clic_fallido", "✓ Listo"),                # botón ya desactivado tras aplicar el fix
     ("http_400", "/api/me/password"),           # cambiar contraseña con el formulario vacío
+    ("http_400", "/api/config/ssh-credentials"),  # guardar una credencial SSH sin nombre
 )
 
 

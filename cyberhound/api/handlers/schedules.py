@@ -76,11 +76,15 @@ class ScheduleHandlers:
         return web.json_response([{**r, "running": r["id"] in running} for r in rows])
 
     async def _schedule_problem(self, data: dict) -> str | None:
+        cred = data.get("ssh_credential")
         try:
-            schedules.check_targets(data["task"], data["targets"])
+            schedules.check_credential(data["task"], cred)
+            schedules.check_targets(data["task"], data["targets"], cred)
         except ValueError as e:
             return str(e)
-        return await self._out_of_scope(scope_targets(schedules.ws_message(data["task"], data["targets"])))
+        if err := await self._ssh_credential_error(cred):
+            return err
+        return await self._out_of_scope(scope_targets(schedules.ws_message(data["task"], data["targets"], cred)))
 
     async def api_schedules_create(self, request: web.Request) -> web.Response:
         try:
@@ -104,7 +108,7 @@ class ScheduleHandlers:
             data = schedules.validate(await _read_json(request), partial=True)
         except ValueError as e:
             return web.json_response({"error": str(e)}, status=400)
-        if "task" in data or "targets" in data:
+        if {"task", "targets", "ssh_credential"} & data.keys():
             if err := await self._schedule_problem({**current, **data}):
                 return web.json_response({"error": err}, status=400)
         await self.db.update_schedule(sid, data)
@@ -177,7 +181,7 @@ class ScheduleHandlers:
         await self.db.mark_schedule_run(sched["id"], when, "en curso", None)
         scan_id = None
         try:
-            msg = schedules.ws_message(sched["task"], sched["targets"])
+            msg = schedules.ws_message(sched["task"], sched["targets"], sched.get("ssh_credential"))
             if err := await self._out_of_scope(scope_targets(msg)):   # el ámbito pudo cambiar después
                 await self.db.mark_schedule_run(sched["id"], when, f"fuera de ámbito: {err}", None)
                 return

@@ -118,7 +118,7 @@ if set(R["nav_visibles"]) & {"audit", "malware", "docker", "code", "services", "
 if not ok_ambito:
     fallos.append(f"programar dentro/fuera del ámbito: {R.get('programado_en_ambito')!r} / {R.get('programado_fuera')!r}")
 if set(R["tabs_visibles"]) != {"users", "suppressions", "2fa", "agents", "ldap", "notifications", "siem", "ticketing",
-                               "account", "schedules", "remotefixes", "audit"}:
+                               "account", "sshcreds", "schedules", "remotefixes", "audit"}:
     fallos.append(f"pestañas del tenant: {R['tabs_visibles']}")
 if not R["sa_historial_default"]:
     fallos.append("el superadmin no ve los datos de la plataforma")

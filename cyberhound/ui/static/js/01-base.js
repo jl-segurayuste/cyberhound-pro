@@ -67,6 +67,7 @@ const FN_PERMS = {
   changeUserRole: 'users', createUser: 'users', deleteUser: 'users', loadUsers: 'users',
   loadAudit: 'users', saveTenantScope: 'users', undoFixRemote: 'fix', loadRemoteFixes: 'fix',
   createSchedule: 'config', toggleSchedule: 'config', deleteSchedule: 'config', runSchedule: 'scan',
+  createSshCredential: 'config', deleteSshCredential: 'config',
 };
 // Acciones sobre el propio servidor o su configuración global: en multi-tenant solo el
 // superadmin (HOST_TASKS y _PLATFORM_PREFIXES del servidor; lo comprueba test_consistency)
@@ -182,6 +183,7 @@ function showPanel(name) {
     },
     monitor:   () => { loadMonitorStatus(); loadMonitorHistory(); },
     intel:     () => loadIntelConfig(),
+    network:   () => loadSshCredOptions(),
   };
   _panelLoaders[name]?.();
 }
@@ -205,6 +207,7 @@ function showCfgTab(name) {
     notifications: () => loadNotifications(),
     account:      () => { loadSessions(); loadApiTokens(); },
     schedules:    () => loadSchedules(),
+    sshcreds:     () => loadSshCredentials(),
     remotefixes:  () => loadRemoteFixes(),
     audit:        () => loadAudit(),
     quarantine:   () => loadQuarantine(),

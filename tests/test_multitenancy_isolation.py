@@ -432,3 +432,87 @@ async def test_deshacer_fix_remoto_solo_en_su_organizacion(env, monkeypatch):
     assert (await env.acme.post("/api/fix/remote/undo", json={"fix_id": d["fix_id"]})).status == 409
     hist = await (await env.acme.get("/api/fix/remote/history")).json()
     assert hist[0]["undone_by"] == "jefa" and hist[0]["reversible"] is False
+
+
+async def test_credenciales_ssh_de_cada_organizacion(env, monkeypatch):
+    from cyberhound.core import ssh_credentials
+    from cyberhound.core.models import HostResult
+    from cyberhound.scanners.ssh_audit import RemoteAuditor
+    srv = env.server
+    r = await env.acme.post("/api/config/ssh-credentials",
+                            json={"name": "Servidores", "username": "auditor", "kind": "generate"})
+    assert r.status == 201, await r.text()
+    key = await r.json()
+    assert key["public_key"].startswith("ssh-ed25519 ") and "secret" not in key
+    r = await env.acme.post("/api/config/ssh-credentials",
+                            json={"name": "Legado", "username": "root", "kind": "password", "password": "pw-legado"})
+    pw = await r.json()
+    assert [c["name"] for c in await (await env.acme.get("/api/config/ssh-credentials")).json()] == ["Legado", "Servidores"]
+    assert await (await env.contoso.get("/api/config/ssh-credentials")).json() == []
+    assert (await env.contoso.delete(f"/api/config/ssh-credentials/{key['id']}")).status == 404
+    token = current_tenant.set("acme")
+    try:
+        row = await srv.db.get_ssh_credential(pw["id"])
+    finally:
+        current_tenant.reset(token)
+    assert "pw-legado" not in row["secret"]
+    assert ssh_credentials.unseal(row["secret"], srv._auth_secret, "contoso") is None
+
+    # fix remoto con la credencial guardada: entra con ella y nunca con las claves del servidor
+    await env.sa.patch("/api/tenants/acme", json={"allowed_targets": ["10.10.0.0/24"]})
+    f = Finding(id="10.10.0.9::svc_telnet", category="svc", severity="high", title="t",
+                description="", remediation="r", auto_fix=True, source_host="10.10.0.9")
+    srv._findings_cache["acme:conexion"] = [f]
+    used = []
+
+    async def fake_action(self, host, action):
+        used.append(self.creds)
+        return {"ok": True, "msg": "", "before": {"active": True, "enabled": True}}
+    monkeypatch.setattr(RemoteAuditor, "_run_remote_action", fake_action)
+    r = await env.acme.post("/api/fix/remote", json={"finding_id": f.id, "ssh_credential": key["id"]})
+    assert r.status == 200, await r.text()
+    assert used[-1].private_key and used[-1].username == "auditor" and used[-1].use_server_keys is False
+    r = await env.contoso.post("/api/fix/remote", json={"finding_id": f.id, "ssh_credential": key["id"]})
+    assert r.status == 404                                    # ni el hallazgo ni la credencial son suyos
+    srv._findings_cache["contoso:conexion"] = [f]
+    await env.sa.patch("/api/tenants/contoso", json={"allowed_targets": ["10.10.0.0/24"]})
+    r = await env.contoso.post("/api/fix/remote", json={"finding_id": f.id, "ssh_credential": key["id"]})
+    assert r.status == 400 and "no existe" in (await r.json())["error"]
+    # usuario y contraseña escritos a mano: tampoco con las claves del servidor
+    await env.acme.post("/api/fix/remote", json={"finding_id": f.id, "ssh_password": "x"})
+    assert used[-1].password == "x" and used[-1].to_asyncssh_opts()["client_keys"] is None
+    assert (await (await env.acme.get("/api/config/ssh-credentials")).json())[1]["last_used"]
+
+    # auditoría SSH programada
+    sched = {"name": "SSH nocturno", "task": "ssh", "targets": ["10.10.0.9"], "hour": 2, "minute": 0}
+    r = await env.acme.post("/api/schedules", json=sched)
+    assert r.status == 400 and "credencial" in (await r.json())["error"]
+    r = await env.contoso.post("/api/config/ssh-credentials", json={"name": "c", "kind": "password", "password": "p"})
+    other = (await r.json())["id"]
+    r = await env.acme.post("/api/schedules", json={**sched, "ssh_credential": other})
+    assert r.status == 400 and "no existe" in (await r.json())["error"]
+    r = await env.acme.post("/api/schedules", json={**sched, "targets": ["192.168.1.5"], "ssh_credential": pw["id"]})
+    assert r.status == 400 and "fuera" in (await r.json())["error"]
+    r = await env.acme.post("/api/schedules", json={**sched, "ssh_credential": pw["id"]})
+    assert r.status == 201, await r.text()
+    r = await env.acme.delete(f"/api/config/ssh-credentials/{pw['id']}")
+    assert r.status == 409 and "SSH nocturno" in (await r.json())["error"]
+
+    scanned = []
+
+    async def fake_scan(cls, hosts, credentials, concurrency=5):
+        scanned.append((current_tenant.get(), hosts, credentials))
+        return [HostResult(host=h, port=22, user=credentials.username, status="ok") for h in hosts]
+    monkeypatch.setattr(RemoteAuditor, "scan_multiple", classmethod(fake_scan))
+    tasks = await srv._schedules_tick(datetime(2026, 10, 21, 2, 0, 5))
+    await tasks[0]
+    assert len(scanned) == 1
+    tenant, hosts, creds = scanned[0]
+    assert (tenant, hosts) == ("acme", ["10.10.0.9"])
+    assert creds.password == "pw-legado" and creds.use_server_keys is False
+    s = (await (await env.acme.get("/api/schedules")).json())[0]
+    assert s["ssh_credential"] == pw["id"] and s["last_status"].startswith("ok"), s
+    # credencial para editar: sin el secreto no lo cambia
+    r = await env.acme.patch(f"/api/config/ssh-credentials/{pw['id']}", json={"name": "Legado 2", "port": 2222})
+    assert (await r.json())["port"] == 2222
+    assert (await env.acme.patch(f"/api/config/ssh-credentials/{pw['id']}", json={"port": 0})).status == 400

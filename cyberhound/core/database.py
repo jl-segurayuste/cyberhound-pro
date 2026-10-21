@@ -26,10 +26,11 @@ from cyberhound.core.models import Finding
 from cyberhound.core.paths import DATA_DIR
 from cyberhound.core.remote_fixes import REMOTE_FIXES_TABLE, RemoteFixesMixin
 from cyberhound.core.schedules import SCHEDULES_TABLE, SchedulesMixin
+from cyberhound.core.ssh_credentials import SSH_CREDENTIALS_TABLE, SSHCredentialsMixin
 
 logger = get_logger("database")
 
-DB_VERSION = 7
+DB_VERSION = 8
 
 # Migraciones incrementales — se aplican en orden sobre BDs existentes
 MIGRATIONS: list[tuple[int, str]] = [
@@ -54,6 +55,8 @@ MIGRATIONS: list[tuple[int, str]] = [
     (6, SQLITE_ACCOUNTS),
     # Análisis programados (core/schedules.py) y fixes remotos que se pueden deshacer (core/remote_fixes.py)
     (7, SCHEDULES_TABLE + REMOTE_FIXES_TABLE),
+    # Credenciales SSH guardadas (core/ssh_credentials.py) y su uso en los análisis programados
+    (8, SSH_CREDENTIALS_TABLE + "ALTER TABLE schedules ADD COLUMN ssh_credential TEXT;"),
 ]
 DEFAULT_DB_PATH = DATA_DIR / "cyberhound.db"
 
@@ -146,7 +149,7 @@ CREATE INDEX IF NOT EXISTS idx_findings_severity ON findings(severity);
 CREATE INDEX IF NOT EXISTS idx_scans_started_at  ON scans(started_at);
 CREATE INDEX IF NOT EXISTS idx_scans_type        ON scans(scan_type);
 """
-SCHEMA += SQLITE_ACCOUNTS + SCHEDULES_TABLE + REMOTE_FIXES_TABLE
+SCHEMA += SQLITE_ACCOUNTS + SCHEDULES_TABLE + REMOTE_FIXES_TABLE + SSH_CREDENTIALS_TABLE
 
 
 
@@ -179,7 +182,7 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
-class Database(AccountsMixin, SchedulesMixin, RemoteFixesMixin):
+class Database(AccountsMixin, SchedulesMixin, RemoteFixesMixin, SSHCredentialsMixin):
     def __init__(self, path: Path = DEFAULT_DB_PATH) -> None:
         self.path = path
         self.path.parent.mkdir(parents=True, exist_ok=True)

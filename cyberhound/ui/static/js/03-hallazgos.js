@@ -159,9 +159,7 @@ async function applyFixRemote(findingId, host, btnEl) {
       method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({
         finding_id: findingId, host,
-        ssh_user: document.getElementById('net-user')?.value || 'root',
-        ssh_key:  document.getElementById('net-key')?.value || '',
-        ssh_password: document.getElementById('net-pass')?.value || '',
+        ...sshCredFields(),
       }),
     });
     const d = await r.json();
@@ -191,9 +189,7 @@ async function undoFixRemote(fixId, host, btnEl) {
       method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({
         fix_id: fixId,
-        ssh_user: document.getElementById('net-user')?.value || 'root',
-        ssh_key:  document.getElementById('net-key')?.value || '',
-        ssh_password: document.getElementById('net-pass')?.value || '',
+        ...sshCredFields(),
       }),
     });
     const d = await r.json();

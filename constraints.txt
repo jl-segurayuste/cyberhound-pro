@@ -9,6 +9,7 @@ aiosqlite==0.22.1
 asyncpg==0.32.0
 asyncssh==2.23.1
 attrs==26.1.0
+bcrypt==5.0.0
 cffi==2.0.0
 colorama==0.4.6
 cryptography==49.0.0

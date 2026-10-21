@@ -219,10 +219,7 @@ function runNetworkScan() {
   appendLog('section', '═══ ESCANEO DE RED ═══');
   wsRun('network', {
     networks: document.getElementById('net-networks')?.value || '',
-    ssh_user: document.getElementById('net-user')?.value || 'root',
-    ssh_port: document.getElementById('net-port')?.value || '22',
-    ssh_key:  document.getElementById('net-key')?.value || '',
-    ssh_password: document.getElementById('net-pass')?.value || '',
+    ...sshCredFields(),
     ssh_audit: true,
     vuln_scan: document.getElementById('vuln-scan')?.checked || false,
   }, {
@@ -313,10 +310,7 @@ function sshAuditOne(ip, port) {
   appendLog('section', `═══ SSH AUDIT: ${ip} ═══`);
   wsRun('ssh', {
     hosts: ip,
-    ssh_user: document.getElementById('net-user')?.value || 'root',
-    ssh_port: port,
-    ssh_key:  document.getElementById('net-key')?.value || '',
-    ssh_password: document.getElementById('net-pass')?.value || '',
+    ...sshCredFields(port),
   }, {
     onFinding(f) {
       S.findings.network.push(f);

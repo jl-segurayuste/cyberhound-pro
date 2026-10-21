@@ -69,7 +69,8 @@ class ScanHandlers:
                                                   "solo lo puede lanzar el administrador de la plataforma"})
             await ws.close()
             return ws
-        if err := (await self._out_of_scope(scope_targets(msg))) or self._tenant_ssh_key_error(msg.get("ssh_key")):
+        if err := ((await self._out_of_scope(scope_targets(msg))) or self._tenant_ssh_key_error(msg.get("ssh_key"))
+                   or await self._ssh_credential_error(msg.get("ssh_credential"))):
             await send({"type": "error", "text": err})
             await ws.close()
             return ws
@@ -332,7 +333,7 @@ class ScanHandlers:
 
     async def _run_network_scan(self, params, ws_id, send, log, scan_id):
         from cyberhound.scanners.network import NetworkScanner
-        from cyberhound.scanners.ssh_audit import RemoteAuditor, SSHCredentials
+        from cyberhound.scanners.ssh_audit import RemoteAuditor
         networks = [n.strip() for n in params.get("networks", "").split(",") if n.strip()] or None
         await log("section", "Fase 1/3: Descubriendo dispositivos…")
         scanner = NetworkScanner(nmap_timeout=self.cfg.scan.nmap_timeout)
@@ -371,12 +372,7 @@ class ScanHandlers:
             return
 
         await log("section", f"Fase 2/3: SSH audit en {len(ssh_hosts)} hosts…")
-        creds = SSHCredentials(
-            username=params.get("ssh_user", self.cfg.scan.ssh_default_user),
-            port=int(params.get("ssh_port", self.cfg.scan.ssh_default_port)),
-            key_path=self._ssh_key(params.get("ssh_key")),
-            password=params.get("ssh_password") or None,
-        )
+        creds = await self._ssh_creds(params)
         results = await RemoteAuditor.scan_multiple(
             [d.ip for d in ssh_hosts], creds,
             concurrency=self.cfg.scan.ssh_concurrency,
@@ -397,19 +393,14 @@ class ScanHandlers:
         await self._emit_findings(all_findings, ws_id, send, scan_id)
 
     async def _run_ssh_scan(self, params, ws_id, send, log, scan_id):
-        from cyberhound.scanners.ssh_audit import RemoteAuditor, SSHCredentials
+        from cyberhound.scanners.ssh_audit import RemoteAuditor
         hosts = [h.strip() for h in re.split(r"[,\s\n]+", params.get("hosts", "")) if h.strip()]
         if not hosts:
             await send({"type": "error", "text": "Sin hosts"})
             await self.db.fail_scan(scan_id)
             return
         await log("section", f"SSH Scan en {len(hosts)} hosts…")
-        creds = SSHCredentials(
-            username=params.get("ssh_user", self.cfg.scan.ssh_default_user),
-            port=int(params.get("ssh_port", self.cfg.scan.ssh_default_port)),
-            key_path=self._ssh_key(params.get("ssh_key")),
-            password=params.get("ssh_password") or None,
-        )
+        creds = await self._ssh_creds(params)
         results = await RemoteAuditor.scan_multiple(
             hosts, creds, concurrency=self.cfg.scan.ssh_concurrency
         )

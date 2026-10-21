@@ -28,24 +28,31 @@ CREATE TABLE IF NOT EXISTS schedules (
     created_at   TEXT NOT NULL,
     last_run     TEXT,
     last_status  TEXT DEFAULT '',
-    last_scan_id INTEGER
+    last_scan_id INTEGER,
+    ssh_credential TEXT
 );
 """
 
-# Tarea → campo del mensaje WS con los objetivos. SSH no: necesitaría guardar credenciales.
+# Tarea → campo del mensaje WS con los objetivos. Las de SSH entran con una credencial guardada
+# (core/ssh_credentials.py): obligatoria en "ssh" y opcional en "network" (con ella, además de
+# descubrir y ver puertos, audita por SSH los equipos encontrados).
 TASKS = {
-    "network": "networks", "web_headers": "urls", "web_exposure": "urls", "api_security": "urls",
+    "network": "networks", "ssh": "hosts", "web_headers": "urls", "web_exposure": "urls", "api_security": "urls",
     "nuclei": "urls", "tls": "targets", "dns": "domains", "subdomain_enum": "domains",
 }
+SSH_TASKS = ("ssh", "network")
 MAX_PER_TENANT = 50
 
 
-def ws_message(task: str, targets: list[str]) -> dict:
+def ws_message(task: str, targets: list[str], ssh_credential: str | None = None) -> dict:
     """Mensaje WS saneado equivalente al análisis manual (ValidationError si no vale)."""
     field = TASKS[task]
-    raw = {"task": task, field: ",".join(targets) if field == "networks" else targets}
-    if task == "network":
-        raw["ssh_audit"] = False      # sin credenciales guardadas: solo descubrimiento y puertos
+    value = ",".join(targets) if field == "networks" else " ".join(targets) if field == "hosts" else targets
+    raw: dict = {"task": task, field: value}
+    if task in SSH_TASKS:
+        if ssh_credential:
+            raw["ssh_credential"] = ssh_credential
+        raw["ssh_audit"] = bool(ssh_credential)   # sin credencial, red = solo descubrimiento y puertos
     return InputValidator.ws_message(raw)
 
 
@@ -85,12 +92,24 @@ def validate(body: dict, partial: bool = False) -> dict:
         if not isinstance(body["enabled"], bool):
             raise ValueError("enabled debe ser true/false")
         out["enabled"] = body["enabled"]
+    if not partial or "ssh_credential" in body:
+        cred = body.get("ssh_credential") or None
+        if cred is not None and not (isinstance(cred, str) and InputValidator.is_credential_id(cred)):
+            raise ValueError("ssh_credential no válida")
+        out["ssh_credential"] = cred
     return out
 
 
-def check_targets(task: str, targets: list[str]) -> None:
+def check_credential(task: str, ssh_credential: str | None) -> None:
+    if task == "ssh" and not ssh_credential:
+        raise ValueError("La auditoría SSH programada necesita una credencial SSH guardada")
+    if ssh_credential and task not in SSH_TASKS:
+        raise ValueError("Solo los análisis de red y SSH usan credencial SSH")
+
+
+def check_targets(task: str, targets: list[str], ssh_credential: str | None = None) -> None:
     try:
-        ws_message(task, targets)
+        ws_message(task, targets, ssh_credential)
     except ValidationError as e:
         raise ValueError(f"Objetivos no válidos: {e.reason}") from None
 
@@ -129,10 +148,11 @@ class SchedulesMixin:
 
     async def create_schedule(self, data: dict, created_by: str = "") -> str:
         sid = secrets.token_hex(4)
-        await self._run("INSERT INTO schedules (id,name,task,targets,hour,minute,days,enabled,created_by,created_at) "
-                        "VALUES (?,?,?,?,?,?,?,?,?,?)", sid, data["name"], data["task"], json.dumps(data["targets"]),
-                        data["hour"], data["minute"], ",".join(map(str, data["days"])),
-                        1 if data.get("enabled", True) else 0, created_by, datetime.now(UTC).isoformat())
+        await self._run("INSERT INTO schedules (id,name,task,targets,hour,minute,days,enabled,created_by,created_at,"
+                        "ssh_credential) VALUES (?,?,?,?,?,?,?,?,?,?,?)", sid, data["name"], data["task"],
+                        json.dumps(data["targets"]), data["hour"], data["minute"], ",".join(map(str, data["days"])),
+                        1 if data.get("enabled", True) else 0, created_by, datetime.now(UTC).isoformat(),
+                        data.get("ssh_credential"))
         return sid
 
     async def update_schedule(self, sched_id: str, data: dict) -> bool:

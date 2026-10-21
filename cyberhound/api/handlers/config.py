@@ -9,7 +9,7 @@ from cyberhound.api.common import (
     _read_json,
     _update_yara_rules,
 )
-from cyberhound.core import integrations
+from cyberhound.core import integrations, ssh_credentials
 from cyberhound.core.logging import get_logger
 from cyberhound.core.multitenancy import (
     DEFAULT_TENANT,
@@ -224,3 +224,45 @@ class ConfigHandlers:
             except OSError:
                 pass
         return web.json_response(rules)
+
+    # ── Credenciales SSH guardadas ────────────────────────────────────────────
+
+    async def api_ssh_credentials_list(self, request: web.Request) -> web.Response:
+        return web.json_response(await self.db.list_ssh_credentials())
+
+    async def api_ssh_credentials_create(self, request: web.Request) -> web.Response:
+        try:
+            data = ssh_credentials.prepare(await _read_json(request), self._auth_secret, current_tenant.get())
+        except ValueError as e:
+            return web.json_response({"error": str(e)}, status=400)
+        if await self.db.count_ssh_credentials() >= ssh_credentials.MAX_PER_TENANT:
+            return web.json_response({"error": f"Máximo {ssh_credentials.MAX_PER_TENANT} credenciales"}, status=400)
+        cid = await self.db.create_ssh_credential(data, created_by=request.get("auth_user", ""))
+        await self._audit(request, "ssh_credential_create", data["name"],
+                          f"{data['username']}, puerto {data['port']}, {data['fingerprint'] or 'contraseña'}")
+        return web.json_response(ssh_credentials.public_view(await self.db.get_ssh_credential(cid)), status=201)
+
+    async def api_ssh_credentials_update(self, request: web.Request) -> web.Response:
+        cid = request.match_info["cid"]
+        current = await self.db.get_ssh_credential(cid)
+        if not current:
+            return web.json_response({"error": "Credencial no encontrada"}, status=404)
+        try:
+            data = ssh_credentials.prepare(await _read_json(request), self._auth_secret, current_tenant.get(),
+                                           partial=True)
+        except ValueError as e:
+            return web.json_response({"error": str(e)}, status=400)
+        await self.db.update_ssh_credential(cid, data)
+        await self._audit(request, "ssh_credential_update", current["name"], ",".join(sorted(data)))
+        return web.json_response(ssh_credentials.public_view(await self.db.get_ssh_credential(cid)))
+
+    async def api_ssh_credentials_delete(self, request: web.Request) -> web.Response:
+        cid = request.match_info["cid"]
+        current = await self.db.get_ssh_credential(cid)
+        if not current:
+            return web.json_response({"error": "Credencial no encontrada"}, status=404)
+        if used := await self.db.schedules_using_credential(cid):
+            return web.json_response({"error": "La usan estos análisis programados: " + ", ".join(used)}, status=409)
+        await self.db.delete_ssh_credential(cid)
+        await self._audit(request, "ssh_credential_delete", current["name"])
+        return web.json_response({"ok": True})

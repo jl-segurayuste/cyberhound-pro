@@ -27,6 +27,7 @@ from cyberhound.core.logging import get_logger
 from cyberhound.core.models import Finding
 from cyberhound.core.remote_fixes import REMOTE_FIXES_TABLE, RemoteFixesMixin
 from cyberhound.core.schedules import SCHEDULES_TABLE, SchedulesMixin
+from cyberhound.core.ssh_credentials import SSH_CREDENTIALS_TABLE, SSHCredentialsMixin
 
 logger = get_logger("database_pg")
 
@@ -117,7 +118,7 @@ CREATE INDEX IF NOT EXISTS idx_scans_started_at  ON scans(started_at);
 CREATE INDEX IF NOT EXISTS idx_scans_type        ON scans(scan_type);
 """
 
-DB_VERSION = 7
+DB_VERSION = 8
 
 # Migraciones incrementales (idempotentes) sobre BDs existentes, como en SQLite: antes solo
 # había un ALTER suelto y una tabla o columna nueva no llegaba a las instalaciones antiguas.
@@ -125,6 +126,7 @@ PG_MIGRATIONS: list[tuple[int, str]] = [
     (4, "ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_last_counter INTEGER"),
     (6, PG_ACCOUNTS),
     (7, SCHEDULES_TABLE + REMOTE_FIXES_TABLE),
+    (8, SSH_CREDENTIALS_TABLE + "ALTER TABLE schedules ADD COLUMN IF NOT EXISTS ssh_credential TEXT;"),
 ]
 
 
@@ -136,7 +138,7 @@ def _days_ago(days: int) -> str:
     return (datetime.now(UTC) - timedelta(days=days)).isoformat()
 
 
-class DatabasePG(AccountsMixin, SchedulesMixin, RemoteFixesMixin):
+class DatabasePG(AccountsMixin, SchedulesMixin, RemoteFixesMixin, SSHCredentialsMixin):
     """
     Base de datos PostgreSQL con la misma interfaz que Database (SQLite).
     Usa asyncpg para máximo rendimiento.

@@ -191,11 +191,12 @@ def verify_recovery_code(code: str, hashed_codes: list[str]) -> str | None:
 _SEALED = "enc:v1:"
 
 
-def _fernet(key: str):
+def _fernet(key: str, info: bytes = b"cyberhound-totp-v1"):
+    """Fernet con una clave derivada de auth.secret; `info` separa los usos (2FA, credenciales SSH…)."""
     from cryptography.fernet import Fernet
     from cryptography.hazmat.primitives import hashes
     from cryptography.hazmat.primitives.kdf.hkdf import HKDF
-    raw = HKDF(algorithm=hashes.SHA256(), length=32, salt=None, info=b"cyberhound-totp-v1").derive(key.encode())
+    raw = HKDF(algorithm=hashes.SHA256(), length=32, salt=None, info=info).derive(key.encode())
     return Fernet(urlsafe_b64encode(raw))
 
 

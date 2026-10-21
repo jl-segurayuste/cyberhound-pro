@@ -96,6 +96,7 @@ class CyberHoundServer(ScanHandlers, FixHandlers, DataHandlers, AccountHandlers,
         # Notificaciones, SIEM y ticketing: de la plataforma o de cada organización (ver _integration)
         self._integrations: dict[tuple[str, str], object] = {}
         self._schedules_running: set[tuple[str, str]] = set()
+        self._auth_secret: str | None = cfg.auth.secret
         self.scheduler: Scheduler | None = None
         self._sbom_cache: dict | None = None
         self._ansible_jobs: list = []
@@ -128,6 +129,7 @@ class CyberHoundServer(ScanHandlers, FixHandlers, DataHandlers, AccountHandlers,
             client_max_size=10 * 1024 * 1024,
         )
         app["auth_config"] = auth_cfg
+        self._auth_secret = auth_cfg.secret     # cifra las credenciales SSH guardadas
         app["server"] = self
 
         setup_auth_routes(app, auth_cfg)
@@ -190,6 +192,10 @@ class CyberHoundServer(ScanHandlers, FixHandlers, DataHandlers, AccountHandlers,
         app.router.add_get ("/api/scheduler",           self.api_scheduler_list)
         app.router.add_post("/api/scheduler/{name}/run",   self.api_scheduler_run)
         app.router.add_post("/api/scheduler/{name}/toggle", self.api_scheduler_toggle)
+        app.router.add_get   ("/api/config/ssh-credentials",       self.api_ssh_credentials_list)
+        app.router.add_post  ("/api/config/ssh-credentials",       self.api_ssh_credentials_create)
+        app.router.add_patch ("/api/config/ssh-credentials/{cid}", self.api_ssh_credentials_update)
+        app.router.add_delete("/api/config/ssh-credentials/{cid}", self.api_ssh_credentials_delete)
         app.router.add_get   ("/api/schedules",            self.api_schedules_list)
         app.router.add_post  ("/api/schedules",            self.api_schedules_create)
         app.router.add_patch ("/api/schedules/{sid}",      self.api_schedules_update)

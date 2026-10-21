@@ -186,12 +186,14 @@ async function revokeApiToken(id) {
 
 // ── Análisis programados ──────────────────────────────────────────────────
 const SCHED_TASKS = {web_headers: 'Cabeceras web', web_exposure: 'Exposición web', api_security: 'API / CORS',
-                     tls: 'TLS', dns: 'DNS', subdomain_enum: 'Subdominios', nuclei: 'Nuclei', network: 'Red'};
+                     tls: 'TLS', dns: 'DNS', subdomain_enum: 'Subdominios', nuclei: 'Nuclei', network: 'Red',
+                     ssh: 'Auditoría SSH'};
 const DAY_NAMES = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
 
 async function loadSchedules() {
   const tbody = document.getElementById('schedules-tbody');
   if (!tbody) return;
+  loadSshCredOptions();
   const r = await fetch('/api/schedules');
   if (!r.ok) { tbody.innerHTML = ''; return; }
   const rows = await r.json().catch(() => null);
@@ -199,11 +201,11 @@ async function loadSchedules() {
   const pad = n => String(n).padStart(2, '0');
   tbody.innerHTML = rows.map(s => `<tr>
       <td>${esc(s.name)}<div style="font-size:.72rem;color:var(--text2)">${esc(s.targets.join(', '))}</div></td>
-      <td>${esc(SCHED_TASKS[s.task] || s.task)}</td>
+      <td>${esc(SCHED_TASKS[s.task] || s.task)}${s.ssh_credential ? '<div style="font-size:.72rem;color:var(--text2)">con credencial SSH</div>' : ''}</td>
       <td style="font-size:.78rem">${pad(s.hour)}:${pad(s.minute)} · ${s.days.length === 7 ? 'todos los días' : s.days.map(d => DAY_NAMES[d]).join(' ')}</td>
       <td style="font-size:.78rem">${s.running ? 'en curso…' : (s.last_run ? `${fmt(s.last_run)} · ${esc(s.last_status)}` : '—')}</td>
       <td style="white-space:nowrap">
-        <button class="fix-btn" ${on('click', 'runSchedule', s.id)}>▶ Ahora</button>
+        <button class="fix-btn" ${on('click', 'runSchedule', s.id)} ${s.running ? 'disabled title="En curso"' : ''}>▶ Ahora</button>
         <button class="toggle-btn ${s.enabled ? 'active' : ''}" ${on('click', 'toggleSchedule', s.id, !s.enabled)}>${s.enabled ? 'Pausar' : 'Reanudar'}</button>
         <button class="btn-secondary small danger" ${on('click', 'deleteSchedule', s.id)}>Borrar</button>
       </td></tr>`).join('') || '<tr><td colspan="5" style="color:var(--text2)">Sin análisis programados</td></tr>';
@@ -216,6 +218,7 @@ async function createSchedule() {
     targets: val('sched-targets').split(',').map(t => t.trim()).filter(Boolean),
     hour: parseInt(val('sched-hour'), 10), minute: parseInt(val('sched-minute'), 10),
     days: [...document.querySelectorAll('.sched-day:checked')].map(el => parseInt(el.value, 10)),
+    ssh_credential: val('sched-cred') || null,
   };
   const r = await fetch('/api/schedules', {
     method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body),
@@ -244,6 +247,97 @@ async function deleteSchedule(id) {
   if (!confirm('¿Borrar esta programación?')) return;
   await fetch(`/api/schedules/${encodeURIComponent(id)}`, {method: 'DELETE'});
   loadSchedules();
+}
+
+// ── Credenciales SSH guardadas ────────────────────────────────────────────
+// Lo que se manda al servidor para entrar por SSH: una credencial guardada o lo escrito en el panel Red
+function sshCredFields(port) {
+  const cred = document.getElementById('net-cred')?.value || '';
+  if (cred) return {ssh_credential: cred};
+  return {
+    ssh_user: document.getElementById('net-user')?.value || 'root',
+    ssh_port: port || document.getElementById('net-port')?.value || '22',
+    ssh_key:  document.getElementById('net-key')?.value || '',
+    ssh_password: document.getElementById('net-pass')?.value || '',
+  };
+}
+
+function onSshCredChange() {
+  const box = document.getElementById('net-manual-creds');
+  // display:contents: sus campos siguen siendo parte de la fila del formulario (hidden no puede con él)
+  if (box) box.style.display = document.getElementById('net-cred')?.value ? 'none' : 'contents';
+}
+
+function onSshCredKindChange() {
+  const kind = document.getElementById('sshcred-kind')?.value;
+  document.getElementById('sshcred-key-fields').hidden = kind !== 'key';
+  document.getElementById('sshcred-pass-fields').hidden = kind !== 'password';
+}
+
+// Rellena los desplegables de credencial (panel Red y Programados) sin perder lo elegido
+async function loadSshCredOptions() {
+  const r = await fetch('/api/config/ssh-credentials');
+  const rows = r.ok ? await r.json().catch(() => null) : null;
+  if (!Array.isArray(rows)) return [];
+  for (const [id, empty] of [['net-cred', 'Escribir usuario y clave o contraseña'], ['sched-cred', 'Ninguna']]) {
+    const sel = document.getElementById(id);
+    if (!sel) continue;
+    const keep = sel.value;
+    sel.innerHTML = `<option value="">${empty}</option>` + rows.map(c =>
+      `<option value="${esc(c.id)}">${esc(c.name)} (${esc(c.username)}, puerto ${c.port})</option>`).join('');
+    sel.value = rows.some(c => c.id === keep) ? keep : '';
+  }
+  onSshCredChange();
+  return rows;
+}
+
+async function loadSshCredentials() {
+  const tbody = document.getElementById('sshcreds-tbody');
+  if (!tbody) return;
+  const rows = await loadSshCredOptions();
+  tbody.innerHTML = rows.map(c => `<tr>
+      <td>${esc(c.name)}${c.kind === 'key' ? `<details style="font-size:.72rem;color:var(--text2)"><summary>${esc(c.fingerprint)}</summary>
+        <code style="word-break:break-all;user-select:all">${esc(c.public_key)}</code></details>` : ''}</td>
+      <td style="font-family:monospace">${esc(c.username)}:${c.port}</td>
+      <td>${c.kind === 'key' ? 'Clave' : 'Contraseña'}</td>
+      <td style="font-size:.78rem">${c.last_used ? fmt(c.last_used) : '—'}</td>
+      <td><button class="btn-secondary small danger" ${on('click', 'deleteSshCredential', c.id)}>Borrar</button></td>
+    </tr>`).join('') || '<tr><td colspan="5" style="color:var(--text2)">Sin credenciales guardadas</td></tr>';
+  applyRole(tbody);
+}
+
+async function createSshCredential() {
+  const val = id => document.getElementById(id)?.value || '';
+  const kind = val('sshcred-kind');
+  const body = {name: val('sshcred-name').trim(), username: val('sshcred-user').trim(),
+                port: parseInt(val('sshcred-port') || '22', 10), kind};
+  if (kind === 'key') Object.assign(body, {private_key: val('sshcred-key'), passphrase: val('sshcred-passphrase')});
+  if (kind === 'password') body.password = val('sshcred-password');
+  const r = await fetch('/api/config/ssh-credentials', {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body),
+  });
+  const d = await r.json().catch(() => ({}));
+  const box = document.getElementById('sshcred-msg');
+  if (!r.ok) { _msg('sshcred-msg', false, d.error || r.status); return; }
+  ['sshcred-name', 'sshcred-key', 'sshcred-passphrase', 'sshcred-password'].forEach(id => {
+    const el = document.getElementById(id); if (el) el.value = '';
+  });
+  if (d.kind === 'key' && kind === 'generate') {
+    box.style.color = 'var(--green)';
+    box.innerHTML = `✓ Guardada. Añade esta clave pública a <code>~/.ssh/authorized_keys</code> de ` +
+                    `<b>${esc(d.username)}</b> en cada equipo:<br><code style="word-break:break-all;user-select:all">${esc(d.public_key)}</code>`;
+  } else {
+    _msg('sshcred-msg', true, `Guardada: ${d.name}`);
+  }
+  loadSshCredentials();
+}
+
+async function deleteSshCredential(id) {
+  if (!confirm('¿Borrar esta credencial SSH?')) return;
+  const r = await fetch(`/api/config/ssh-credentials/${encodeURIComponent(id)}`, {method: 'DELETE'});
+  const d = await r.json().catch(() => ({}));
+  toast(r.ok ? '✓ Credencial borrada' : '✗ ' + (d.error || r.status), r.ok ? 'info' : 'error');
+  loadSshCredentials();
 }
 
 // ── Fixes remotos aplicados ───────────────────────────────────────────────

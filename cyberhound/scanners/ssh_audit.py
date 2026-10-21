@@ -49,8 +49,13 @@ class SSHCredentials:
     # Autenticación por clave (recomendada)
     key_path:   str | None = None
     passphrase: str | None = None   # passphrase de la clave, NO la contraseña del sistema
+    # Clave privada en memoria (credencial guardada de una organización), en formato OpenSSH
+    private_key: str | None = None
     # Autenticación por contraseña (solo si no hay alternativa)
     password:   str | None = None   # Se maneja en memoria, nunca en disco ni logs
+    # False: no probar las claves por defecto del servidor (~/.ssh/id_*) ni su agente. Las
+    # organizaciones no pueden entrar en sus hosts con la identidad de la plataforma.
+    use_server_keys: bool = True
     # Opciones de conexión
     known_hosts: str | None = None  # None = no verificar (aceptar al primero, TOFU)
     connect_timeout: int = 15
@@ -62,15 +67,22 @@ class SSHCredentials:
             "connect_timeout":  self.connect_timeout,
             "known_hosts":      self.known_hosts,
         }
-        if self.key_path:
+        if self.private_key:
+            opts["client_keys"] = [asyncssh.import_private_key(self.private_key)]
+            opts["agent_path"] = None
+        elif self.key_path:
             opts["client_keys"] = [self.key_path]
             if self.passphrase:
                 opts["passphrase"] = self.passphrase
         elif self.password:
             opts["password"] = self.password
         else:
-            # Intentar con el agente SSH del sistema
-            opts["agent_path"] = None  # asyncssh usa SSH_AUTH_SOCK automáticamente
+            opts["agent_path"] = None  # sin agente: las claves por defecto de ~/.ssh sí se prueban
+        if not self.use_server_keys and not self.private_key:
+            # asyncssh carga las de ~/.ssh y el agente de SSH_AUTH_SOCK salvo con client_keys=None
+            # (una lista vacía también carga las de por defecto)
+            opts["client_keys"] = None
+            opts["agent_path"] = None
         return opts
 
 
@@ -255,13 +267,13 @@ print(json.dumps(findings))
                     host, len(findings), result.scan_time,
                 )
 
+        except asyncssh.PermissionDenied:     # antes que DisconnectError, de la que es subclase
+            result.status = "auth_failed"
+            result.error = "Autenticación SSH fallida (clave o contraseña incorrecta)"
+            logger.warning("%s: %s", host, result.error)
         except asyncssh.DisconnectError as e:
             result.status = "unreachable"
             result.error = f"Conexión rechazada: {e}"
-            logger.warning("%s: %s", host, result.error)
-        except asyncssh.PermissionDenied:
-            result.status = "auth_failed"
-            result.error = "Autenticación SSH fallida (clave o contraseña incorrecta)"
             logger.warning("%s: %s", host, result.error)
         except asyncssh.HostKeyNotVerifiable:
             result.status = "error"

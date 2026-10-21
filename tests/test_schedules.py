@@ -12,8 +12,8 @@ def test_validacion():
     d = schedules.validate({"name": " Web ", "task": "web_headers", "targets": "https://a.es, https://b.es",
                             "hour": 5, "minute": 30, "days": [4, 0, 0]})
     assert d == {"name": "Web", "task": "web_headers", "targets": ["https://a.es", "https://b.es"],
-                 "hour": 5, "minute": 30, "days": [0, 4]}
-    for bad in ({"task": "audit"}, {"task": "ssh"}, {"targets": []}, {"hour": 24}, {"minute": "5"},
+                 "hour": 5, "minute": 30, "days": [0, 4], "ssh_credential": None}
+    for bad in ({"task": "audit"}, {"task": "code"}, {"targets": []}, {"ssh_credential": "../x"}, {"hour": 24}, {"minute": "5"},
                 {"days": [7]}, {"days": []}, {"enabled": "sí"}, {"name": ""}, {"hour": True}):
         with pytest.raises(ValueError):
             schedules.validate({"name": "x", "task": "tls", "targets": ["a.es"], **bad})
@@ -21,6 +21,22 @@ def test_validacion():
     with pytest.raises(ValueError):
         schedules.check_targets("web_headers", ["https://a.es; rm -rf /"])
     assert schedules.ws_message("network", ["10.10.0.0/24"])["ssh_audit"] is False
+
+
+def test_programados_ssh_necesitan_credencial():
+    """SSH programado entra con una credencial guardada; sin ella no hay a quién pedirle la contraseña."""
+    with pytest.raises(ValueError, match="credencial"):
+        schedules.check_credential("ssh", None)
+    with pytest.raises(ValueError, match="Solo"):
+        schedules.check_credential("tls", "0a1b2c3d")
+    schedules.check_credential("ssh", "0a1b2c3d")
+    schedules.check_credential("network", None)
+    msg = schedules.ws_message("ssh", ["10.10.0.5", "10.10.0.6"], "0a1b2c3d")
+    assert msg["hosts"] == "10.10.0.5 10.10.0.6" and msg["ssh_credential"] == "0a1b2c3d"
+    net = schedules.ws_message("network", ["10.10.0.0/24"], "0a1b2c3d")
+    assert net["ssh_audit"] is True and net["ssh_credential"] == "0a1b2c3d"
+    with pytest.raises(ValueError):
+        schedules.check_targets("ssh", ["10.10.0.5; reboot"], "0a1b2c3d")
 
 
 def test_cuando_toca():

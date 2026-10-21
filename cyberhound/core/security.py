@@ -396,6 +396,10 @@ class InputValidator:
         return p
 
     @staticmethod
+    def is_credential_id(value: str) -> bool:
+        return bool(re.fullmatch(r"[0-9a-f]{8}", value))
+
+    @staticmethod
     def ssh_username(value: str) -> str:
         """Valida un nombre de usuario SSH."""
         if not value:
@@ -497,6 +501,12 @@ class InputValidator:
             # Contraseña: solo en memoria, nunca se loguea
             if msg.get("ssh_password"):
                 sanitized["ssh_password"] = str(msg["ssh_password"])
+            # Credencial SSH guardada (core/ssh_credentials.py): sustituye usuario, puerto, clave y contraseña
+            cred = msg.get("ssh_credential")
+            if cred:
+                if not (isinstance(cred, str) and InputValidator.is_credential_id(cred)):
+                    raise ValidationError("ssh_credential", "Credencial SSH no válida")
+                sanitized["ssh_credential"] = cred
             sanitized["ssh_audit"] = bool(msg.get("ssh_audit", True))
             sanitized["vuln_scan"] = bool(msg.get("vuln_scan", False))
 

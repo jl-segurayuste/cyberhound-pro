@@ -13,6 +13,8 @@ E2E_PYTHON="${E2E_PYTHON:-python3}"     # con playwright (pip install playwright
 abs() { case "$1" in /*) echo "$1" ;; */*) echo "$PWD/$1" ;; *) command -v "$1" ;; esac; }
 CH_PYTHON="$(abs "$CH_PYTHON")"; E2E_PYTHON="$(abs "$E2E_PYTHON")"   # el script cambia de directorio
 PORT="${CH_E2E_PORT:-18443}"; MT_PORT=$((PORT + 1)); WEB_PORT="${CH_E2E_WEB_PORT:-18080}"
+SSH_PORT="${CH_E2E_SSH_PORT:-18022}"
+export CH_E2E_SSH_PASSWORD="ssh-$("$CH_PYTHON" -c 'import secrets; print(secrets.token_hex(6))')"
 export CH_E2E_PASSWORD="e2e-$("$CH_PYTHON" -c 'import secrets; print(secrets.token_hex(6))')"
 WORK="$(mktemp -d)"; PIDS=()
 cleanup() { for p in "${PIDS[@]}"; do kill "$p" 2>/dev/null; done; rm -rf "$WORK"; }
@@ -43,13 +45,16 @@ echo "── Preparando instancias de demo en $WORK"
 "$CH_PYTHON" "$HERE/targets.py" "$WORK/targets"
 (exec "$CH_PYTHON" -m http.server "$WEB_PORT" --bind 127.0.0.1 -d "$WORK/targets/web" >/dev/null 2>&1) &
 PIDS+=($!)
+# servidor SSH de pruebas (solo 127.0.0.1): credenciales guardadas y auditoría SSH programada
+(exec "$CH_PYTHON" "$HERE/sshd.py" "$SSH_PORT" "$WORK" >"$WORK/sshd.log" 2>&1) &
+PIDS+=($!)
 instance plataforma "$PORT" false
 instance multitenant "$MT_PORT" true
 
 RESULT=0
 run() {   # run <nombre> <script> [args…]
     echo; echo "── $1"
-    if CH_E2E_BASE="${BASE:-https://127.0.0.1:$PORT}" CH_E2E_WEB="http://127.0.0.1:$WEB_PORT" \
+    if CH_E2E_BASE="${BASE:-https://127.0.0.1:$PORT}" CH_E2E_WEB="http://127.0.0.1:$WEB_PORT" CH_E2E_SSH_PORT="$SSH_PORT" \
         "$E2E_PYTHON" -I "$HERE/$2" "${@:3}"; then echo "✓ $1"; else echo "✗ $1"; RESULT=1; fi
 }
 run "Interfaz: paneles, scroll y todos los controles" ui.py "$HERE/fakews.js" "$WORK"

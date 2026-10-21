@@ -9,7 +9,9 @@ from aiohttp import web
 from cyberhound.api.common import (
     _read_json,
 )
+from cyberhound.core import ssh_credentials
 from cyberhound.core.logging import audit_log, get_logger
+from cyberhound.core.multitenancy import current_tenant
 
 logger = get_logger("api")
 
@@ -75,9 +77,13 @@ class FixHandlers:
                 return web.json_response({"ok": False, "error": err}, status=403)
             if err := self._tenant_ssh_key_error(body.get("ssh_key")):
                 return web.json_response({"ok": False, "error": err}, status=400)
+            try:
+                creds = await self._ssh_creds(body)
+            except ValueError as e:
+                return web.json_response({"ok": False, "error": str(e)}, status=400)
             from cyberhound.scanners.ssh_audit import RemoteAuditor
             action = RemoteAuditor.remote_fix_action(finding)
-            ok, msg, undo = await RemoteAuditor(self._ssh_creds(body)).apply_fix_remote(host, finding)
+            ok, msg, undo = await RemoteAuditor(creds).apply_fix_remote(host, finding)
             audit_log.fix_applied(fid, user, host, False)
             fix_id = None
             if ok:
@@ -90,13 +96,23 @@ class FixHandlers:
             logger.error("api_fix_remote: %s", e, exc_info=True)
             return web.json_response({"ok": False, "error": str(e)}, status=500)
 
-    def _ssh_creds(self, body: dict):
+    async def _ssh_creds(self, params: dict):
+        """Credenciales SSH de un análisis o un fix: una guardada (ssh_credential) o las que trae la
+        petición. ValueError si la guardada no existe o no se puede descifrar."""
         from cyberhound.scanners.ssh_audit import SSHCredentials
+        if cid := params.get("ssh_credential"):
+            row = await self.db.get_ssh_credential(str(cid))
+            if not row:
+                raise ValueError("La credencial SSH elegida ya no existe")
+            creds = ssh_credentials.to_ssh_credentials(row, self._auth_secret, current_tenant.get())
+            await self.db.touch_ssh_credential(row["id"])
+            return creds
         return SSHCredentials(
-            username=body.get("ssh_user", self.cfg.scan.ssh_default_user),
-            port=int(body.get("ssh_port", self.cfg.scan.ssh_default_port)),
-            key_path=self._ssh_key(body.get("ssh_key")),
-            password=body.get("ssh_password") or None,
+            username=params.get("ssh_user", self.cfg.scan.ssh_default_user),
+            port=int(params.get("ssh_port", self.cfg.scan.ssh_default_port)),
+            key_path=self._ssh_key(params.get("ssh_key")),
+            password=params.get("ssh_password") or None,
+            use_server_keys=self._tenant_obj() is None,
         )
 
     def _ssh_key(self, given: str | None) -> str | None:
@@ -108,7 +124,13 @@ class FixHandlers:
 
     def _tenant_ssh_key_error(self, given: str | None) -> str | None:
         if given and self._tenant_obj() is not None:
-            return "Una organización no puede usar claves SSH guardadas en el servidor: usa usuario y contraseña"
+            return ("Una organización no puede usar claves SSH guardadas en el servidor: usa usuario y contraseña "
+                    "o una credencial SSH guardada (Configuración › Credenciales SSH)")
+        return None
+
+    async def _ssh_credential_error(self, cid: str | None) -> str | None:
+        if cid and not await self.db.get_ssh_credential(cid):
+            return "La credencial SSH elegida no existe"
         return None
 
     async def api_fix_remote_history(self, request: web.Request) -> web.Response:
@@ -131,11 +153,15 @@ class FixHandlers:
             return web.json_response({"ok": False, "error": err}, status=403)
         if err := self._tenant_ssh_key_error(body.get("ssh_key")):
             return web.json_response({"ok": False, "error": err}, status=400)
+        try:
+            creds = await self._ssh_creds(body)
+        except ValueError as e:
+            return web.json_response({"ok": False, "error": str(e)}, status=400)
         user = request.get("auth_user", "unknown")
         if not await self.db.mark_remote_fix_undone(fix["id"], user):
             return web.json_response({"ok": False, "error": "Este fix no se puede deshacer: ya se deshizo"}, status=409)
         from cyberhound.scanners.ssh_audit import RemoteAuditor
-        ok, msg = await RemoteAuditor(self._ssh_creds(body)).undo_fix_remote(fix["host"], fix["undo"])
+        ok, msg = await RemoteAuditor(creds).undo_fix_remote(fix["host"], fix["undo"])
         if not ok:
             await self.db.clear_remote_fix_undone(fix["id"])
         audit_log.fix_rolled_back(fix["finding_id"], user, fix["host"], ok)
