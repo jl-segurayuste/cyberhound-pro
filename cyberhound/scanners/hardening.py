@@ -123,21 +123,25 @@ async def check_firewall() -> list[Finding]:
                "sudo apt install ufw && ufw enable", auto_fix=False)]
 
 
+# Parámetro sysctl → (valor esperado, severidad, descripción). También lo usa el generador de
+# playbooks Ansible (cyberhound/core/ansible_integration.py).
+KERNEL_PARAMS = {
+    "net.ipv4.ip_forward":              ("0",  "high",   "Reenvío IP activo (gateway no intencionado)"),
+    "net.ipv4.conf.all.send_redirects": ("0",  "high",   "Envío de ICMP redirects activo"),
+    "net.ipv4.conf.all.accept_source_route": ("0", "high", "Enrutamiento por origen aceptado"),
+    "kernel.randomize_va_space":        ("2",  "high",   "ASLR desactivado o parcial"),
+    "net.ipv4.tcp_syncookies":          ("1",  "high",   "SYN cookies desactivadas (vulnerable a SYN flood)"),
+    "net.ipv4.conf.all.log_martians":   ("1",  "medium", "Paquetes martian no registrados"),
+    "net.ipv4.conf.all.rp_filter":      ("1",  "medium", "Filtro de ruta inversa desactivado"),
+    "kernel.dmesg_restrict":            ("1",  "medium", "dmesg accesible por usuarios sin privilegios"),
+    "kernel.perf_event_paranoid":       ("2",  "medium", "Eventos perf accesibles sin privilegios"),
+    "net.ipv6.conf.all.disable_ipv6":   ("1",  "info",   "IPv6 activo (considera deshabilitarlo si no se usa)"),
+}
+
+
 async def check_kernel_params() -> list[Finding]:
     results = []
-    PARAMS = {
-        "net.ipv4.ip_forward":              ("0",  "high",   "Reenvío IP activo (gateway no intencionado)"),
-        "net.ipv4.conf.all.send_redirects": ("0",  "high",   "Envío de ICMP redirects activo"),
-        "net.ipv4.conf.all.accept_source_route": ("0", "high", "Enrutamiento por origen aceptado"),
-        "kernel.randomize_va_space":        ("2",  "high",   "ASLR desactivado o parcial"),
-        "net.ipv4.tcp_syncookies":          ("1",  "high",   "SYN cookies desactivadas (vulnerable a SYN flood)"),
-        "net.ipv4.conf.all.log_martians":   ("1",  "medium", "Paquetes martian no registrados"),
-        "net.ipv4.conf.all.rp_filter":      ("1",  "medium", "Filtro de ruta inversa desactivado"),
-        "kernel.dmesg_restrict":            ("1",  "medium", "dmesg accesible por usuarios sin privilegios"),
-        "kernel.perf_event_paranoid":       ("2",  "medium", "Eventos perf accesibles sin privilegios"),
-        "net.ipv6.conf.all.disable_ipv6":   ("1",  "info",   "IPv6 activo (considera deshabilitarlo si no se usa)"),
-    }
-    for param, (expected, sev, desc) in PARAMS.items():
+    for param, (expected, sev, desc) in KERNEL_PARAMS.items():
         sysfs = Path("/proc/sys") / param.replace(".", "/")
         if not sysfs.exists():
             continue

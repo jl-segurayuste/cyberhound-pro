@@ -86,7 +86,7 @@ class PlatformHandlers:
         try:
             body     = await _read_json(request)
             scan_id  = body.get("scan_id")
-            target   = body.get("target", "localhost")
+            target   = str(body.get("target") or "localhost").strip()
             mode     = body.get("mode", "local")  # local | awx
 
             # Cargar findings del scan
@@ -97,15 +97,29 @@ class PlatformHandlers:
                     id=f["finding_id"], category=f["category"],
                     severity=f["severity"], title=f["title"],
                     description=f.get("description",""), remediation=f.get("remediation",""),
-                    auto_fix=bool(f.get("auto_fix")),
+                    auto_fix=bool(f.get("auto_fix")), file_path=f.get("file_path") or "",
+                    source_host=f.get("source_host") or "",
                 ) for f in findings_raw]
             else:
                 findings = []
 
-            from cyberhound.core.ansible_integration import generate_playbook, run_playbook_local
-            playbook = generate_playbook(findings, target)
+            from cyberhound.core.ansible_integration import build_playbook, run_playbook_local
+            if mode == "local":
+                # ansible-playbook local corre con --connection=local: solo puede corregir este servidor.
+                # Antes los hallazgos de hosts remotos del análisis se "corregían" aquí.
+                if target not in ("localhost", "127.0.0.1"):
+                    return web.json_response({"error": "En modo local el playbook se aplica en este servidor: "
+                                                       "para otros hosts usa AWX o descarga el playbook"}, status=400)
+                findings = [f for f in findings if f.source_host in ("", "localhost", "127.0.0.1")]
+                target = "localhost"            # el inventario de run_playbook_local es "localhost,"
+            try:
+                playbook, _n, _manual = build_playbook(findings, target)
+            except ValueError as e:
+                return web.json_response({"error": str(e)}, status=400)
             if not playbook:
-                return web.json_response({"error": "Sin hallazgos con corrección automática"}, status=400)
+                return web.json_response({"error": "Sin hallazgos de este servidor que Ansible pueda corregir"
+                                          if mode == "local" else "Sin hallazgos con corrección automática"},
+                                         status=400)
 
             if mode == "local":
                 job = await run_playbook_local(playbook, target)

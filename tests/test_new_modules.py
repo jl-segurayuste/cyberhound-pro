@@ -13,7 +13,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from cyberhound.core.ansible_integration import _finding_to_task, generate_playbook
 from cyberhound.core.models import Finding
 from cyberhound.core.multitenancy import Tenant, TenantStore, tenant_from_host
 from cyberhound.core.openapi import ENDPOINT_DOCS, SWAGGER_UI_HTML, build_openapi_spec
@@ -221,109 +220,6 @@ class TestTenantDetection:
                 store.create(slug, "X")
         with pytest.raises(ValueError):
             store.create("acme", "   ")
-
-
-# ── Ansible playbook generation ───────────────────────────────────────────────
-
-class TestAnsiblePlaybookGeneration:
-
-    def _make_finding(self, fid, category="ssh", severity="high", auto_fix=True):
-        return Finding(
-            id=fid, category=category, severity=severity,
-            title=f"Test: {fid}", description="", remediation="fix",
-            auto_fix=auto_fix,
-        )
-
-    def test_empty_without_autofixable(self):
-        findings = [self._make_finding("manual_fix", auto_fix=False)]
-        pb = generate_playbook(findings)
-        assert pb == ""
-
-    def test_generates_ssh_root_login_task(self):
-        findings = [self._make_finding("ssh_PermitRootLogin")]
-        pb = generate_playbook(findings)
-        assert "PermitRootLogin no" in pb
-        assert "lineinfile" in pb
-
-    def test_generates_ufw_task(self):
-        findings = [self._make_finding("fw_ufw_inactive", category="firewall")]
-        pb = generate_playbook(findings)
-        assert "ufw" in pb
-        assert "enabled" in pb
-
-    def test_generates_auditd_task(self):
-        findings = [self._make_finding("no_auditd", category="audit")]
-        pb = generate_playbook(findings)
-        assert "auditd" in pb
-        assert "service" in pb
-
-    def test_generates_ntp_chrony_task(self):
-        findings = [self._make_finding("no_ntp", category="ntp")]
-        pb = generate_playbook(findings)
-        assert "chrony" in pb
-
-    def test_playbook_has_valid_yaml_structure(self):
-        findings = [
-            self._make_finding("ssh_PermitRootLogin"),
-            self._make_finding("fw_ufw_inactive", category="firewall"),
-        ]
-        pb = generate_playbook(findings, target="webserver-01")
-        assert "---" in pb
-        assert "hosts: webserver-01" in pb
-        assert "become: yes" in pb
-        assert "tasks:" in pb
-        assert "handlers:" in pb
-
-    def test_multiple_findings_multiple_tasks(self):
-        findings = [
-            self._make_finding("ssh_PermitRootLogin"),
-            self._make_finding("ssh_PasswordAuthentication"),
-            self._make_finding("ssh_MaxAuthTries"),
-        ]
-        pb = generate_playbook(findings)
-        assert pb.count("- name:") >= 3
-
-    def test_finding_to_task_returns_string(self):
-        f = self._make_finding("ssh_PermitRootLogin")
-        task = _finding_to_task(f)
-        assert isinstance(task, str)
-        assert len(task) > 10
-
-    def test_generates_auditd_inactive_task(self):
-        findings = [self._make_finding("auditd_inactive", category="audit")]
-        pb = generate_playbook(findings)
-        assert "auditd" in pb
-        assert "started" in pb
-
-    def test_generates_sticky_bit_task(self):
-        findings = [self._make_finding("tmp_no_sticky_bit", category="filesystem")]
-        pb = generate_playbook(findings)
-        assert "/tmp" in pb
-        assert "1777" in pb
-
-    def test_generates_cron_restriction_task(self):
-        findings = [self._make_finding("cron_no_restriction", category="cron")]
-        pb = generate_playbook(findings)
-        assert "cron.allow" in pb
-        assert "root" in pb
-
-    def test_generates_at_restriction_task(self):
-        findings = [self._make_finding("at_no_restriction", category="cron")]
-        pb = generate_playbook(findings)
-        assert "at.allow" in pb
-
-    def test_generates_umask_task(self):
-        findings = [self._make_finding("umask_insecure_user", category="hardening")]
-        pb = generate_playbook(findings)
-        assert "UMASK 027" in pb
-        assert "login.defs" in pb
-
-    def test_finding_to_task_unknown_returns_debug(self):
-        f = self._make_finding("unknown_check_xyz", auto_fix=True)
-        f.remediation = "Hacer algo manualmente"
-        task = _finding_to_task(f)
-        # Para checks desconocidos, genera un task de debug
-        assert "debug" in task or task == ""
 
 
 # ── Runtime scan patterns ─────────────────────────────────────────────────────

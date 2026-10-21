@@ -13,9 +13,14 @@ de CyberHound en formato Ansible estándar (roles, tasks, handlers).
 """
 from __future__ import annotations
 
+import copy
+import ipaddress
 import json
+import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+
+import yaml
 
 from cyberhound import __version__
 from cyberhound.core.executor import command_exists, run_command
@@ -49,263 +54,266 @@ class AnsibleJob:
 
 
 # ── Generador de playbooks ────────────────────────────────────────────────────
+# El playbook se construye como datos y se vuelca con el SafeDumper de PyYAML: nunca se pega texto del
+# hallazgo en el YAML ni en una tarea. El título, la remediación o el id de un hallazgo remoto los
+# escribe el host auditado; antes iban a un f-string (una comilla rompía el YAML) y, en el export de
+# informes, la remediación se ejecutaba tal cual con ansible.builtin.shell y become. Además Ansible
+# evalúa las plantillas {{ … }} de los valores de una tarea en la máquina de control. Por eso las
+# tareas solo llevan valores fijos de este catálogo o validados (rutas, servicios, usuarios, hosts).
+
+SSHD_CONFIG = "/etc/ssh/sshd_config"
+SYSCTL_FILE = "/etc/sysctl.d/99-cyberhound.conf"
+SSH_PARAMS = {"PermitRootLogin": "no", "PasswordAuthentication": "no", "PermitEmptyPasswords": "no",
+              "X11Forwarding": "no", "MaxAuthTries": "4"}
+LOGIN_DEFS = {"PASS_MAX_DAYS": "90", "PASS_MIN_DAYS": "1", "PASS_WARN_AGE": "7", "LOGIN_RETRIES": "5"}
+BANNER_FILES = {"no_banner_issue": "/etc/issue", "no_banner_issue_net": "/etc/issue.net"}
+BANNER = ("AVISO: Este sistema es de uso exclusivo para personal autorizado.\n"
+          "Toda actividad es registrada y supervisada.\n"
+          "El acceso no autorizado está prohibido y puede ser objeto de acciones legales.\n")
+_SAFE_PATH = re.compile(r"/[\w./+@-]+")
+_SAFE_NAME = re.compile(r"[\w.@-]{1,64}")
+_SAFE_USER = re.compile(r"[a-z_][a-z0-9_.-]{0,31}")
+_SAFE_HOST = re.compile(r"[A-Za-z0-9][A-Za-z0-9.-]{0,252}")   # sin ":" (en hosts: une patrones)
+_SSHD_HANDLER = "CyberHound: recargar sshd"
+
+
+def _path(p: str | None, prefixes: tuple[str, ...] = ("/",)) -> str | None:
+    p = p or ""
+    return p if _SAFE_PATH.fullmatch(p) and ".." not in p and p.startswith(prefixes) else None
+
+
+def _sshd(param: str, value: str) -> list[dict]:
+    """sshd usa el PRIMER valor de cada opción y lee antes los sshd_config.d/*.conf incluidos al
+    principio (p. ej. el de cloud-init con PasswordAuthentication yes). Un lineinfile solo cambiaba
+    la última línea: con "X11Forwarding yes" de serie más arriba, el valor inseguro seguía mandando.
+
+    Solo se tocan las líneas sin sangría (la sección global): las de un bloque Match, que por
+    convención van sangradas, son excepciones que ha puesto el administrador."""
+    regexp, line = rf"^{param}[ \t]+.*$", f"{param} {value}"
+    found = f"cyberhound_sshd_{param}"
+    return [
+        {"name": f"CyberHound: {line} en sshd_config",
+         "ansible.builtin.replace": {"path": SSHD_CONFIG, "regexp": regexp, "replace": line,
+                                     "validate": "/usr/sbin/sshd -t -f %s"},
+         "notify": _SSHD_HANDLER},
+        {"name": f"CyberHound: {line} en sshd_config (si no estaba)",
+         "ansible.builtin.lineinfile": {"path": SSHD_CONFIG, "regexp": rf"^{param}\s", "line": line,
+                                        "insertbefore": r"^\s*Match\s", "firstmatch": True,
+                                        "validate": "/usr/sbin/sshd -t -f %s"},
+         "notify": _SSHD_HANDLER},
+        {"name": f"CyberHound: {param} en sshd_config.d",
+         "ansible.builtin.find": {"paths": "/etc/ssh/sshd_config.d", "patterns": "*.conf",
+                                  "contains": rf"^{param}\s"},
+         "register": found},
+        {"name": f"CyberHound: {line} en sshd_config.d",
+         "ansible.builtin.replace": {"path": "{{ item.path }}", "regexp": regexp, "replace": line},
+         "loop": f"{{{{ {found}.files }}}}", "notify": _SSHD_HANDLER},
+    ]
+
+
+def _service(name: str, enabled: bool) -> dict:
+    return {"name": f"CyberHound: {'activar' if enabled else 'desactivar'} {name}",
+            "ansible.builtin.systemd_service": {"name": name, "enabled": enabled,
+                                                "state": "started" if enabled else "stopped"}}
+
+
+def _package(name: str) -> dict:
+    return {"name": f"CyberHound: instalar {name}", "ansible.builtin.package": {"name": name, "state": "present"}}
+
+
+def _mode(path: str, mode: str) -> dict:
+    return {"name": f"CyberHound: permisos {mode} en {path}",
+            "ansible.builtin.file": {"path": path, "mode": mode}}
+
+
+def _sysctl(param: str, value: str) -> dict:
+    return {"name": f"CyberHound: {param} = {value}",
+            "ansible.posix.sysctl": {"name": param, "value": value, "sysctl_file": SYSCTL_FILE, "reload": True}}
+
+
+def _only_file(dest: str, deny: str) -> list[dict]:
+    return [{"name": f"CyberHound: solo root en {dest}",
+             "ansible.builtin.copy": {"dest": dest, "content": "root\n", "owner": "root", "mode": "0600"}},
+            {"name": f"CyberHound: quitar {deny}", "ansible.builtin.file": {"path": deny, "state": "absent"}}]
+
+
+def _firewall_ufw() -> list[dict]:
+    # Antes de activar, abrir el puerto SSH por el que entra Ansible: si no, la propia tarea deja
+    # el host inaccesible (el fix local hace lo mismo con los puertos de sshd).
+    return [{"name": "CyberHound: permitir SSH en ufw",
+             "community.general.ufw": {"rule": "allow", "port": "{{ ansible_port | default(22) | string }}",
+                                       "proto": "tcp"}},
+            {"name": "CyberHound: activar ufw (entrada denegada por defecto)",
+             "community.general.ufw": {"state": "enabled", "policy": "deny", "direction": "incoming"}}]
+
+
+_EXACT: dict[str, list[dict]] = {
+    "ssh_protocol1": [{"name": "CyberHound: quitar Protocol 1 de sshd_config",
+                       "ansible.builtin.lineinfile": {"path": SSHD_CONFIG, "regexp": r"^\s*Protocol\s+1",
+                                                      "state": "absent"},
+                       "notify": _SSHD_HANDLER}],
+    "fw_firewalld_inactive": [_service("firewalld", True)],
+    "no_auditd": [_package("auditd"), _service("auditd", True)],
+    "auditd_inactive": [_service("auditd", True)],
+    "apparmor_inactive": [_service("apparmor", True)],
+    "no_aide": [_package("aide")],
+    "aide_db_missing": [
+        {"name": "CyberHound: inicializar la base de datos de AIDE",
+         "ansible.builtin.command": {"cmd": "aideinit -y -f", "creates": "/var/lib/aide/aide.db"}}],
+    "no_unattended_upgrades": [
+        _package("unattended-upgrades"),
+        {"name": "CyberHound: activar las actualizaciones automáticas",
+         "ansible.builtin.copy": {"dest": "/etc/apt/apt.conf.d/20auto-upgrades", "mode": "0644",
+                                  "content": 'APT::Periodic::Update-Package-Lists "1";\n'
+                                             'APT::Periodic::Unattended-Upgrade "1";\n'}}],
+    "no_ntp": [_package("chrony"),
+               {"name": "CyberHound: activar chrony",
+                "ansible.builtin.systemd_service": {
+                    "name": "{{ 'chrony' if ansible_facts.os_family == 'Debian' else 'chronyd' }}",
+                    "enabled": True, "state": "started"}}],
+    "tmp_no_sticky_bit": [_mode("/tmp", "1777")],
+    "ctrlaltdel_enabled": [{"name": "CyberHound: enmascarar ctrl-alt-del.target",
+                            "ansible.builtin.systemd_service": {"name": "ctrl-alt-del.target", "masked": True}}],
+    "core_dumps_enabled": [
+        {"name": "CyberHound: sin volcados de memoria (limits.conf)",
+         "ansible.builtin.blockinfile": {"path": "/etc/security/limits.conf", "marker": "# {mark} CyberHound core",
+                                         "block": "* hard core 0\n* soft core 0"}},
+        _sysctl("fs.suid_dumpable", "0")],
+    "usb_storage_enabled": [
+        {"name": "CyberHound: directorio /etc/modprobe.d",
+         "ansible.builtin.file": {"path": "/etc/modprobe.d", "state": "directory", "mode": "0755"}},
+        {"name": "CyberHound: bloquear el módulo usb-storage",
+         "ansible.builtin.copy": {"dest": "/etc/modprobe.d/cyberhound-usb.conf", "mode": "0644",
+                                  "content": "blacklist usb-storage\ninstall usb-storage /bin/false\n"}}],
+    "no_pam_faillock": [
+        {"name": "CyberHound: pam_faillock en common-auth",
+         "ansible.builtin.lineinfile": {"path": "/etc/pam.d/common-auth", "insertbefore": r"^\s*auth\s",
+                                        "firstmatch": True, "regexp": r"^auth\s+required\s+pam_faillock\.so",
+                                        "line": "auth required pam_faillock.so preauth silent deny=5 unlock_time=600"},
+         "when": "ansible_facts.os_family == 'Debian'"},
+        {"name": "CyberHound: pam_faillock en common-account",
+         "ansible.builtin.lineinfile": {"path": "/etc/pam.d/common-account",
+                                        "line": "account required pam_faillock.so"},
+         "when": "ansible_facts.os_family == 'Debian'"}],
+    "cron_no_restriction": _only_file("/etc/cron.allow", "/etc/cron.deny"),
+    "cron_unrestricted": _only_file("/etc/cron.allow", "/etc/cron.deny"),
+    "at_no_restriction": _only_file("/etc/at.allow", "/etc/at.deny"),
+}
+
+
+def finding_tasks(f: Finding) -> list[dict]:
+    """Tareas Ansible que corrigen el hallazgo, o [] si necesita intervención manual."""
+    fid = (f.id or "").split("::", 1)[-1]
+    from cyberhound.scanners.hardening import KERNEL_PARAMS
+    if fid in _EXACT:
+        return copy.deepcopy(_EXACT[fid])
+    if fid.startswith("ssh_") and fid[4:] in SSH_PARAMS:
+        return _sshd(fid[4:], SSH_PARAMS[fid[4:]])
+    if fid in ("fw_ufw_inactive", "fw_inactive"):
+        return _firewall_ufw()
+    if fid.startswith("kernel_"):
+        name = fid[7:]
+        for param, (value, _sev, _desc) in KERNEL_PARAMS.items():
+            if name in (param, param.replace(".", "_")):
+                return [_sysctl(param, value)]
+        return []
+    if fid.startswith("svc_") and not fid.startswith("svc_listen_all_") and _SAFE_NAME.fullmatch(fid[4:]):
+        return [_service(fid[4:], False)]
+    if fid.startswith("login_defs_") and fid[11:] in LOGIN_DEFS:
+        param = fid[11:]
+        return [{"name": f"CyberHound: login.defs {param}",
+                 "ansible.builtin.lineinfile": {"path": "/etc/login.defs", "regexp": rf"^\s*{param}\s",
+                                                "line": f"{param}\t{LOGIN_DEFS[param]}"}}]
+    if fid in BANNER_FILES:
+        return [{"name": f"CyberHound: banner en {BANNER_FILES[fid]}",
+                 "ansible.builtin.copy": {"dest": BANNER_FILES[fid], "content": BANNER, "mode": "0644"}}]
+    if fid.startswith("passwd_perm_") and fid[12:] in ("passwd", "shadow"):
+        return [_mode(f"/etc/{fid[12:]}", "0640" if fid.endswith("shadow") else "0644")]
+    if fid.startswith("ssh_hostkey_perm_") and (path := _path(f.file_path, ("/etc/ssh/",))):
+        return [_mode(path, "0600")]
+    if fid.startswith("ww_") and (path := _path(f.file_path)):
+        return [_mode(path, "o-w")]
+    if fid.startswith("log_perm_") and (path := _path(f.file_path, ("/var/log/",))):
+        return [_mode(path, "o-r")]
+    if fid.startswith("umask_insecure_") and (path := _path(f.file_path, ("/etc/",))):
+        return [{"name": f"CyberHound: umask 027 en {path}",
+                 "ansible.builtin.replace": {"path": path, "regexp": r"(umask\s+)0?22\b", "replace": r"\g<1>027"}}]
+    if fid.startswith("empty_password_") and _SAFE_USER.fullmatch(fid[15:]):
+        return [{"name": f"CyberHound: bloquear la cuenta sin contraseña {fid[15:]}",
+                 "ansible.builtin.user": {"name": fid[15:], "password_lock": True}}]
+    if fid.startswith("openssh_cve_"):
+        return [{"name": "CyberHound: actualizar openssh-server",
+                 "ansible.builtin.package": {"name": "openssh-server", "state": "latest", "update_cache": True}}]
+    return []
+
+
+def _one_line(text: str, limit: int = 120) -> str:
+    return " ".join(str(text).split())[:limit]
+
+
+def _host_of(f: Finding, local: str) -> str | None:
+    host = (f.source_host or "").strip()
+    if not host or host in ("localhost", "127.0.0.1"):
+        return local
+    return host if valid_target(host) else None
+
+
+def valid_target(target: str) -> bool:
+    try:
+        return ipaddress.ip_address(target).version == 4      # una IPv6 en hosts: se lee como patrones
+    except ValueError:
+        return bool(_SAFE_HOST.fullmatch(target or ""))
+
+
+class _NoAliases(yaml.SafeDumper):
+    def ignore_aliases(self, data) -> bool:
+        return True
+
+
+def build_playbook(findings: list[Finding], target: str = "localhost") -> tuple[str, int, list[Finding]]:
+    """(playbook, tareas, hallazgos que requieren intervención manual).
+
+    Un play por host: los hallazgos remotos se corrigen en el host donde se encontraron
+    (source_host) y los locales en `target`. Playbook vacío si nada se puede automatizar."""
+    if not valid_target(target):
+        raise ValueError(f"Objetivo no válido: {target!r}")
+    plays: dict[str, list[dict]] = {}
+    manual: list[Finding] = []
+    for f in findings:
+        host = _host_of(f, target)
+        tasks = finding_tasks(f) if host else []
+        if not tasks:
+            if f.severity != "info":
+                manual.append(f)
+            continue
+        tag = re.sub(r"[^\w.-]", "_", (f.id or "").split("::", 1)[-1])[:80]
+        plays.setdefault(host, []).extend({**t, "tags": ["cyberhound", tag]} for t in tasks)
+    if not plays:
+        return "", 0, manual
+    doc = []
+    for host, tasks in plays.items():
+        play: dict = {"name": f"CyberHound Pro — remediación en {host}", "hosts": host, "become": True,
+                      "gather_facts": True, "tasks": tasks}
+        if any(t.get("notify") == _SSHD_HANDLER for t in tasks):
+            play["handlers"] = [{"name": _SSHD_HANDLER, "ansible.builtin.systemd_service": {
+                "name": "{{ 'ssh' if ansible_facts.os_family == 'Debian' else 'sshd' }}", "state": "reloaded"}}]
+        doc.append(play)
+    n = sum(len(t) for t in plays.values())
+    header = [f"# CyberHound Pro {__version__} — playbook de remediación",
+              f"# Generado: {datetime.now(UTC).isoformat(timespec='seconds')}",
+              f"# Tareas: {n} en {len(plays)} host(s). Revísalo antes de ejecutarlo; prueba con --check --diff.",
+              "# Colecciones: ansible.posix y community.general (incluidas en el paquete 'ansible')."]
+    if manual:
+        header.append(f"# Requieren intervención manual ({len(manual)}):")
+        header += [f"#   - [{_one_line(f.severity, 10)}] {_one_line(f.title)}"
+                   + (f" ({_one_line(f.source_host, 60)})" if f.source_host else "") for f in manual[:200]]
+    body = yaml.dump(doc, Dumper=_NoAliases, sort_keys=False, allow_unicode=True, width=1000)
+    return "\n".join(header) + "\n---\n" + body, n, manual
+
 
 def generate_playbook(findings: list[Finding], target: str = "localhost") -> str:
-    """
-    Genera un playbook Ansible de remediación a partir de los hallazgos.
-    Solo incluye findings con auto_fix=True.
-    """
-    fixable = [f for f in findings if f.auto_fix]
-    if not fixable:
-        return ""
-
-    tasks = []
-    for f in fixable:
-        task = _finding_to_task(f)
-        if task:
-            tasks.append(task)
-
-    if not tasks:
-        return ""
-
-    tasks_yaml = "\n".join(tasks)
-    return f"""---
-# CyberHound Pro — Playbook de remediación
-# Generado: {datetime.now(UTC).isoformat()}
-# Objetivo: {target}
-# Hallazgos: {len(fixable)} con corrección automática disponible
-
-- name: CyberHound Pro — Remediación de seguridad
-  hosts: {target}
-  become: yes
-  gather_facts: yes
-
-  vars:
-    cyberhound_version: "{__version__}"
-    cyberhound_target: "{target}"
-
-  tasks:
-{tasks_yaml}
-
-  handlers:
-    - name: restart sshd
-      service:
-        name: sshd
-        state: restarted
-
-    - name: reload sysctl
-      command: sysctl --system
-
-    - name: enable ufw
-      ufw:
-        state: enabled
-"""
-
-
-def _finding_to_task(f: Finding) -> str:
-    """Convierte un Finding en una task Ansible."""
-    fid = f.id or ""
-    rem = f.remediation or ""
-
-    indent = "    "
-
-    # SSH fixes
-    if "ssh_PermitRootLogin" in fid:
-        return f"""{indent}- name: "CyberHound: Deshabilitar login root via SSH"
-{indent}  lineinfile:
-{indent}    path: /etc/ssh/sshd_config
-{indent}    regexp: '^#?PermitRootLogin'
-{indent}    line: 'PermitRootLogin no'
-{indent}    state: present
-{indent}  notify: restart sshd"""
-
-    if "ssh_PasswordAuthentication" in fid:
-        return f"""{indent}- name: "CyberHound: Deshabilitar autenticación por contraseña SSH"
-{indent}  lineinfile:
-{indent}    path: /etc/ssh/sshd_config
-{indent}    regexp: '^#?PasswordAuthentication'
-{indent}    line: 'PasswordAuthentication no'
-{indent}    state: present
-{indent}  notify: restart sshd"""
-
-    if "ssh_MaxAuthTries" in fid:
-        return f"""{indent}- name: "CyberHound: Limitar intentos de autenticación SSH"
-{indent}  lineinfile:
-{indent}    path: /etc/ssh/sshd_config
-{indent}    regexp: '^#?MaxAuthTries'
-{indent}    line: 'MaxAuthTries 4'
-{indent}    state: present
-{indent}  notify: restart sshd"""
-
-    if "ssh_X11Forwarding" in fid:
-        return f"""{indent}- name: "CyberHound: Deshabilitar X11 forwarding"
-{indent}  lineinfile:
-{indent}    path: /etc/ssh/sshd_config
-{indent}    regexp: '^#?X11Forwarding'
-{indent}    line: 'X11Forwarding no'
-{indent}    state: present
-{indent}  notify: restart sshd"""
-
-    # Firewall fixes
-    if "fw_ufw_inactive" in fid:
-        return f"""{indent}- name: "CyberHound: Activar UFW"
-{indent}  ufw:
-{indent}    state: enabled
-{indent}    policy: deny
-{indent}  when: ansible_os_family == 'Debian'"""
-
-    if "fw_firewalld_inactive" in fid:
-        return f"""{indent}- name: "CyberHound: Activar firewalld"
-{indent}  service:
-{indent}    name: firewalld
-{indent}    state: started
-{indent}    enabled: yes
-{indent}  when: ansible_os_family == 'RedHat'"""
-
-    # Kernel / sysctl
-    if "kernel_aslr" in fid:
-        return f"""{indent}- name: "CyberHound: Activar ASLR"
-{indent}  sysctl:
-{indent}    name: kernel.randomize_va_space
-{indent}    value: '2'
-{indent}    sysctl_file: /etc/sysctl.d/99-cyberhound.conf
-{indent}    reload: yes"""
-
-    if "kernel_syn_cookies" in fid:
-        return f"""{indent}- name: "CyberHound: Activar SYN cookies"
-{indent}  sysctl:
-{indent}    name: net.ipv4.tcp_syncookies
-{indent}    value: '1'
-{indent}    sysctl_file: /etc/sysctl.d/99-cyberhound.conf
-{indent}    reload: yes"""
-
-    if "kernel_ip_forward" in fid:
-        return f"""{indent}- name: "CyberHound: Deshabilitar IP forwarding"
-{indent}  sysctl:
-{indent}    name: net.ipv4.ip_forward
-{indent}    value: '0'
-{indent}    sysctl_file: /etc/sysctl.d/99-cyberhound.conf
-{indent}    reload: yes"""
-
-    # Auditd no instalado
-    if "no_auditd" in fid:
-        return f"""{indent}- name: "CyberHound: Instalar y activar auditd"
-{indent}  package:
-{indent}    name: auditd
-{indent}    state: present
-{indent}- name: "CyberHound: Activar servicio auditd"
-{indent}  service:
-{indent}    name: auditd
-{indent}    state: started
-{indent}    enabled: yes"""
-
-    # Auditd instalado pero inactivo
-    if "auditd_inactive" in fid:
-        return f"""{indent}- name: "CyberHound: Activar servicio auditd"
-{indent}  service:
-{indent}    name: auditd
-{indent}    state: started
-{indent}    enabled: yes"""
-
-    # Sticky bit en /tmp
-    if "tmp_no_sticky_bit" in fid:
-        return f"""{indent}- name: "CyberHound: Aplicar sticky bit a /tmp"
-{indent}  file:
-{indent}    path: /tmp
-{indent}    mode: '1777'
-{indent}    state: directory"""
-
-    # Restricción de cron (crear cron.allow con solo root)
-    if "cron_no_restriction" in fid or "cron_unrestricted" in fid:
-        return f"""{indent}- name: "CyberHound: Restringir cron a root"
-{indent}  copy:
-{indent}    dest: /etc/cron.allow
-{indent}    content: "root\\n"
-{indent}    mode: '0600'
-{indent}- name: "CyberHound: Eliminar cron.deny"
-{indent}  file:
-{indent}    path: /etc/cron.deny
-{indent}    state: absent"""
-
-    # Restricción de at
-    if "at_no_restriction" in fid:
-        return f"""{indent}- name: "CyberHound: Restringir at a root"
-{indent}  copy:
-{indent}    dest: /etc/at.allow
-{indent}    content: "root\\n"
-{indent}    mode: '0600'
-{indent}- name: "CyberHound: Eliminar at.deny"
-{indent}  file:
-{indent}    path: /etc/at.deny
-{indent}    state: absent"""
-
-    # Umask inseguro (configurar 027 en login.defs)
-    if "umask_insecure" in fid:
-        return f"""{indent}- name: "CyberHound: Establecer UMASK 027 en login.defs"
-{indent}  lineinfile:
-{indent}    path: /etc/login.defs
-{indent}    regexp: '^UMASK'
-{indent}    line: 'UMASK 027'
-{indent}    state: present"""
-
-    # NTP
-    if "no_ntp" in fid:
-        return f"""{indent}- name: "CyberHound: Instalar chrony"
-{indent}  package:
-{indent}    name: chrony
-{indent}    state: present
-{indent}- name: "CyberHound: Activar servicio chrony"
-{indent}  service:
-{indent}    name: chronyd
-{indent}    state: started
-{indent}    enabled: yes"""
-
-    # Banners
-    if "no_banner_issue" in fid:
-        return f"""{indent}- name: "CyberHound: Crear banner /etc/issue"
-{indent}  copy:
-{indent}    dest: /etc/issue
-{indent}    content: |
-{indent}      ***** AVISO DE SEGURIDAD *****
-{indent}      Acceso restringido. Solo usuarios autorizados.
-{indent}      Toda actividad puede ser registrada y auditada.
-{indent}      *******************************
-{indent}    mode: '0644'"""
-
-    # AppArmor
-    if "apparmor_inactive" in fid:
-        return f"""{indent}- name: "CyberHound: Activar AppArmor"
-{indent}  service:
-{indent}    name: apparmor
-{indent}    state: started
-{indent}    enabled: yes
-{indent}  when: ansible_os_family == 'Debian'"""
-
-    # Core dumps
-    if "core_dumps_enabled" in fid:
-        return f"""{indent}- name: "CyberHound: Deshabilitar core dumps"
-{indent}  sysctl:
-{indent}    name: kernel.core_pattern
-{indent}    value: '|/bin/false'
-{indent}    sysctl_file: /etc/sysctl.d/99-cyberhound.conf
-{indent}    reload: yes"""
-
-    # Ctrl+Alt+Del
-    if "ctrlaltdel_enabled" in fid:
-        return f"""{indent}- name: "CyberHound: Deshabilitar Ctrl+Alt+Del"
-{indent}  systemd:
-{indent}    name: ctrl-alt-del.target
-{indent}    masked: yes"""
-
-    # Generic: usar el texto de remediación como comentario informativo
-    if rem:
-        first_line = rem.split("\n")[0][:100]
-        return f"""{indent}- name: "CyberHound: {f.title[:60]}"
-{indent}  debug:
-{indent}    msg: "Remediación manual requerida: {first_line}"
-{indent}  # TODO: implementar remediación automatizada para {f.id}"""
-
-    return ""
+    """Playbook de remediación de los hallazgos ("" si ninguno se puede corregir con Ansible)."""
+    return build_playbook(findings, target)[0]
 
 
 # ── Ejecución local ───────────────────────────────────────────────────────────

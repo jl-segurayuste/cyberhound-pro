@@ -3,8 +3,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import yaml
-
 from cyberhound.core.logging import get_logger
 from cyberhound.core.models import Finding, ScanReport
 
@@ -79,24 +77,16 @@ tr:hover{{background:#21262d}}.meta{{color:#8b949e;font-size:.85rem;margin-botto
 
     @staticmethod
     def ansible_playbook(findings: list[Finding]) -> str:
-        tasks = [
-            {
-                "name": f"[CyberHound] {f.title}",
-                "ansible.builtin.shell": f.remediation.split("\n")[0],
-                "become": True,
-                "tags": [f.category, f.severity],
-            }
-            for f in findings
-            if f.auto_fix and f.remediation
-        ]
-        playbook = [{
-            "name": "CyberHound Pro — Remediación automática",
-            "hosts": "all",
-            "become": True,
-            "gather_facts": True,
-            "tasks": tasks,
-        }]
-        return yaml.dump(playbook, default_flow_style=False, allow_unicode=True)
+        """Playbook descargable: el mismo generador seguro que /api/ansible/run (cyberhound/core/ansible_integration.py).
+
+        Antes ejecutaba la primera línea de la remediación con ansible.builtin.shell y become en
+        todos los hosts; esa remediación la escribe el host auditado."""
+        from cyberhound.core.ansible_integration import build_playbook
+        playbook, _n, manual = build_playbook(findings)
+        if playbook:
+            return playbook
+        return ("# CyberHound Pro: ningún hallazgo se puede corregir automáticamente con Ansible.\n"
+                + "".join(f"#   - {' '.join(f.title.split())[:120]}\n" for f in manual[:200]))
 
 
 def _h(s: str) -> str:
