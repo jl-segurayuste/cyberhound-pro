@@ -149,6 +149,8 @@ async def test_cache_de_hallazgos_no_cruza_tenants(env, monkeypatch):
     monkeypatch.setattr(RemoteAuditor, "apply_fix_remote", fake)
     body = {"finding_id": f.id}
     assert (await env.contoso.post("/api/fix/remote", json=body)).status == 404
+    assert (await env.acme.post("/api/fix/remote", json=body)).status == 403     # fuera de su ámbito
+    await env.sa.patch("/api/tenants/acme", json={"allowed_targets": ["10.0.0.0/24"]})
     assert (await env.acme.post("/api/fix/remote", json=body)).status == 200
 
 
@@ -286,3 +288,34 @@ async def test_token_de_api_de_un_tenant(env):
     assert (await anon.get("/api/config/keys", headers=h)).status == 403        # de la plataforma
     forged = tok.replace("cht_acme.", "cht_contoso.")
     assert (await anon.get("/api/me", headers={"Authorization": f"Bearer {forged}"})).status == 401
+
+
+async def test_ambito_de_analisis_por_organizacion(env):
+    async def ws_error(client, msg):
+        async with client.ws_connect("/ws") as ws:
+            await ws.send_json(msg)
+            return await ws.receive_json()
+
+    web = {"task": "web_headers", "urls": ["http://10.10.0.9"]}
+    msg = await ws_error(env.acme, web)                        # sin ámbito: nada
+    assert msg["type"] == "error" and "permitidos" in msg["text"]
+    assert (await env.acme.patch("/api/tenants/acme", json={"allowed_targets": ["10.10.0.0/24"]})).status == 403
+    r = await env.sa.patch("/api/tenants/acme", json={"allowed_targets": ["10.0.0.0/8"]})
+    assert r.status == 400
+    r = await env.sa.patch("/api/tenants/acme", json={"allowed_targets": ["10.10.0.0/24", "ejemplo-demo.es"]})
+    assert (await r.json())["allowed_targets"] == ["10.10.0.0/24", "ejemplo-demo.es"]
+    msg = await ws_error(env.acme, {"task": "web_headers", "urls": ["http://192.168.1.1"]})
+    assert msg["type"] == "error" and "fuera" in msg["text"]
+    msg = await ws_error(env.acme, {"task": "network", "networks": ""})   # el escáner elegiría las del servidor
+    assert msg["type"] == "error" and "Indica" in msg["text"]
+    msg = await ws_error(env.contoso, web)                     # el ámbito de acme no vale para contoso
+    assert msg["type"] == "error"
+    assert (await env.acme.get("/api/network/discover?networks=192.168.1.0/24")).status == 403
+    assert (await env.acme.get("/api/network/discover")).status == 403
+    assert (await env.acme.post("/api/scan/ldap", json={"uri": "ldap://192.168.1.5"})).status == 403
+    # dentro del ámbito el análisis arranca (no hay servidor en 10.10.0.9: sale info, no error de ámbito)
+    msg = await ws_error(env.acme, web)
+    assert not (msg["type"] == "error" and "permit" in msg["text"]), msg
+    # el superadmin en su plataforma no tiene ámbito
+    msg = await ws_error(env.sa, {"task": "web_headers", "urls": ["http://192.168.1.1"]})
+    assert not (msg["type"] == "error" and "permit" in msg["text"]), msg

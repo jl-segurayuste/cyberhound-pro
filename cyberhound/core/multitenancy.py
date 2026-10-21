@@ -72,6 +72,7 @@ class Tenant:
             "plan":        self.plan,
             "active":      self.active,
             "created_at":  self.created_at,
+            "allowed_targets": self.settings.get("allowed_targets", []),
         }
         if include_key:
             d["api_key"] = self.api_key
@@ -173,6 +174,9 @@ class TenantStore:
         for k in ("name", "admin_email", "plan"):
             if k in kwargs and isinstance(kwargs[k], str):
                 setattr(tenant, k, kwargs[k].strip())
+        if "allowed_targets" in kwargs:
+            from cyberhound.core.scope import parse_scope
+            tenant.settings["allowed_targets"] = parse_scope(kwargs["allowed_targets"])
         self._save()
         return tenant
 

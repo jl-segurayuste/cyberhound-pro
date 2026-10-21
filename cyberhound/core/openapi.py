@@ -342,7 +342,12 @@ ENDPOINT_DOCS: dict[str, dict] = {
     "GET /api/intel/config":   {"summary": "Fuentes de intel con API key configurada", "tags": ["Intel"]},
     # ── Multi-tenant ─────────────────────────────────────────────────────────
     "GET /api/tenants/{slug}":    {"summary": "Detalle de un tenant", "tags": ["MultiTenant"]},
-    "PATCH /api/tenants/{slug}":  {"summary": "Modificar tenant", "tags": ["MultiTenant"]},
+    "PATCH /api/tenants/{slug}":  {"summary": "Modificar tenant (nombre, email, ámbito de análisis)", "tags": ["MultiTenant"],
+                                   "requestBody": {"properties": {
+                                       "name": {"type": "string"}, "admin_email": {"type": "string"},
+                                       "allowed_targets": {"type": "array", "items": {"type": "string"},
+                                                           "description": "Redes CIDR, IPs y dominios que la "
+                                                                          "organización puede analizar; vacío = ninguno"}}}},
     "DELETE /api/tenants/{slug}": {"summary": "Dar de baja un tenant (sus datos se archivan)", "tags": ["MultiTenant"]},
     "POST /api/tenants/{slug}/rotate-key": {"summary": "Nueva API key del tenant (la de sus agentes)", "tags": ["MultiTenant"]},
     "GET /api/tenant/agent-key": {"summary": "API key de la organización para sus agentes (su admin)", "tags": ["MultiTenant"]},

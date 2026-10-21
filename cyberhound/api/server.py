@@ -48,6 +48,7 @@ from cyberhound.core.multitenancy import (
 from cyberhound.core.notifications import NotificationConfig, NotificationManager
 from cyberhound.core.paths import YARA_DIR
 from cyberhound.core.scheduler import Scheduler, build_scheduler
+from cyberhound.core.scope import Scope, ws_targets
 from cyberhound.core.security import (
     CsrfProtection,
     InputValidator,
@@ -662,6 +663,10 @@ class CyberHoundServer:
                                                   "solo lo puede lanzar el administrador de la plataforma"})
             await ws.close()
             return ws
+        if err := await self._out_of_scope(ws_targets(msg)):
+            await send({"type": "error", "text": err})
+            await ws.close()
+            return ws
         audit_log.scan_started(msg.get("target", "localhost"), task, user)
 
         # Crear scan en BD
@@ -708,6 +713,23 @@ class CyberHoundServer:
 
         await ws.close()
         return ws
+
+    async def _out_of_scope(self, targets: list[str] | None) -> str | None:
+        """En una organización (multi-tenant), motivo por el que algún objetivo queda fuera de su ámbito.
+
+        targets=None: la tarea no actúa sobre la red. Lista vacía: el escáner elegiría solo
+        (p. ej. las redes del propio servidor), y eso a una organización no se le permite."""
+        slug = current_tenant.get()
+        if targets is None or not self.cfg.multi_tenant.enabled or slug == DEFAULT_TENANT:
+            return None
+        tenant = self.tenants.get(slug)
+        allowed = (tenant.settings.get("allowed_targets") if tenant else None) or []
+        if not allowed:
+            return ("Esta organización todavía no tiene redes ni dominios permitidos: "
+                    "pídeselo al administrador de la plataforma")
+        if not targets:
+            return "Indica qué redes o equipos analizar (dentro del ámbito de la organización)"
+        return await Scope(allowed).check_all(targets)
 
     async def _emit_findings(
         self, findings: list[Finding], ws_id: str, send, scan_id: int
@@ -1090,6 +1112,8 @@ class CyberHoundServer:
             host = finding.source_host or body.get("host", "")
             if not host or host in ("localhost", "127.0.0.1"):
                 return web.json_response({"ok": False, "error": "El hallazgo no es de un host remoto"}, status=400)
+            if err := await self._out_of_scope([host]):
+                return web.json_response({"ok": False, "error": err}, status=403)
             from cyberhound.scanners.ssh_audit import RemoteAuditor, SSHCredentials
             creds = SSHCredentials(
                 username=body.get("ssh_user", self.cfg.scan.ssh_default_user),
@@ -1248,6 +1272,8 @@ class CyberHoundServer:
         try:
             networks_raw = request.rel_url.query.get("networks", "")
             networks = [n.strip() for n in networks_raw.split(",") if n.strip()] or None
+            if err := await self._out_of_scope(networks or []):
+                return web.json_response({"error": err}, status=403)
             from cyberhound.scanners.network import NetworkScanner
             ips = await NetworkScanner().discover_hosts(networks=networks)
             return web.json_response({"hosts": ips})
@@ -2272,6 +2298,8 @@ class CyberHoundServer:
         try:
             body   = await _read_json(request)
             user   = request.get("auth_user", "unknown")
+            if err := await self._out_of_scope([body.get("uri", "")]):
+                return web.json_response({"error": err}, status=403)
             from cyberhound.scanners.ldap_audit import LDAPAuditor
             scan_id = await self.db.create_scan("ldap", triggered_by=user)
             findings = await LDAPAuditor.full_audit(
