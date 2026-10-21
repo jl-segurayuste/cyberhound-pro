@@ -2121,7 +2121,7 @@ async function load2FAStatus() {
     const disableBtn = document.getElementById('2fa-disable-btn');
     if (d.enabled) {
       if (statusBox) statusBox.innerHTML = `<div style="color:var(--green);font-weight:600">✓ 2FA activado para <b>${esc(d.user)}</b></div>`;
-      if (disableBtn) disableBtn.style.display = '';
+      if (disableBtn) disableBtn.style.display = 'inline-flex';
     } else {
       if (statusBox) statusBox.innerHTML = `<div style="color:var(--text2)">⚠ 2FA no activado — tu cuenta solo está protegida por contraseña</div>`;
       if (disableBtn) disableBtn.style.display = 'none';
@@ -2174,13 +2174,18 @@ async function activate2FA() {
 }
 
 async function disable2FA() {
+  const code = document.getElementById('2fa-disable-code')?.value.trim();
+  if (!code) { toast('Escribe un código de tu app (o uno de recuperación) para desactivarlo', 'error'); return; }
   if (!confirm('¿Seguro que quieres desactivar el 2FA? Tu cuenta quedará menos protegida.')) return;
-  const r = await fetch('/api/auth/2fa/disable', { method: 'POST' });
+  const r = await fetch('/api/auth/2fa/disable', {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({code}),
+  });
   const d = await r.json();
   if (d.ok) {
     toast('2FA desactivado');
+    document.getElementById('2fa-disable-code').value = '';
     await load2FAStatus();
-  }
+  } else toast('Error: ' + (d.error || r.status), 'error');
 }
 
 // ── YARA ──────────────────────────────────────────────────────────────────────

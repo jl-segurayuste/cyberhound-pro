@@ -260,3 +260,29 @@ async def test_sesion_de_tenant_no_vale_si_se_desactiva_el_modo(env):
     env.server.cfg.multi_tenant.enabled = False
     assert (await env.acme.get("/api/history")).status == 401
     assert (await env.sa.get("/api/history")).status == 200
+
+
+async def test_cuenta_del_superadmin_mirando_otra_organizacion(env):
+    """Su sesión, tokens y 2FA viven en "default" aunque esté viendo acme."""
+    await env.sa.post("/api/tenant/switch", json={"slug": "acme"})
+    assert (await env.sa.get("/api/me")).status == 200
+    assert len(await (await env.sa.get("/api/sessions")).json()) == 1
+    tok = await (await env.sa.post("/api/tokens", json={"name": "ci"})).json()
+    assert tok["token"].startswith("cht_default.")
+    assert (await env.sa.get("/api/auth/2fa/status")).status == 200
+    # la auditoría de lo hecho en acme queda en acme
+    await env.sa.post("/api/suppressions", json={"pattern": "p_*", "reason": "r"})
+    acme_ev = await (await env.acme.get("/api/audit")).json()
+    assert not any(e["action"] == "token_create" for e in acme_ev)
+
+
+async def test_token_de_api_de_un_tenant(env):
+    tok = (await (await env.acme.post("/api/tokens", json={"name": "ci"})).json())["token"]
+    assert tok.startswith("cht_acme.")
+    anon = await env.login("nadie", "x")
+    h = {"Authorization": f"Bearer {tok}"}
+    me = await (await anon.get("/api/me", headers=h)).json()
+    assert me["tenant"] == "acme" and me["superadmin"] is False
+    assert (await anon.get("/api/config/keys", headers=h)).status == 403        # de la plataforma
+    forged = tok.replace("cht_acme.", "cht_contoso.")
+    assert (await anon.get("/api/me", headers={"Authorization": f"Bearer {forged}"})).status == 401

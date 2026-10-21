@@ -18,9 +18,11 @@ from __future__ import annotations
 
 import fnmatch
 import json
+import re
 import time
 from datetime import UTC, datetime, timedelta
 
+from cyberhound.core.accounts_db import PG_ACCOUNTS, AccountsMixin
 from cyberhound.core.logging import get_logger
 from cyberhound.core.models import Finding
 
@@ -113,7 +115,14 @@ CREATE INDEX IF NOT EXISTS idx_scans_started_at  ON scans(started_at);
 CREATE INDEX IF NOT EXISTS idx_scans_type        ON scans(scan_type);
 """
 
-DB_VERSION = 3
+DB_VERSION = 6
+
+# Migraciones incrementales (idempotentes) sobre BDs existentes, como en SQLite: antes solo
+# había un ALTER suelto y una tabla o columna nueva no llegaba a las instalaciones antiguas.
+PG_MIGRATIONS: list[tuple[int, str]] = [
+    (4, "ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_last_counter INTEGER"),
+    (6, PG_ACCOUNTS),
+]
 
 
 def _now() -> str:
@@ -124,7 +133,7 @@ def _days_ago(days: int) -> str:
     return (datetime.now(UTC) - timedelta(days=days)).isoformat()
 
 
-class DatabasePG:
+class DatabasePG(AccountsMixin):
     """
     Base de datos PostgreSQL con la misma interfaz que Database (SQLite).
     Usa asyncpg para máximo rendimiento.
@@ -159,25 +168,38 @@ class DatabasePG:
         )
         async with self._pool.acquire() as conn:
             await conn.execute(SCHEMA_PG)
-            # `CREATE TABLE IF NOT EXISTS` no altera una tabla `users` que ya
-            # existiera de un despliegue anterior a esta columna -- a
-            # diferencia de database.py (SQLite), este backend no tiene lista
-            # de migraciones incrementales. `ADD COLUMN IF NOT EXISTS` es
-            # idempotente y no requiere una.
-            await conn.execute(
-                "ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_last_counter INTEGER"
-            )
-            version = await conn.fetchval("SELECT MAX(version) FROM schema_version")
-            if not version or version < DB_VERSION:
-                await conn.execute(
-                    "INSERT INTO schema_version VALUES ($1, $2) ON CONFLICT DO NOTHING",
-                    DB_VERSION, _now(),
-                )
+            current = await conn.fetchval("SELECT MAX(version) FROM schema_version") or 0
+            for version, sql in PG_MIGRATIONS:
+                if current < version:
+                    async with conn.transaction():
+                        await conn.execute(sql)
+                        await conn.execute("INSERT INTO schema_version VALUES ($1, $2) ON CONFLICT DO NOTHING",
+                                           version, _now())
+                    logger.info("PostgreSQL: migración v%d aplicada", version)
+                    current = version
         logger.info("PostgreSQL inicializado: %s", self.url.split("@")[-1])
 
     async def close(self) -> None:
         if self._pool:
             await self._pool.close()
+
+    @staticmethod
+    def _pg(sql: str) -> str:
+        """SQL con ? (estilo SQLite) → $1, $2… (asyncpg)."""
+        n = iter(range(1, sql.count("?") + 1))
+        return re.sub(r"\?", lambda _m: f"${next(n)}", sql)
+
+    async def _run(self, sql: str, *args) -> int:
+        async with self._pool.acquire() as conn:
+            status = await conn.execute(self._pg(sql), *args)
+        tail = status.rsplit(" ", 1)[-1]
+        return int(tail) if tail.isdigit() else 0
+
+    async def _rows(self, sql: str, *args) -> list[dict]:
+        return await self._fetch(self._pg(sql), *args)
+
+    async def _val(self, sql: str, *args):
+        return await self._fetchval(self._pg(sql), *args)
 
     async def _exec(self, query: str, *args) -> None:
         async with self._pool.acquire() as conn:

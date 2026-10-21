@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import base64
 import secrets
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import jwt  # PyJWT
 from aiohttp import web
@@ -86,15 +86,15 @@ class AuthConfig:
         # KDF salado (PBKDF2); verifica también hashes SHA-256 antiguos.
         return passwords.verify_password(password, self.password_hash or "")
 
-    def issue_jwt(self, username: str, tenant: str = DEFAULT_TENANT) -> str:
+    def issue_jwt(self, username: str, tenant: str = DEFAULT_TENANT, jti: str | None = None) -> str:
         payload = {
             "sub": username,
             # Organización de la sesión (multi-tenant); la fija el login y nadie la puede cambiar
             "tenant": tenant,
             "iat": datetime.utcnow(),
             "exp": datetime.utcnow() + self.token_ttl,
-            # Nonce para invalidar tokens individuales si es necesario
-            "jti": secrets.token_hex(8),
+            # Id de la sesión (tabla sessions): cerrar sesión o cambiar la contraseña la revoca
+            "jti": jti or secrets.token_hex(16),
         }
         return jwt.encode(payload, self.secret, algorithm="HS256")
 
@@ -149,6 +149,53 @@ class AuthConfig:
         if payload.get("purpose") != "pending_2fa":
             return None
         return payload.get("sub")
+
+
+API_TOKEN_PREFIX = "cht_"
+_ROLE_ORDER = {"viewer": 0, "operator": 1, "admin": 2}
+
+
+def make_api_token(tenant: str) -> tuple[str, str, str]:
+    """(token completo, id, hash del secreto). Formato: cht_<tenant>.<id>.<secreto>."""
+    token_id, secret = secrets.token_hex(6), secrets.token_urlsafe(32)
+    return f"{API_TOKEN_PREFIX}{tenant}.{token_id}.{secret}", token_id, _hash_secret(secret)
+
+
+def _hash_secret(secret: str) -> str:
+    import hashlib
+    return hashlib.sha256(secret.encode()).hexdigest()   # 256 bits aleatorios: no hace falta un KDF lento
+
+
+def cap_role(role: str, token_role: str | None) -> str:
+    """El rol efectivo con un token nunca supera al del usuario."""
+    if not token_role:
+        return role
+    return min(role, token_role, key=lambda r: _ROLE_ORDER.get(r, -1))
+
+
+async def _verify_api_token(request: web.Request, raw: str) -> str | None:
+    try:
+        tenant, token_id, secret = raw[len(API_TOKEN_PREFIX):].split(".", 2)
+    except ValueError:
+        return None
+    server = request.app.get("server")
+    if server is None or not await _open_tenant(server, tenant):
+        return None
+    ctx = current_tenant.set(tenant)
+    try:
+        row = await server.db.get_api_token(token_id)
+        if not row or not secrets.compare_digest(row["token_hash"], _hash_secret(secret)):
+            return None
+        if row.get("expires_at") and datetime.fromisoformat(row["expires_at"]) <= datetime.now(UTC):
+            return None
+        last = row.get("last_used")
+        if not last or datetime.now(UTC) - datetime.fromisoformat(last) > timedelta(minutes=1):
+            await server.db.touch_api_token(token_id)
+    finally:
+        current_tenant.reset(ctx)
+    request["auth_user"], request["auth_tenant"] = row["username"], tenant
+    request["auth_token_id"], request["auth_token_role"] = token_id, row["role"]
+    return row["username"]
 
 
 def _via_proxy(request: web.Request) -> bool:
@@ -243,6 +290,15 @@ async def auth_middleware(request: web.Request, handler):
         request["auth_user"] = creds[0]
         return await handler(request)
 
+    # Token de API ("Authorization: Bearer cht_…"), para scripts y CI
+    bearer = request.headers.get(AUTH_HEADER, "")
+    if bearer.startswith("Bearer " + API_TOKEN_PREFIX):
+        user = await _verify_api_token(request, bearer[7:])
+        if not user:
+            audit_log.auth_failure(_get_real_ip(request), "Token de API inválido, revocado o caducado")
+            raise web.HTTPUnauthorized(reason="Token de API inválido")
+        return await handler(request)
+
     # Modo JWT
     token = _extract_token(request)
     if not token:
@@ -263,6 +319,7 @@ async def auth_middleware(request: web.Request, handler):
     audit_log.auth_success(_get_real_ip(request), payload["sub"])
     request["auth_user"] = payload["sub"]
     request["auth_tenant"] = payload.get("tenant", DEFAULT_TENANT)
+    request["auth_jti"] = payload.get("jti")   # rbac_middleware comprueba que la sesión siga viva
     return await handler(request)
 
 
@@ -382,6 +439,7 @@ def setup_auth_routes(app: web.Application, cfg: AuthConfig) -> None:
             if not ok:
                 blocked, block_time = await _login_rate_limiter.record_failure(ip)
                 audit_log.auth_failure(ip, f"2FA incorrecto para '{pending_user}'")
+                await _audit(server, pending_tenant, "login", pending_user, ip, "código 2FA incorrecto", ok=False)
                 if blocked:
                     response = web.HTTPFound(
                         f"/login?error=Cuenta+bloqueada+{block_time}s+por+múltiples+intentos."
@@ -391,7 +449,7 @@ def setup_auth_routes(app: web.Application, cfg: AuthConfig) -> None:
                 raise web.HTTPFound("/login?error=Código+de+verificación+incorrecto.")
 
             await _login_rate_limiter.record_success(ip)
-            token = cfg.issue_jwt(pending_user, pending_tenant)
+            token = await _start_session(server, cfg, request, pending_user, pending_tenant)
             audit_log.auth_success(ip, pending_user)
             response = web.HTTPFound("/")
             response.set_cookie(
@@ -423,6 +481,8 @@ def setup_auth_routes(app: web.Application, cfg: AuthConfig) -> None:
         if not valid:
             blocked, block_time = await _login_rate_limiter.record_failure(ip)
             audit_log.auth_failure(ip, f"Login fallido para '{username}'")
+            await _audit(server, tenant if tenant_ok else DEFAULT_TENANT, "login", username, ip,
+                         "credenciales incorrectas" if tenant_ok else f"organización desconocida: {tenant}", ok=False)
             if blocked:
                 raise web.HTTPFound(
                     f"/login?error=Cuenta+bloqueada+{block_time}s+por+múltiples+intentos."
@@ -460,7 +520,7 @@ def setup_auth_routes(app: web.Application, cfg: AuthConfig) -> None:
             return response
 
         # ── Login exitoso (sin 2FA) ──────────────────────────────────────────
-        token = cfg.issue_jwt(username, tenant)
+        token = await _start_session(server, cfg, request, username, tenant)
         audit_log.auth_success(ip, username)
 
         response = web.HTTPFound("/")
@@ -476,6 +536,18 @@ def setup_auth_routes(app: web.Application, cfg: AuthConfig) -> None:
         return response
 
     async def logout(request: web.Request) -> web.Response:
+        # La sesión se revoca en el servidor: la cookie sola ya no vale aunque alguien la copiara
+        payload = cfg.verify_jwt(request.cookies.get(AUTH_COOKIE, "")) if request.cookies.get(AUTH_COOKIE) else None
+        server = request.app.get("server")
+        if payload and payload.get("jti") and server is not None:
+            tenant = payload.get("tenant", DEFAULT_TENANT)
+            if await _open_tenant(server, tenant):
+                ctx = current_tenant.set(tenant)
+                try:
+                    await server.db.revoke_session(payload["jti"])
+                finally:
+                    current_tenant.reset(ctx)
+                await _audit(server, tenant, "logout", payload.get("sub", ""), _get_real_ip(request))
         response = web.HTTPFound("/login")
         response.del_cookie(AUTH_COOKIE)
         response.del_cookie(PENDING_2FA_COOKIE)
@@ -500,6 +572,35 @@ def setup_auth_routes(app: web.Application, cfg: AuthConfig) -> None:
 def _mt_enabled(server) -> bool:
     cfg = getattr(server, "cfg", None)
     return bool(cfg is not None and cfg.multi_tenant.enabled)
+
+
+async def _start_session(server, cfg: AuthConfig, request: web.Request, username: str, tenant: str) -> str:
+    """Emite el JWT y registra su sesión (revocable) en la BD del tenant."""
+    jti = secrets.token_hex(16)
+    token = cfg.issue_jwt(username, tenant, jti=jti)
+    db = getattr(server, "db", None)
+    if db is not None and hasattr(db, "create_session"):
+        ctx = current_tenant.set(tenant)
+        try:
+            await db.create_session(jti, username, (datetime.now(UTC) + cfg.token_ttl).isoformat(),
+                                    _get_real_ip(request), request.headers.get("User-Agent", ""))
+        finally:
+            current_tenant.reset(ctx)
+    await _audit(server, tenant, "login", username, _get_real_ip(request))
+    return token
+
+
+async def _audit(server, tenant: str, action: str, username: str, ip: str, detail: str = "", ok: bool = True):
+    db = getattr(server, "db", None)
+    if db is None or not hasattr(db, "add_audit_event"):
+        return
+    ctx = current_tenant.set(tenant)
+    try:
+        await db.add_audit_event(action, username, ip, detail=detail, ok=ok)
+    except Exception as e:  # noqa: BLE001 — la auditoría nunca rompe un login
+        logger.warning("No se pudo registrar el evento de auditoría: %s", e)
+    finally:
+        current_tenant.reset(ctx)
 
 
 async def _open_tenant(server, tenant: str) -> bool:

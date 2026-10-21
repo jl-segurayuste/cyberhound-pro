@@ -20,13 +20,14 @@ from pathlib import Path
 
 import aiosqlite
 
+from cyberhound.core.accounts_db import SQLITE_ACCOUNTS, AccountsMixin
 from cyberhound.core.logging import get_logger
 from cyberhound.core.models import Finding
 from cyberhound.core.paths import DATA_DIR
 
 logger = get_logger("database")
 
-DB_VERSION = 4
+DB_VERSION = 6
 
 # Migraciones incrementales — se aplican en orden sobre BDs existentes
 MIGRATIONS: list[tuple[int, str]] = [
@@ -47,6 +48,8 @@ MIGRATIONS: list[tuple[int, str]] = [
     (5, """
         ALTER TABLE users ADD COLUMN totp_last_counter INTEGER;
     """),
+    # Sesiones revocables, tokens de API y eventos de auditoría (cyberhound/core/accounts_db.py)
+    (6, SQLITE_ACCOUNTS),
 ]
 DEFAULT_DB_PATH = DATA_DIR / "cyberhound.db"
 
@@ -139,6 +142,8 @@ CREATE INDEX IF NOT EXISTS idx_findings_severity ON findings(severity);
 CREATE INDEX IF NOT EXISTS idx_scans_started_at  ON scans(started_at);
 CREATE INDEX IF NOT EXISTS idx_scans_type        ON scans(scan_type);
 """
+SCHEMA += SQLITE_ACCOUNTS
+
 
 
 @dataclass
@@ -170,10 +175,29 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
-class Database:
+class Database(AccountsMixin):
     def __init__(self, path: Path = DEFAULT_DB_PATH) -> None:
         self.path = path
         self.path.parent.mkdir(parents=True, exist_ok=True)
+
+    # ── SQL genérico (lo usa AccountsMixin) ───────────────────────────────────
+
+    async def _run(self, sql: str, *args) -> int:
+        async with aiosqlite.connect(str(self.path)) as db:
+            cur = await db.execute(sql, args)
+            await db.commit()
+            return cur.rowcount
+
+    async def _rows(self, sql: str, *args) -> list[dict]:
+        async with aiosqlite.connect(str(self.path)) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(sql, args) as cur:
+                return [dict(r) for r in await cur.fetchall()]
+
+    async def _val(self, sql: str, *args):
+        async with aiosqlite.connect(str(self.path)) as db, db.execute(sql, args) as cur:
+            row = await cur.fetchone()
+            return row[0] if row else None
 
     async def init(self) -> None:
         async with aiosqlite.connect(str(self.path)) as db:
