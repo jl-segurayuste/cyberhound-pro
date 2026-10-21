@@ -309,70 +309,148 @@ import json, os, re, shutil, stat, subprocess, sys
 def run(cmd):
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
     return r.returncode == 0, (r.stderr or r.stdout).strip()[:300]
-def done(ok, msg=""):
-    print(json.dumps({"ok": ok, "msg": msg})); sys.exit(0)
-act = A["action"]
-if act == "ssh_param":
-    path = "/etc/ssh/sshd_config"; old = open(path).read()
-    line = A["param"] + " " + A["value"]
-    pat = re.compile(r"^\\s*" + A["param"] + r"\\s+.*$", re.M | re.I)
-    new = pat.sub(line, old) if pat.search(old) else old.rstrip("\\n") + "\\n" + line + "\\n"
-    shutil.copy2(path, path + ".cyberhound.bak")
+def done(ok, msg="", before=None):
+    print(json.dumps({"ok": ok, "msg": msg, "before": before})); sys.exit(0)
+def sshd_apply(new, old, before):
+    path = "/etc/ssh/sshd_config"
     open(path, "w").write(new)
     ok, err = run(["sshd", "-t"]) if shutil.which("sshd") else run(["/usr/sbin/sshd", "-t"])
     if not ok:
         open(path, "w").write(old); done(False, "sshd -t rechaza el cambio, restaurado: " + err)
     for unit in ("ssh", "sshd"):
         if run(["systemctl", "reload", unit])[0]:
-            done(True)
-    done(True, "aplicado; recarga sshd a mano")
+            done(True, "", before)
+    done(True, "aplicado; recarga sshd a mano", before)
+act = A["action"]
+if act in ("ssh_param", "ssh_param_undo"):
+    path = "/etc/ssh/sshd_config"; old = open(path).read()
+    pat = re.compile(r"^\\s*" + re.escape(A["param"]) + r"\\s+.*$", re.M | re.I)
+    m = pat.search(old)
+    if act == "ssh_param":
+        line = A["param"] + " " + A["value"]
+        new = pat.sub(line, old, count=1) if m else old.rstrip("\\n") + "\\n" + line + "\\n"
+        shutil.copy2(path, path + ".cyberhound.bak")
+        sshd_apply(new, old, {"line": m.group(0) if m else None})
+    if A.get("line") is None:
+        new = pat.sub("", old, count=1).replace("\\n\\n\\n", "\\n\\n") if m else old
+    else:
+        new = pat.sub(lambda _m: A["line"], old, count=1) if m else old.rstrip("\\n") + "\\n" + A["line"] + "\\n"
+    sshd_apply(new, old, None)
 if act == "ufw_enable":
+    was_active = "Status: active" in subprocess.run(["ufw", "status"], capture_output=True, text=True).stdout
     ports = re.findall(r"^\\s*Port\\s+(\\d+)", open("/etc/ssh/sshd_config").read(), re.M) or ["22"]
     for p in ports:
         run(["ufw", "allow", p + "/tcp"])
-    done(*run(["ufw", "--force", "enable"]))
-if act == "sysctl":
+    ok, err = run(["ufw", "--force", "enable"])
+    done(ok, err, {"active": was_active})
+if act == "ufw_disable":
+    done(*run(["ufw", "--force", "disable"]))
+if act in ("sysctl", "sysctl_undo"):
+    conf = "/etc/sysctl.d/99-cyberhound.conf"
+    cur = open(conf).read() if os.path.exists(conf) else ""
+    if act == "sysctl":
+        prev = subprocess.run(["sysctl", "-n", A["param"]], capture_output=True, text=True).stdout.strip()
+        ok, err = run(["sysctl", "-w", A["param"] + "=" + A["value"]])
+        added = False
+        if ok and A["param"] not in cur:
+            open(conf, "a").write(A["param"] + " = " + A["value"] + "\\n"); added = True
+        done(ok, err, {"value": prev, "conf_added": added})
     ok, err = run(["sysctl", "-w", A["param"] + "=" + A["value"]])
-    if ok:
-        conf = "/etc/sysctl.d/99-cyberhound.conf"
-        cur = open(conf).read() if os.path.exists(conf) else ""
-        if A["param"] not in cur:
-            open(conf, "a").write(A["param"] + " = " + A["value"] + "\\n")
+    if ok and A.get("conf_added"):
+        keep = [l for l in cur.splitlines(True) if not re.match(r"^\\s*" + re.escape(A["param"]) + r"\\s*=", l)]
+        open(conf, "w").write("".join(keep))
     done(ok, err)
 if act == "svc_disable":
-    done(*run(["systemctl", "disable", "--now", A["svc"]]))
-if act == "chmod_ow":
+    q = lambda *c: subprocess.run(["systemctl", *c, A["svc"]], capture_output=True, text=True).stdout.strip()
+    before = {"active": q("is-active") == "active", "enabled": q("is-enabled") == "enabled"}
+    ok, err = run(["systemctl", "disable", "--now", A["svc"]])
+    done(ok, err, before)
+if act == "svc_undo":
+    if A.get("enabled"):
+        ok, err = run(["systemctl", "enable", A["svc"]])
+        if not ok: done(False, err)
+    if A.get("active"):
+        ok, err = run(["systemctl", "start", A["svc"]])
+        if not ok: done(False, err)
+    done(True)
+if act in ("chmod_ow", "chmod_restore"):
     fd = os.open(A["path"], os.O_RDONLY | os.O_NOFOLLOW)
     st = os.fstat(fd)
     if not stat.S_ISREG(st.st_mode):
         done(False, "no es un fichero regular")
-    os.fchmod(fd, stat.S_IMODE(st.st_mode) & ~0o002); done(True)
+    mode = stat.S_IMODE(st.st_mode)
+    os.fchmod(fd, mode & ~0o002 if act == "chmod_ow" else A["mode"])
+    done(True, "", {"mode": mode} if act == "chmod_ow" else None)
 done(False, "acción desconocida")
 '''
+
+    @staticmethod
+    def undo_action(action: dict, before) -> dict | None:
+        """Acción que deshace `action` a partir del estado previo que devolvió el host.
+
+        `before` viene del host remoto, así que se valida aquí: lo que se guarda y se vuelve a
+        enviar son solo valores con forma conocida, no lo que el host quiera."""
+        if not isinstance(before, dict):
+            return None
+        act = action.get("action")
+        if act == "ssh_param":
+            line = before.get("line")
+            if line is not None and not (isinstance(line, str) and len(line) < 200 and re.fullmatch(
+                    r"\s*" + re.escape(action["param"]) + r"\s+[\w .,:@/=+-]*", line, re.I)):
+                return None
+            return {"action": "ssh_param_undo", "param": action["param"], "line": line}
+        if act == "ufw_enable":
+            return None if before.get("active") is not False else {"action": "ufw_disable"}
+        if act == "sysctl":
+            value = before.get("value")
+            if not (isinstance(value, str) and re.fullmatch(r"[\w .:/-]{1,100}", value)):
+                return None
+            return {"action": "sysctl_undo", "param": action["param"], "value": " ".join(value.split()),
+                    "conf_added": before.get("conf_added") is True}
+        if act == "svc_disable":
+            return {"action": "svc_undo", "svc": action["svc"], "active": before.get("active") is True,
+                    "enabled": before.get("enabled") is True}
+        if act == "chmod_ow":
+            mode = before.get("mode")
+            if not (isinstance(mode, int) and not isinstance(mode, bool) and 0 <= mode <= 0o7777):
+                return None
+            return {"action": "chmod_restore", "path": action["path"], "mode": mode}
+        return None
 
     @classmethod
     def _fix_payload(cls, action: dict) -> str:
         # repr() de un str es un literal Python válido: la acción viaja como dato, no como código
         return f"A = __import__('json').loads({json.dumps(action)!r})\n" + cls.REMOTE_FIX_SCRIPT
 
-    async def apply_fix_remote(self, host: str, finding: Finding) -> tuple[bool, str]:
-        """Aplica en el host remoto la corrección de un hallazgo de su auditoría."""
-        action = self.remote_fix_action(finding)
-        if action is None:
-            return False, f"Sin corrección remota automática para {finding.id}"
+    async def _run_remote_action(self, host: str, action: dict) -> dict:
         try:
             async with asyncssh.connect(host, **self.creds.to_asyncssh_opts()) as conn:
                 r = await conn.run(await self._python_cmd(conn), input=self._fix_payload(action), timeout=90)
                 out = (r.stdout or "").strip().splitlines()
                 res = json.loads(out[-1]) if out else {"ok": False, "msg": (r.stderr or "")[:300]}
-                if res.get("ok"):
-                    logger.info("Fix remoto aplicado en %s: %s", host, action)
-                else:
-                    logger.error("Fix remoto falló en %s: %s", host, res.get("msg"))
-                return bool(res.get("ok")), res.get("msg", "")
         except Exception as e:
-            logger.error("Error aplicando fix remoto en %s: %s", host, e)
-            return False, str(e)
+            logger.error("Error en acción remota en %s: %s", host, e)
+            return {"ok": False, "msg": str(e)}
+        if res.get("ok"):
+            logger.info("Acción remota en %s: %s", host, action)
+        else:
+            logger.error("Acción remota falló en %s: %s", host, res.get("msg"))
+        return res
+
+    async def apply_fix_remote(self, host: str, finding: Finding) -> tuple[bool, str, dict | None]:
+        """Aplica en el host remoto la corrección de un hallazgo de su auditoría.
+
+        Devuelve (ok, mensaje, acción para deshacerla o None si no se puede deshacer)."""
+        action = self.remote_fix_action(finding)
+        if action is None:
+            return False, f"Sin corrección remota automática para {finding.id}", None
+        res = await self._run_remote_action(host, action)
+        ok = bool(res.get("ok"))
+        return ok, res.get("msg", ""), self.undo_action(action, res.get("before")) if ok else None
+
+    async def undo_fix_remote(self, host: str, undo: dict) -> tuple[bool, str]:
+        res = await self._run_remote_action(host, undo)
+        return bool(res.get("ok")), res.get("msg", "")
 
     @classmethod
     async def scan_multiple(

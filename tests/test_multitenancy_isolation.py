@@ -147,7 +147,7 @@ async def test_cache_de_hallazgos_no_cruza_tenants(env, monkeypatch):
     from cyberhound.scanners.ssh_audit import RemoteAuditor
 
     async def fake(self, host, finding):
-        return True, ""
+        return True, "", None
     monkeypatch.setattr(RemoteAuditor, "apply_fix_remote", fake)
     body = {"finding_id": f.id}
     assert (await env.contoso.post("/api/fix/remote", json=body)).status == 404
@@ -405,3 +405,30 @@ async def test_analisis_programados_por_organizacion(env, monkeypatch):
     assert (await env.acme.patch(f"/api/schedules/{sid}", json={"enabled": False})).status == 200
     assert await srv._schedules_tick(datetime(2026, 10, 23, 3, 0, 10)) == []
     assert (await env.acme.delete(f"/api/schedules/{sid}")).status == 200
+
+
+async def test_deshacer_fix_remoto_solo_en_su_organizacion(env, monkeypatch):
+    from cyberhound.scanners.ssh_audit import RemoteAuditor
+    await env.sa.patch("/api/tenants/acme", json={"allowed_targets": ["10.0.0.0/24"]})
+    f = Finding(id="10.0.0.9::svc_telnet", category="svc", severity="high", title="t",
+                description="", remediation="r", auto_fix=True, source_host="10.0.0.9")
+    env.server._findings_cache["acme:conexion"] = [f]
+    calls = []
+
+    async def fake(self, host, action):
+        calls.append((host, action))
+        return {"ok": True, "msg": "", "before": {"active": True, "enabled": True}}
+    monkeypatch.setattr(RemoteAuditor, "_run_remote_action", fake)
+    body = {"finding_id": f.id, "ssh_password": "x"}
+    assert (await env.acme.post("/api/fix/remote", json={**body, "ssh_key": "/data/id_rsa"})).status == 400
+    d = await (await env.acme.post("/api/fix/remote", json=body)).json()
+    assert d["ok"] and d["reversible"] and d["fix_id"]
+    assert [h["id"] for h in await (await env.acme.get("/api/fix/remote/history")).json()] == [d["fix_id"]]
+    assert await (await env.contoso.get("/api/fix/remote/history")).json() == []
+    assert (await env.contoso.post("/api/fix/remote/undo", json={"fix_id": d["fix_id"]})).status == 404
+    r = await env.acme.post("/api/fix/remote/undo", json={"fix_id": d["fix_id"], "ssh_password": "x"})
+    assert r.status == 200, await r.text()
+    assert calls[-1] == ("10.0.0.9", {"action": "svc_undo", "svc": "telnet", "active": True, "enabled": True})
+    assert (await env.acme.post("/api/fix/remote/undo", json={"fix_id": d["fix_id"]})).status == 409
+    hist = await (await env.acme.get("/api/fix/remote/history")).json()
+    assert hist[0]["undone_by"] == "jefa" and hist[0]["reversible"] is False

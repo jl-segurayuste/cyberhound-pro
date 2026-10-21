@@ -124,7 +124,7 @@ def test_acciones_sobre_el_servidor_coinciden_con_el_servidor():
     for fn in sorted(handlers - {"showCfgTab", "showPanel"}):
         eps = _write_endpoints(fn)
         touches_host = any((m == "WS" and p in HOST_TASKS) or (m != "WS" and _platform_only(p)) for m, p in eps)
-        if fn in ("createTenant", "deleteTenant", "rotateTenantKey", "switchTenant"):
+        if fn in ("createTenant", "deleteTenant", "rotateTenantKey", "switchTenant", "saveTenantScope"):
             continue   # gestión de tenants: solo se muestra al superadmin
         assert touches_host == (fn in host_fns), f"{fn}: toca el servidor={touches_host}, en HOST_FNS={fn in host_fns}"
 

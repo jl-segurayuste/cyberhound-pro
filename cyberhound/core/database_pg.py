@@ -25,6 +25,7 @@ from datetime import UTC, datetime, timedelta
 from cyberhound.core.accounts_db import PG_ACCOUNTS, AccountsMixin
 from cyberhound.core.logging import get_logger
 from cyberhound.core.models import Finding
+from cyberhound.core.remote_fixes import REMOTE_FIXES_TABLE, RemoteFixesMixin
 from cyberhound.core.schedules import SCHEDULES_TABLE, SchedulesMixin
 
 logger = get_logger("database_pg")
@@ -123,7 +124,7 @@ DB_VERSION = 7
 PG_MIGRATIONS: list[tuple[int, str]] = [
     (4, "ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_last_counter INTEGER"),
     (6, PG_ACCOUNTS),
-    (7, SCHEDULES_TABLE),
+    (7, SCHEDULES_TABLE + REMOTE_FIXES_TABLE),
 ]
 
 
@@ -135,7 +136,7 @@ def _days_ago(days: int) -> str:
     return (datetime.now(UTC) - timedelta(days=days)).isoformat()
 
 
-class DatabasePG(AccountsMixin, SchedulesMixin):
+class DatabasePG(AccountsMixin, SchedulesMixin, RemoteFixesMixin):
     """
     Base de datos PostgreSQL con la misma interfaz que Database (SQLite).
     Usa asyncpg para máximo rendimiento.

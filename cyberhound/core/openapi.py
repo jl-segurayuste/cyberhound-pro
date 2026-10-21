@@ -121,6 +121,11 @@ ENDPOINT_DOCS: dict[str, dict] = {
             },
         },
     },
+    "GET /api/fix/remote/history": {"summary": "Fixes remotos aplicados y si se pueden deshacer", "tags": ["Remediation"]},
+    "POST /api/fix/remote/undo": {"summary": "Deshacer un fix remoto (vuelve al estado previo del host)", "tags": ["Remediation"],
+                                  "requestBody": {"properties": {"fix_id": {"type": "string"},
+                                                                 "ssh_user": {"type": "string"},
+                                                                 "ssh_password": {"type": "string"}}}},
     "POST /api/report/pdf": {
         "summary": "Generar informe PDF",
         "tags": ["Reports"],

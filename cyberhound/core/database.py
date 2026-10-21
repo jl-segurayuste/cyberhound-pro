@@ -24,6 +24,7 @@ from cyberhound.core.accounts_db import SQLITE_ACCOUNTS, AccountsMixin
 from cyberhound.core.logging import get_logger
 from cyberhound.core.models import Finding
 from cyberhound.core.paths import DATA_DIR
+from cyberhound.core.remote_fixes import REMOTE_FIXES_TABLE, RemoteFixesMixin
 from cyberhound.core.schedules import SCHEDULES_TABLE, SchedulesMixin
 
 logger = get_logger("database")
@@ -51,8 +52,8 @@ MIGRATIONS: list[tuple[int, str]] = [
     """),
     # Sesiones revocables, tokens de API y eventos de auditoría (cyberhound/core/accounts_db.py)
     (6, SQLITE_ACCOUNTS),
-    # Análisis programados de cada organización (cyberhound/core/schedules.py)
-    (7, SCHEDULES_TABLE),
+    # Análisis programados (core/schedules.py) y fixes remotos que se pueden deshacer (core/remote_fixes.py)
+    (7, SCHEDULES_TABLE + REMOTE_FIXES_TABLE),
 ]
 DEFAULT_DB_PATH = DATA_DIR / "cyberhound.db"
 
@@ -145,7 +146,7 @@ CREATE INDEX IF NOT EXISTS idx_findings_severity ON findings(severity);
 CREATE INDEX IF NOT EXISTS idx_scans_started_at  ON scans(started_at);
 CREATE INDEX IF NOT EXISTS idx_scans_type        ON scans(scan_type);
 """
-SCHEMA += SQLITE_ACCOUNTS + SCHEDULES_TABLE
+SCHEMA += SQLITE_ACCOUNTS + SCHEDULES_TABLE + REMOTE_FIXES_TABLE
 
 
 
@@ -178,7 +179,7 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
-class Database(AccountsMixin, SchedulesMixin):
+class Database(AccountsMixin, SchedulesMixin, RemoteFixesMixin):
     def __init__(self, path: Path = DEFAULT_DB_PATH) -> None:
         self.path = path
         self.path.parent.mkdir(parents=True, exist_ok=True)

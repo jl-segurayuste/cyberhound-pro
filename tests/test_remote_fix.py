@@ -187,10 +187,76 @@ async def test_fix_remoto_usa_el_host_del_hallazgo(client, monkeypatch):
 
     async def fake(self, host, finding):
         seen.append(host)
-        return False, "sin conexión"
+        return False, "sin conexión", None
     monkeypatch.setattr(RemoteAuditor, "apply_fix_remote", fake)
     r = await client.post("/api/fix/remote", json={"finding_id": "10.0.0.5::ssh_PermitRootLogin",
                                                     "host": "10.9.9.9"})
     d = await r.json()
     assert seen == ["10.0.0.5"]
     assert d["ok"] is False and d["error"] == "sin conexión"  # la UI muestra d.error
+
+
+def test_accion_inversa_solo_con_estado_previo_valido():
+    ua = RemoteAuditor.undo_action
+    ssh = {"action": "ssh_param", "param": "PermitRootLogin", "value": "no"}
+    assert ua(ssh, {"line": "PermitRootLogin yes"}) == {"action": "ssh_param_undo", "param": "PermitRootLogin",
+                                                        "line": "PermitRootLogin yes"}
+    assert ua(ssh, {"line": None})["line"] is None                  # no estaba: se quita la línea
+    assert ua(ssh, {"line": "PermitRootLogin yes\nMatch all"}) is None
+    assert ua(ssh, {"line": "PasswordAuthentication yes"}) is None   # otra directiva: el host miente
+    assert ua({"action": "ufw_enable"}, {"active": False}) == {"action": "ufw_disable"}
+    assert ua({"action": "ufw_enable"}, {"active": True}) is None   # ya estaba activo: nada que deshacer
+    sysctl = {"action": "sysctl", "param": "net.ipv4.ip_forward", "value": "0"}
+    assert ua(sysctl, {"value": "1", "conf_added": True})["value"] == "1"
+    assert ua(sysctl, {"value": "1; reboot"}) is None
+    assert ua({"action": "chmod_ow", "path": "/etc/a"}, {"mode": 0o666})["mode"] == 0o666
+    assert ua({"action": "chmod_ow", "path": "/etc/a"}, {"mode": "777"}) is None
+    assert ua({"action": "svc_disable", "svc": "telnet"}, None) is None
+
+
+def test_deshacer_chmod_con_el_script_real(tmp_path):
+    import json
+    import os
+    import subprocess
+    import sys
+    target = tmp_path / "f"
+    target.write_text("x")
+    os.chmod(target, 0o646)
+    action = {"action": "chmod_ow", "path": str(target)}
+
+    def run(a):
+        out = subprocess.run([sys.executable, "-"], input=RemoteAuditor._fix_payload(a),
+                             capture_output=True, text=True, timeout=30)
+        return json.loads(out.stdout.strip().splitlines()[-1])
+    res = run(action)
+    assert res["ok"] and os.stat(target).st_mode & 0o777 == 0o644
+    undo = RemoteAuditor.undo_action(action, res["before"])
+    assert run(undo)["ok"] and os.stat(target).st_mode & 0o777 == 0o646
+
+
+def test_deshacer_ssh_param_con_el_script_real(tmp_path):
+    """Fix y deshacer de sshd_config con el script real (sshd -t y systemctl simulados)."""
+    import json
+    import os
+    import subprocess
+    import sys
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for tool in ("sshd", "systemctl"):
+        (bin_dir / tool).write_text("#!/bin/sh\nexit 0\n")
+        (bin_dir / tool).chmod(0o755)
+    conf = tmp_path / "sshd_config"
+    original = "Port 22\nPermitRootLogin yes\nUsePAM yes\n"
+
+    def run(a):
+        payload = RemoteAuditor._fix_payload(a).replace("/etc/ssh/sshd_config", str(conf))
+        env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}"}
+        out = subprocess.run([sys.executable, "-"], input=payload, capture_output=True, text=True, timeout=30, env=env)
+        return json.loads(out.stdout.strip().splitlines()[-1])
+    for start, param in ((original, "PermitRootLogin"), (original, "X11Forwarding")):
+        conf.write_text(start)
+        action = {"action": "ssh_param", "param": param, "value": "no"}
+        res = run(action)
+        assert res["ok"] and f"{param} no" in conf.read_text()
+        assert run(RemoteAuditor.undo_action(action, res["before"]))["ok"]
+        assert conf.read_text().strip() == start.strip(), param

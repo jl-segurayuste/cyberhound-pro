@@ -446,6 +446,8 @@ class CyberHoundServer:
         # ── Escaneos ──────────────────────────────────────────────────────────
         app.router.add_post("/api/fix/local",    self.api_fix_local)
         app.router.add_post("/api/fix/remote",   self.api_fix_remote)
+        app.router.add_get ("/api/fix/remote/history", self.api_fix_remote_history)
+        app.router.add_post("/api/fix/remote/undo",    self.api_fix_remote_undo)
         app.router.add_post("/api/findings/explain", self.api_explain_finding)
         app.router.add_get ("/api/rollback",      self.api_rollback_list)
         app.router.add_post("/api/rollback/local", self.api_rollback_local)
@@ -637,7 +639,7 @@ class CyberHoundServer:
                                                   "solo lo puede lanzar el administrador de la plataforma"})
             await ws.close()
             return ws
-        if err := await self._out_of_scope(scope_targets(msg)):
+        if err := (await self._out_of_scope(scope_targets(msg))) or self._tenant_ssh_key_error(msg.get("ssh_key")):
             await send({"type": "error", "text": err})
             await ws.close()
             return ws
@@ -942,7 +944,7 @@ class CyberHoundServer:
         creds = SSHCredentials(
             username=params.get("ssh_user", self.cfg.scan.ssh_default_user),
             port=int(params.get("ssh_port", self.cfg.scan.ssh_default_port)),
-            key_path=params.get("ssh_key") or self.cfg.scan.ssh_key_path,
+            key_path=self._ssh_key(params.get("ssh_key")),
             password=params.get("ssh_password") or None,
         )
         results = await RemoteAuditor.scan_multiple(
@@ -975,7 +977,7 @@ class CyberHoundServer:
         creds = SSHCredentials(
             username=params.get("ssh_user", self.cfg.scan.ssh_default_user),
             port=int(params.get("ssh_port", self.cfg.scan.ssh_default_port)),
-            key_path=params.get("ssh_key") or self.cfg.scan.ssh_key_path,
+            key_path=self._ssh_key(params.get("ssh_key")),
             password=params.get("ssh_password") or None,
         )
         results = await RemoteAuditor.scan_multiple(
@@ -1060,20 +1062,75 @@ class CyberHoundServer:
                 return web.json_response({"ok": False, "error": "El hallazgo no es de un host remoto"}, status=400)
             if err := await self._out_of_scope([host]):
                 return web.json_response({"ok": False, "error": err}, status=403)
-            from cyberhound.scanners.ssh_audit import RemoteAuditor, SSHCredentials
-            creds = SSHCredentials(
-                username=body.get("ssh_user", self.cfg.scan.ssh_default_user),
-                port=int(body.get("ssh_port", self.cfg.scan.ssh_default_port)),
-                key_path=body.get("ssh_key") or self.cfg.scan.ssh_key_path,
-                password=body.get("ssh_password") or None,
-            )
-            ok, msg = await RemoteAuditor(creds).apply_fix_remote(host, finding)
+            if err := self._tenant_ssh_key_error(body.get("ssh_key")):
+                return web.json_response({"ok": False, "error": err}, status=400)
+            from cyberhound.scanners.ssh_audit import RemoteAuditor
+            action = RemoteAuditor.remote_fix_action(finding)
+            ok, msg, undo = await RemoteAuditor(self._ssh_creds(body)).apply_fix_remote(host, finding)
             audit_log.fix_applied(fid, user, host, False)
-            return web.json_response({"ok": ok, "message": msg, **({} if ok else {"error": msg or "El fix no se pudo aplicar"})},
+            fix_id = None
+            if ok:
+                fix_id = await self.db.add_remote_fix(host, fid, action, undo, username=user, message=msg)
+            await self._audit(request, "fix_remote", f"{host} {fid}", msg, ok=ok)
+            return web.json_response({"ok": ok, "message": msg, "fix_id": fix_id, "reversible": bool(undo),
+                                      **({} if ok else {"error": msg or "El fix no se pudo aplicar"})},
                                      status=200 if ok else 422)
         except Exception as e:
             logger.error("api_fix_remote: %s", e, exc_info=True)
             return web.json_response({"ok": False, "error": str(e)}, status=500)
+
+    def _ssh_creds(self, body: dict):
+        from cyberhound.scanners.ssh_audit import SSHCredentials
+        return SSHCredentials(
+            username=body.get("ssh_user", self.cfg.scan.ssh_default_user),
+            port=int(body.get("ssh_port", self.cfg.scan.ssh_default_port)),
+            key_path=self._ssh_key(body.get("ssh_key")),
+            password=body.get("ssh_password") or None,
+        )
+
+    def _ssh_key(self, given: str | None) -> str | None:
+        """Clave SSH a usar. Una organización no puede usar ficheros del servidor (ni la clave de la
+        plataforma, ni otra ruta que indique): entraría en sus hosts con la identidad de la plataforma."""
+        if self._tenant_obj() is not None:
+            return None
+        return given or self.cfg.scan.ssh_key_path
+
+    def _tenant_ssh_key_error(self, given: str | None) -> str | None:
+        if given and self._tenant_obj() is not None:
+            return "Una organización no puede usar claves SSH guardadas en el servidor: usa usuario y contraseña"
+        return None
+
+    async def api_fix_remote_history(self, request: web.Request) -> web.Response:
+        """Fixes remotos aplicados en esta organización, con los que aún se pueden deshacer."""
+        try:
+            limit = int(request.rel_url.query.get("limit", "100"))
+        except ValueError:
+            return web.json_response({"error": "limit debe ser un entero"}, status=400)
+        return web.json_response(await self.db.list_remote_fixes(limit))
+
+    async def api_fix_remote_undo(self, request: web.Request) -> web.Response:
+        body = await _read_json(request)
+        fix = await self.db.get_remote_fix(str(body.get("fix_id", "")))
+        if not fix:
+            return web.json_response({"ok": False, "error": "Fix no encontrado"}, status=404)
+        if not fix["reversible"]:
+            why = "ya se deshizo" if fix.get("undone_at") else "no se guardó cómo deshacerlo"
+            return web.json_response({"ok": False, "error": f"Este fix no se puede deshacer: {why}"}, status=409)
+        if err := await self._out_of_scope([fix["host"]]):
+            return web.json_response({"ok": False, "error": err}, status=403)
+        if err := self._tenant_ssh_key_error(body.get("ssh_key")):
+            return web.json_response({"ok": False, "error": err}, status=400)
+        user = request.get("auth_user", "unknown")
+        if not await self.db.mark_remote_fix_undone(fix["id"], user):
+            return web.json_response({"ok": False, "error": "Este fix no se puede deshacer: ya se deshizo"}, status=409)
+        from cyberhound.scanners.ssh_audit import RemoteAuditor
+        ok, msg = await RemoteAuditor(self._ssh_creds(body)).undo_fix_remote(fix["host"], fix["undo"])
+        if not ok:
+            await self.db.clear_remote_fix_undone(fix["id"])
+        audit_log.fix_rolled_back(fix["finding_id"], user, fix["host"], ok)
+        await self._audit(request, "fix_remote_undo", f"{fix['host']} {fix['finding_id']}", msg, ok=ok)
+        return web.json_response({"ok": ok, "message": msg, **({} if ok else {"error": msg or "No se pudo deshacer"})},
+                                 status=200 if ok else 422)
 
     # ── Rollback de fixes locales ───────────────────────────────────────────────
 
