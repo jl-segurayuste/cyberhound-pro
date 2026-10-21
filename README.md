@@ -4,7 +4,7 @@
 
 > Analiza tu red, servidores, contenedores, webs y código. Detecta vulnerabilidades, malware y configuraciones inseguras, corrige con un clic (y deshace) y vigila en tiempo real. Una instancia o varias organizaciones aisladas (multi-tenant).
 
-[![Versión](https://img.shields.io/badge/versión-v6.6.0-blue.svg)](cyberhound/__init__.py)
+[![Versión](https://img.shields.io/badge/versión-v6.7.0-blue.svg)](cyberhound/__init__.py)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://python.org)
 [![Tests](https://img.shields.io/badge/tests-729%20passed-green.svg)](#tests)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
@@ -390,6 +390,8 @@ cyberhound/
 │   ├── accounts_db.py       # sesiones, tokens de API y auditoría (SQLite y PostgreSQL)
 │   ├── schedules.py · remote_fixes.py   # análisis programados · fixes remotos que se pueden deshacer
 │   ├── ssh_credentials.py   # credenciales SSH guardadas (cifradas por organización)
+│   ├── ssh_host_keys.py     # claves de host SSH conocidas (TOFU)
+│   ├── sshd_config.py       # configuración efectiva de sshd (también viaja en los scripts remotos)
 │   ├── scoring.py · scheduler.py · notifications.py · siem.py · ticketing.py
 │   ├── agent.py · rollback.py · quarantine.py · ebpf_monitor.py · llm.py
 │   ├── ansible_integration.py · openapi.py · executor.py · logging.py · models.py
@@ -499,6 +501,7 @@ La referencia completa está en **`/api/docs`** (Swagger UI, servida por la prop
 | `GET` · `POST` | `/api/fix/remote/history` · `/api/fix/remote/undo` | Fixes remotos aplicados y deshacerlos |
 | `GET` · `POST` · `PATCH` · `DELETE` | `/api/schedules` · `/api/schedules/{id}` · `/api/schedules/{id}/run` | Análisis programados |
 | `GET` · `POST` · `PATCH` · `DELETE` | `/api/config/ssh-credentials` · `/api/config/ssh-credentials/{id}` | Credenciales SSH guardadas (nunca devuelve el secreto) |
+| `GET` · `DELETE` | `/api/config/ssh-host-keys` · `/api/config/ssh-host-keys/{host}/{puerto}` | Claves de host SSH conocidas |
 | `POST` | `/api/report/{html\|ansible\|json}` · `/api/report/pdf` | Informes |
 | `POST` · `GET` | `/api/intel/scan` · `/api/intel/lookup` | Threat intelligence |
 | `GET` · `POST` | `/api/config/{keys\|notifications\|siem\|ticketing\|agent}` | Configuración |
@@ -548,6 +551,7 @@ La referencia completa está en **`/api/docs`** (Swagger UI, servida por la prop
 
 ### Ejecución
 - Ningún `shell=True` ni `os.system`. La corrección remota no ejecuta texto que venga del host auditado: construye la acción desde el id del hallazgo, la pasa como dato y el script remoto va por stdin (nada en `/tmp` que otro usuario pueda sustituir antes del `sudo`).
+- **Claves de host SSH verificadas (TOFU)**: la primera conexión a cada equipo guarda su clave y las siguientes tienen que presentar la misma; si cambia no se conecta, así que un equipo suplantado no recibe la contraseña ni el script. Las claves conocidas se ven y se olvidan en Configuración › Credenciales SSH.
 - Un hallazgo de otro host no se puede corregir en local por error (tampoco con el playbook de Ansible en modo local), y el fix remoto se aplica en el host del hallazgo, no en el que diga la petición.
 - Los playbooks de Ansible se construyen como datos y se vuelcan con el `SafeDumper` de PyYAML: el título, la remediación o el id que manda un host auditado nunca acaban en una tarea (ni como comando ni como plantilla `{{ }}`, que Ansible evaluaría en la máquina de control).
 
@@ -654,7 +658,7 @@ Los secretos que llegan por entorno no se copian al fichero.
 
 ## Tests
 
-**746 tests** en 56 ficheros (`tests/test_*.py`), que el CI ejecuta en Python 3.11 y 3.12 y otra vez contra PostgreSQL 16.
+**749 tests** en 57 ficheros (`tests/test_*.py`), que el CI ejecuta en Python 3.11 y 3.12 y otra vez contra PostgreSQL 16.
 
 ```bash
 pip install -e ".[test]"
@@ -687,11 +691,11 @@ Además de las pruebas unitarias hay tests de extremo a extremo sobre la aplicac
 
 ## Roadmap
 
-### ✅ Implementado (v6.6)
+### ✅ Implementado (v6.7)
 
 Los cambios de cada versión están en [CHANGELOG.md](CHANGELOG.md).
 
-Todo lo descrito arriba: hardening con fixes y deshacer, red, SSH remoto, malware y cuarentena, Docker/K8s/imágenes/runtime, código y secretos, web (TLS, cabeceras, exposición, API/CORS, Nuclei), DNS y subdominios, threat intelligence, scoring, compliance, SBOM, LDAP/AD (6 checks: AS-REP roasting, admins del dominio, cuentas sin caducidad…), monitor, 2FA, roles, sesiones revocables, tokens de API, auditoría, multi-tenant con ámbito e integraciones por organización, análisis programados (también SSH), credenciales SSH guardadas, deshacer fixes remotos, playbooks de remediación, agentes, SIEM, ticketing, AWX, OpenAPI, SQLite y PostgreSQL, interfaz responsive (escritorio, tablet y móvil).
+Todo lo descrito arriba: hardening con fixes y deshacer, red, SSH remoto, malware y cuarentena, Docker/K8s/imágenes/runtime, código y secretos, web (TLS, cabeceras, exposición, API/CORS, Nuclei), DNS y subdominios, threat intelligence, scoring, compliance, SBOM, LDAP/AD (6 checks: AS-REP roasting, admins del dominio, cuentas sin caducidad…), monitor, 2FA, roles, sesiones revocables, tokens de API, auditoría, multi-tenant con ámbito e integraciones por organización, análisis programados (también SSH), credenciales SSH guardadas y claves de host verificadas, deshacer fixes remotos, playbooks de remediación, agentes, SIEM, ticketing, AWX, OpenAPI, SQLite y PostgreSQL, interfaz responsive (escritorio, tablet y móvil).
 
 ### 🔜 Ideas para futuras versiones
 

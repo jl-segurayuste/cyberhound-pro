@@ -4,6 +4,21 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/); v
 [SemVer](https://semver.org/lang/es/). Cada versión publicada tiene su etiqueta `vX.Y.Z` y su
 release en GitHub, con la imagen Docker correspondiente en GHCR.
 
+## [6.7.0] — 2026-10-21
+
+### Añadido
+- **Verificación de la clave de host SSH (TOFU)**: la primera conexión a cada equipo guarda su clave
+  y las siguientes tienen que presentar la misma; si cambia, CyberHound no se conecta (estado "clave de
+  host cambiada") y no envía la contraseña ni el script. Configuración › Credenciales SSH lista las
+  claves conocidas de la organización y permite olvidar una (`/api/config/ssh-host-keys`) cuando el
+  cambio es legítimo, por ejemplo tras reinstalar el equipo. BD v9.
+
+### Corregido
+- Las conexiones SSH no verificaban la clave del host (`known_hosts=None`): quien suplantara un equipo
+  en la red recibía la contraseña guardada o el script que se ejecuta con sudo.
+- El aviso de clave de host no verificable nunca se mostraba: `HostKeyNotVerifiable` es subclase de
+  `DisconnectError` y se capturaba antes como "inalcanzable".
+
 ## [6.6.0] — 2026-10-21
 
 ### Añadido
@@ -113,6 +128,7 @@ release en GitHub, con la imagen Docker correspondiente en GHCR.
 
 Las versiones anteriores no tienen registro de cambios; su historia está en `git log`.
 
+[6.7.0]: https://github.com/jl-segurayuste/cyberhound-pro/releases/tag/v6.7.0
 [6.6.0]: https://github.com/jl-segurayuste/cyberhound-pro/releases/tag/v6.6.0
 [6.5.0]: https://github.com/jl-segurayuste/cyberhound-pro/releases/tag/v6.5.0
 [6.4.0]: https://github.com/jl-segurayuste/cyberhound-pro/releases/tag/v6.4.0

@@ -3,7 +3,9 @@
 Acepta al usuario "auditor" con la contraseña de CH_E2E_SSH_PASSWORD o con cualquier clave de
 <trabajo>/ssh_authorized_keys, que la propia batería rellena con la clave pública que genera
 CyberHound. Los comandos se ejecutan en esta máquina como el usuario que lanza la batería (sin
-sudo): la auditoría SSH sale parcial, pero el camino es el real de punta a punta.
+sudo): la auditoría SSH sale parcial, pero el camino es el real de punta a punta. Si aparece
+<trabajo>/ssh_rotate, vuelve a arrancar en el mismo puerto con otra clave de host (como un equipo
+suplantado o reinstalado) para probar que CyberHound no se conecta.
 
     python sshd.py <puerto> <directorio de trabajo>
 """
@@ -17,6 +19,7 @@ import asyncssh
 PORT, WORK = int(sys.argv[1]), Path(sys.argv[2])
 USER, PASSWORD = "auditor", os.environ["CH_E2E_SSH_PASSWORD"]
 AUTHORIZED = WORK / "ssh_authorized_keys"
+ROTATE = WORK / "ssh_rotate"
 
 
 class Server(asyncssh.SSHServer):
@@ -51,10 +54,20 @@ async def handle(process) -> None:
     process.exit(proc.returncode or 0)
 
 
+async def serve():
+    return await asyncssh.create_server(Server, "127.0.0.1", PORT, process_factory=handle,
+                                        server_host_keys=[asyncssh.generate_private_key("ssh-ed25519")])
+
+
 async def main() -> None:
-    await asyncssh.create_server(Server, "127.0.0.1", PORT, process_factory=handle,
-                                 server_host_keys=[asyncssh.generate_private_key("ssh-ed25519")])
-    await asyncio.Future()
+    server = await serve()
+    while True:
+        await asyncio.sleep(0.5)
+        if ROTATE.exists():
+            ROTATE.unlink()
+            server.close()
+            await server.wait_closed()
+            server = await serve()
 
 
 asyncio.run(main())

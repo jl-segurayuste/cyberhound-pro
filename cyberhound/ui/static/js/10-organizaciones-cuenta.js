@@ -294,6 +294,7 @@ async function loadSshCredOptions() {
 async function loadSshCredentials() {
   const tbody = document.getElementById('sshcreds-tbody');
   if (!tbody) return;
+  loadSshHostKeys();
   const rows = await loadSshCredOptions();
   tbody.innerHTML = rows.map(c => `<tr>
       <td>${esc(c.name)}${c.kind === 'key' ? `<details style="font-size:.72rem;color:var(--text2)"><summary>${esc(c.fingerprint)}</summary>
@@ -304,6 +305,30 @@ async function loadSshCredentials() {
       <td><button class="btn-secondary small danger" ${on('click', 'deleteSshCredential', c.id)}>Borrar</button></td>
     </tr>`).join('') || '<tr><td colspan="5" style="color:var(--text2)">Sin credenciales guardadas</td></tr>';
   applyRole(tbody);
+}
+
+async function loadSshHostKeys() {
+  const tbody = document.getElementById('sshhostkeys-tbody');
+  if (!tbody) return;
+  const r = await fetch('/api/config/ssh-host-keys');
+  const rows = r.ok ? await r.json().catch(() => null) : null;
+  if (!Array.isArray(rows)) { tbody.innerHTML = ''; return; }
+  tbody.innerHTML = rows.map(k => `<tr>
+      <td style="font-family:monospace">${esc(k.host)}:${k.port}</td>
+      <td style="font-family:monospace;font-size:.72rem;word-break:break-all">${esc(k.fingerprint)}</td>
+      <td style="font-size:.78rem">${fmt(k.first_seen)}</td>
+      <td style="font-size:.78rem">${k.last_seen ? fmt(k.last_seen) : '—'}</td>
+      <td><button class="btn-secondary small danger" ${on('click', 'forgetSshHostKey', k.host, k.port)}>Olvidar</button></td>
+    </tr>`).join('') || '<tr><td colspan="5" style="color:var(--text2)">Ninguna todavía: se guardan al conectar por primera vez</td></tr>';
+  applyRole(tbody);
+}
+
+async function forgetSshHostKey(host, port) {
+  if (!confirm(`¿Olvidar la clave de host de ${host}:${port}? La próxima conexión guardará la que presente.`)) return;
+  const r = await fetch(`/api/config/ssh-host-keys/${encodeURIComponent(host)}/${encodeURIComponent(port)}`, {method: 'DELETE'});
+  const d = await r.json().catch(() => ({}));
+  toast(r.ok ? '✓ Clave de host olvidada' : '✗ ' + (d.error || r.status), r.ok ? 'info' : 'error');
+  loadSshHostKeys();
 }
 
 async function createSshCredential() {

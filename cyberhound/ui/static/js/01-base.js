@@ -67,7 +67,7 @@ const FN_PERMS = {
   changeUserRole: 'users', createUser: 'users', deleteUser: 'users', loadUsers: 'users',
   loadAudit: 'users', saveTenantScope: 'users', undoFixRemote: 'fix', loadRemoteFixes: 'fix',
   createSchedule: 'config', toggleSchedule: 'config', deleteSchedule: 'config', runSchedule: 'scan',
-  createSshCredential: 'config', deleteSshCredential: 'config',
+  createSshCredential: 'config', deleteSshCredential: 'config', forgetSshHostKey: 'config',
 };
 // Acciones sobre el propio servidor o su configuración global: en multi-tenant solo el
 // superadmin (HOST_TASKS y _PLATFORM_PREFIXES del servidor; lo comprueba test_consistency)

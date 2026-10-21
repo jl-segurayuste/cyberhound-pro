@@ -12,6 +12,7 @@ from cyberhound.api.common import (
 from cyberhound.core import ssh_credentials
 from cyberhound.core.logging import audit_log, get_logger
 from cyberhound.core.multitenancy import current_tenant
+from cyberhound.core.ssh_host_keys import HostKeyStore
 
 logger = get_logger("api")
 
@@ -83,7 +84,7 @@ class FixHandlers:
                 return web.json_response({"ok": False, "error": str(e)}, status=400)
             from cyberhound.scanners.ssh_audit import RemoteAuditor
             action = RemoteAuditor.remote_fix_action(finding)
-            ok, msg, undo = await RemoteAuditor(creds).apply_fix_remote(host, finding)
+            ok, msg, undo = await RemoteAuditor(creds, host_keys=HostKeyStore(self.db)).apply_fix_remote(host, finding)
             audit_log.fix_applied(fid, user, host, False)
             fix_id = None
             if ok:
@@ -161,7 +162,7 @@ class FixHandlers:
         if not await self.db.mark_remote_fix_undone(fix["id"], user):
             return web.json_response({"ok": False, "error": "Este fix no se puede deshacer: ya se deshizo"}, status=409)
         from cyberhound.scanners.ssh_audit import RemoteAuditor
-        ok, msg = await RemoteAuditor(creds).undo_fix_remote(fix["host"], fix["undo"])
+        ok, msg = await RemoteAuditor(creds, host_keys=HostKeyStore(self.db)).undo_fix_remote(fix["host"], fix["undo"])
         if not ok:
             await self.db.clear_remote_fix_undone(fix["id"])
         audit_log.fix_rolled_back(fix["finding_id"], user, fix["host"], ok)

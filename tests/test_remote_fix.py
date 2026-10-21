@@ -76,14 +76,18 @@ async def test_auditoria_remota_va_por_stdin_sin_ficheros_en_tmp(monkeypatch):
     from cyberhound.scanners import ssh_audit
     conn = _FakeConn(stdout='[{"id": "ssh_PermitRootLogin", "category": "ssh", "severity": "high", '
                             '"title": "t", "description": "", "remediation": "r", "auto_fix": true}]')
-    monkeypatch.setattr(ssh_audit.asyncssh, "connect", lambda host, **kw: conn)
+    async def connect(host, **kw):
+        return conn
+    monkeypatch.setattr(ssh_audit.asyncssh, "connect", connect)
     res = await RemoteAuditor(ssh_audit.SSHCredentials()).audit_host("10.0.0.5")
     assert res.status == "ok" and res.findings[0].id == "10.0.0.5::ssh_PermitRootLogin"
     assert all("/tmp" not in cmd for cmd, _ in conn.calls)
     assert ("sudo -n python3 -", RemoteAuditor.REMOTE_AUDIT_SCRIPT) in conn.calls
     # sin sudo: misma auditoría, sin elevar
     conn2 = _FakeConn(sudo_ok=False)
-    monkeypatch.setattr(ssh_audit.asyncssh, "connect", lambda host, **kw: conn2)
+    async def connect2(host, **kw):
+        return conn2
+    monkeypatch.setattr(ssh_audit.asyncssh, "connect", connect2)
     await RemoteAuditor(ssh_audit.SSHCredentials()).audit_host("10.0.0.5")
     assert ("python3 -", RemoteAuditor.REMOTE_AUDIT_SCRIPT) in conn2.calls
 

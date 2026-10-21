@@ -25,6 +25,7 @@ from cyberhound.core.security import (
     InputValidator,
     ValidationError,
 )
+from cyberhound.core.ssh_host_keys import HostKeyStore
 
 logger = get_logger("api")
 
@@ -375,7 +376,7 @@ class ScanHandlers:
         creds = await self._ssh_creds(params)
         results = await RemoteAuditor.scan_multiple(
             [d.ip for d in ssh_hosts], creds,
-            concurrency=self.cfg.scan.ssh_concurrency,
+            concurrency=self.cfg.scan.ssh_concurrency, host_keys=HostKeyStore(self.db),
         )
         all_findings: list[Finding] = []
         for hr in results:
@@ -402,7 +403,7 @@ class ScanHandlers:
         await log("section", f"SSH Scan en {len(hosts)} hosts…")
         creds = await self._ssh_creds(params)
         results = await RemoteAuditor.scan_multiple(
-            hosts, creds, concurrency=self.cfg.scan.ssh_concurrency
+            hosts, creds, concurrency=self.cfg.scan.ssh_concurrency, host_keys=HostKeyStore(self.db)
         )
         all_findings: list[Finding] = []
         for hr in results:

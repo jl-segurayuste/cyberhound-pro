@@ -144,6 +144,11 @@ El secreto se guarda cifrado y no se vuelve a mostrar; la tabla enseña la huell
 Un operador puede usar las credenciales pero no verlas. No se puede borrar una credencial que use un
 análisis programado.
 
+Debajo están las **claves de host conocidas**. La primera vez que CyberHound entra en un equipo guarda
+su clave de host; si otro día presenta una distinta no se conecta y el equipo aparece como *clave de
+host cambiada*, porque podría ser un equipo suplantado. Si sabes que el cambio es legítimo (lo has
+reinstalado o le has regenerado las claves), pulsa **Olvidar**: la siguiente conexión guardará la nueva.
+
 ## 6. Organizaciones (multi-tenant)
 
 Con `multi_tenant.enabled: true`, el admin de la plataforma gestiona organizaciones en

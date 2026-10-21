@@ -25,6 +25,7 @@ except ImportError:
 from cyberhound.core import sshd_config
 from cyberhound.core.logging import get_logger
 from cyberhound.core.models import Finding, HostResult
+from cyberhound.core.ssh_host_keys import known_hosts_line
 
 logger = get_logger("ssh_audit")
 
@@ -37,6 +38,9 @@ REMOTE_SYSCTL = {
 }
 REMOTE_SERVICES = ("telnet", "rsh", "nis", "finger", "tftp")
 REMOTE_WW_DIRS = ("/etc/", "/usr/bin/", "/usr/sbin/", "/bin/", "/sbin/")
+HOSTKEY_CHANGED = ("La clave de host de {host} no es la que se guardó en la primera conexión: puede ser una "
+                   "suplantación. Si el cambio es legítimo (equipo reinstalado), olvídala en "
+                   "Configuración › Credenciales SSH y vuelve a conectar.")
 # Los scripts remotos llevan delante core/sshd_config.py tal cual (configuración efectiva de sshd)
 _SSHD_LIB = Path(sshd_config.__file__).read_text() + "\n"
 
@@ -196,7 +200,7 @@ print(json.dumps(findings))
 '''
     REMOTE_AUDIT_SCRIPT = _SSHD_LIB + REMOTE_AUDIT_SCRIPT
 
-    def __init__(self, credentials: SSHCredentials) -> None:
+    def __init__(self, credentials: SSHCredentials, host_keys=None) -> None:
         if not ASYNCSSH_AVAILABLE:
             raise RuntimeError(
                 "asyncssh no está instalado. "
@@ -205,6 +209,29 @@ print(json.dumps(findings))
                 "(alternativa a sshpass que expone credenciales en ps aux)."
             )
         self.creds = credentials
+        self.host_keys = host_keys
+
+    async def _connect(self, host: str):
+        """Conexión SSH verificando la clave del host contra la que se guardó la primera vez (TOFU).
+
+        Sin almacén (host_keys=None) no se verifica, como antes; lo usan solo los tests."""
+        opts = self.creds.to_asyncssh_opts()
+        port = self.creds.port
+        pinned = await self.host_keys.known(host, port) if self.host_keys else None
+        if pinned:
+            opts["known_hosts"] = asyncssh.import_known_hosts(known_hosts_line(host, port, pinned))
+        conn = await asyncssh.connect(host, **opts)
+        if self.host_keys:
+            try:
+                if pinned:
+                    await self.host_keys.seen(host, port)
+                elif key := conn.get_server_host_key():
+                    await self.host_keys.learn(host, port, key.export_public_key("openssh").decode().strip(),
+                                               key.get_fingerprint())
+            except Exception:
+                conn.close()
+                raise
+        return conn
 
     async def audit_host(self, host: str) -> HostResult:
         start = time.monotonic()
@@ -214,9 +241,7 @@ print(json.dumps(findings))
         )
 
         try:
-            async with asyncssh.connect(
-                host, **self.creds.to_asyncssh_opts()
-            ) as conn:
+            async with await self._connect(host) as conn:
                 logger.info("SSH conectado a %s", host)
 
                 # Obtener info del sistema
@@ -272,18 +297,19 @@ print(json.dumps(findings))
                     host, len(findings), result.scan_time,
                 )
 
-        except asyncssh.PermissionDenied:     # antes que DisconnectError, de la que es subclase
+        # PermissionDenied y HostKeyNotVerifiable antes que DisconnectError, de la que son subclases
+        except asyncssh.PermissionDenied:
             result.status = "auth_failed"
             result.error = "Autenticación SSH fallida (clave o contraseña incorrecta)"
             logger.warning("%s: %s", host, result.error)
+        except asyncssh.HostKeyNotVerifiable:
+            result.status = "hostkey_changed"
+            result.error = HOSTKEY_CHANGED.format(host=host)
+            logger.error("%s: %s", host, result.error)
         except asyncssh.DisconnectError as e:
             result.status = "unreachable"
             result.error = f"Conexión rechazada: {e}"
             logger.warning("%s: %s", host, result.error)
-        except asyncssh.HostKeyNotVerifiable:
-            result.status = "error"
-            result.error = "Host key no verificable. Añade el host a known_hosts primero."
-            logger.error("%s: %s", host, result.error)
         except (ConnectionRefusedError, OSError) as e:
             result.status = "unreachable"
             result.error = str(e)
@@ -481,10 +507,13 @@ done(False, "acción desconocida")
 
     async def _run_remote_action(self, host: str, action: dict) -> dict:
         try:
-            async with asyncssh.connect(host, **self.creds.to_asyncssh_opts()) as conn:
+            async with await self._connect(host) as conn:
                 r = await conn.run(await self._python_cmd(conn), input=self._fix_payload(action), timeout=90)
                 out = (r.stdout or "").strip().splitlines()
                 res = json.loads(out[-1]) if out else {"ok": False, "msg": (r.stderr or "")[:300]}
+        except asyncssh.HostKeyNotVerifiable:
+            logger.error("Acción remota en %s: la clave de host ha cambiado", host)
+            return {"ok": False, "msg": HOSTKEY_CHANGED.format(host=host)}
         except Exception as e:
             logger.error("Error en acción remota en %s: %s", host, e)
             return {"ok": False, "msg": str(e)}
@@ -515,8 +544,9 @@ done(False, "acción desconocida")
         hosts: list[str],
         credentials: SSHCredentials,
         concurrency: int = 5,
+        host_keys=None,
     ) -> list[HostResult]:
-        auditor = cls(credentials)
+        auditor = cls(credentials, host_keys=host_keys)
         sem = asyncio.Semaphore(concurrency)
 
         async def _one(host: str) -> HostResult:

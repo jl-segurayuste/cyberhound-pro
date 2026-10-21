@@ -266,3 +266,21 @@ class ConfigHandlers:
         await self.db.delete_ssh_credential(cid)
         await self._audit(request, "ssh_credential_delete", current["name"])
         return web.json_response({"ok": True})
+
+    # ── Claves de host SSH conocidas (TOFU) ───────────────────────────────────
+
+    async def api_ssh_host_keys_list(self, request: web.Request) -> web.Response:
+        return web.json_response(await self.db.list_ssh_host_keys())
+
+    async def api_ssh_host_keys_delete(self, request: web.Request) -> web.Response:
+        """Olvida la clave guardada de host:puerto; la próxima conexión guarda la que presente."""
+        host = request.match_info["host"]
+        try:
+            port = int(request.match_info["port"])
+        except ValueError:
+            return web.json_response({"error": "Puerto no válido"}, status=400)
+        current = await self.db.get_ssh_host_key(host, port)
+        if not current or not await self.db.delete_ssh_host_key(host, port):
+            return web.json_response({"error": "Clave de host no encontrada"}, status=404)
+        await self._audit(request, "ssh_hostkey_forget", f"{host}:{port}", current["fingerprint"])
+        return web.json_response({"ok": True})

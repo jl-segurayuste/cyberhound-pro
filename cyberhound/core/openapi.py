@@ -348,6 +348,10 @@ ENDPOINT_DOCS: dict[str, dict] = {
             "kind": {"type": "string", "enum": ["generate", "key", "password"]},
             "private_key": {"type": "string"}, "passphrase": {"type": "string"}, "password": {"type": "string"}}}},
     "PATCH /api/config/ssh-credentials/{cid}": {"summary": "Modificar una credencial SSH", "tags": ["Config"]},
+    "GET /api/config/ssh-host-keys": {"summary": "Claves de host SSH guardadas en la primera conexión (TOFU)",
+                                      "tags": ["Config"]},
+    "DELETE /api/config/ssh-host-keys/{host}/{port}": {
+        "summary": "Olvidar la clave de un host (la próxima conexión guarda la que presente)", "tags": ["Config"]},
     "DELETE /api/config/ssh-credentials/{cid}": {"summary": "Borrar una credencial SSH (no si la usa un programado)",
                                                   "tags": ["Config"]},
     # ── Configuración ────────────────────────────────────────────────────────

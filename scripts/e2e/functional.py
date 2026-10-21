@@ -361,6 +361,18 @@ with sync_playwright() as p:
             check("programados: auditoría SSH programada con hallazgos reales",
                   done and done["last_status"].startswith("ok") and not done["last_status"].startswith("ok: 0"), done)
             call("programados: borrar SSH", "DELETE", f"/api/schedules/{ss['id']}")
+        call("claves de host: la del servidor SSH se guardó en la primera conexión", "GET", "/api/config/ssh-host-keys",
+             pred=lambda d: any(k["host"] == "127.0.0.1" and k["port"] == SSH_PORT and k["fingerprint"].startswith("SHA256:")
+                                for k in d))
+        (OUT / "ssh_rotate").write_text("1")          # sshd.py vuelve a arrancar con otra clave de host
+        time.sleep(3)
+        r = ws({"task": "ssh", "hosts": "127.0.0.1", "ssh_credential": pwc["id"]}, 60000)
+        check("ssh: con otra clave de host no se conecta (posible suplantación)",
+              (r.get("hosts") or [{}])[0].get("status") == "hostkey_changed", r.get("hosts"))
+        call("claves de host: olvidar la clave", "DELETE", f"/api/config/ssh-host-keys/127.0.0.1/{SSH_PORT}")
+        r = ws({"task": "ssh", "hosts": "127.0.0.1", "ssh_credential": pwc["id"]}, 120000)
+        check("ssh: tras olvidarla se conecta y guarda la nueva", (r.get("hosts") or [{}])[0].get("status") == "ok",
+              r.get("hosts"))
         call("credenciales ssh: último uso registrado", "GET", "/api/config/ssh-credentials",
              pred=lambda d: all(c["last_used"] for c in d if c["id"] in (gen["id"], pwc["id"])))
         for c in (gen, pwc):

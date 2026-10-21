@@ -288,12 +288,14 @@ function _renderNetworkTable(devices) {
 function _updateHostChip(hr) {
   const chip = document.getElementById(`chip-${hr.host.replace(/\./g,'_')}`);
   if (!chip) return;
-  const icons = {ok:'✓', unreachable:'✗', auth_failed:'', error:'⚠'};
+  const icons = {ok:'✓', unreachable:'✗', auth_failed:'', error:'⚠', hostkey_changed:'⚠'};
   chip.className = `host-chip ${hr.status}`;
+  chip.title = hr.error || '';
   chip.textContent = `${icons[hr.status]||'?'} ${hr.host}${hr.status==='ok'?` (${hr.count})`:hr.error?` — ${hr.error.substring(0,25)}`:''}`;
   const statusEl = document.getElementById(`status-${hr.host.replace(/\./g,'_')}`);
   if (statusEl) {
-    statusEl.textContent = hr.status === 'ok' ? `✓ ${hr.count} hallazgos` : hr.status;
+    statusEl.textContent = hr.status === 'ok' ? `✓ ${hr.count} hallazgos`
+      : hr.status === 'hostkey_changed' ? 'clave de host cambiada' : hr.status;
     statusEl.style.color = hr.status === 'ok' ? 'var(--green)' : 'var(--red)';
   }
 }

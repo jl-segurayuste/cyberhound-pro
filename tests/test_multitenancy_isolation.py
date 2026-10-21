@@ -500,7 +500,7 @@ async def test_credenciales_ssh_de_cada_organizacion(env, monkeypatch):
 
     scanned = []
 
-    async def fake_scan(cls, hosts, credentials, concurrency=5):
+    async def fake_scan(cls, hosts, credentials, concurrency=5, host_keys=None):
         scanned.append((current_tenant.get(), hosts, credentials))
         return [HostResult(host=h, port=22, user=credentials.username, status="ok") for h in hosts]
     monkeypatch.setattr(RemoteAuditor, "scan_multiple", classmethod(fake_scan))
@@ -516,3 +516,20 @@ async def test_credenciales_ssh_de_cada_organizacion(env, monkeypatch):
     r = await env.acme.patch(f"/api/config/ssh-credentials/{pw['id']}", json={"name": "Legado 2", "port": 2222})
     assert (await r.json())["port"] == 2222
     assert (await env.acme.patch(f"/api/config/ssh-credentials/{pw['id']}", json={"port": 0})).status == 400
+
+
+async def test_claves_de_host_ssh_de_cada_organizacion(env):
+    token = current_tenant.set("acme")
+    try:
+        await env.server.db.add_ssh_host_key("10.10.0.9", 22, "ssh-ed25519 AAAAdemo", "SHA256:demo")
+    finally:
+        current_tenant.reset(token)
+    rows = await (await env.acme.get("/api/config/ssh-host-keys")).json()
+    assert [(r["host"], r["port"], r["fingerprint"]) for r in rows] == [("10.10.0.9", 22, "SHA256:demo")]
+    assert await (await env.contoso.get("/api/config/ssh-host-keys")).json() == []
+    assert (await env.contoso.delete("/api/config/ssh-host-keys/10.10.0.9/22")).status == 404
+    assert (await env.acme.delete("/api/config/ssh-host-keys/10.10.0.9/x")).status == 400
+    assert (await env.acme.delete("/api/config/ssh-host-keys/10.10.0.9/22")).status == 200
+    assert await (await env.acme.get("/api/config/ssh-host-keys")).json() == []
+    events = await (await env.acme.get("/api/audit?action=ssh_hostkey_forget")).json()
+    assert events and events[0]["target"] == "10.10.0.9:22"

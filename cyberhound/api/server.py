@@ -196,6 +196,8 @@ class CyberHoundServer(ScanHandlers, FixHandlers, DataHandlers, AccountHandlers,
         app.router.add_post  ("/api/config/ssh-credentials",       self.api_ssh_credentials_create)
         app.router.add_patch ("/api/config/ssh-credentials/{cid}", self.api_ssh_credentials_update)
         app.router.add_delete("/api/config/ssh-credentials/{cid}", self.api_ssh_credentials_delete)
+        app.router.add_get   ("/api/config/ssh-host-keys",         self.api_ssh_host_keys_list)
+        app.router.add_delete("/api/config/ssh-host-keys/{host}/{port}", self.api_ssh_host_keys_delete)
         app.router.add_get   ("/api/schedules",            self.api_schedules_list)
         app.router.add_post  ("/api/schedules",            self.api_schedules_create)
         app.router.add_patch ("/api/schedules/{sid}",      self.api_schedules_update)
