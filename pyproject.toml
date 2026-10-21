@@ -80,6 +80,9 @@ ignore = [
     "B008",   # function call in default argument (patrón aiohttp/fastapi)
 ]
 
+[tool.ruff.lint.isort]
+combine-as-imports = true
+
 [tool.ruff.lint.per-file-ignores]
 "cyberhound/core/scheduler.py" = ["F401"]   # find_spec availability check pattern
 "tests/*" = ["F811", "F401"]

@@ -5,8 +5,7 @@ from datetime import UTC, datetime, timedelta
 import pytest_asyncio
 
 from cyberhound.core.database import DB_VERSION
-from cyberhound.core.database_pg import DB_VERSION as PG_DB_VERSION
-from cyberhound.core.database_pg import create_database
+from cyberhound.core.database_pg import DB_VERSION as PG_DB_VERSION, create_database
 
 FUTURE = (datetime.now(UTC) + timedelta(hours=8)).isoformat()
 
