@@ -25,7 +25,7 @@ from aiohttp import web
 
 from cyberhound import __version__
 from cyberhound.api.routes.intel_routes import register_routes as register_intel_routes
-from cyberhound.core import integrations, passwords
+from cyberhound.core import integrations, passwords, schedules
 from cyberhound.core.auth import (
     AGENT_ROUTES,
     TENANT_COOKIE,
@@ -47,8 +47,9 @@ from cyberhound.core.multitenancy import (
     current_tenant,
 )
 from cyberhound.core.paths import YARA_DIR
-from cyberhound.core.scheduler import Scheduler, build_scheduler
-from cyberhound.core.scope import Scope, ws_targets
+from cyberhound.core.scheduler import ENTRY_FLAGS, Scheduler, build_platform_scheduler
+from cyberhound.core.scope import Scope
+from cyberhound.core.scope import ws_targets as scope_targets
 from cyberhound.core.security import (
     CsrfProtection,
     InputValidator,
@@ -155,10 +156,11 @@ def _required_permission(method: str, path: str) -> str:
     if path == "/ws" or path.startswith((
         "/api/scan/", "/api/intel/scan", "/api/sbom/generate", "/api/import/audit",
         "/api/network/discover", "/api/findings/explain",
-    )) or (write and (path == "/api/compliance" or (path.startswith("/api/scheduler/") and path.endswith("/run")))):
+    )) or (write and (path == "/api/compliance" or (path.startswith(("/api/scheduler/", "/api/schedules/"))
+                                                    and path.endswith("/run")))):
         return "scan"
     if write and path.startswith((
-        "/api/config/", "/api/suppressions", "/api/scheduler/", "/api/yara/",
+        "/api/config/", "/api/suppressions", "/api/scheduler/", "/api/yara/", "/api/schedules",
     )):
         return "config"
     return "view"
@@ -173,6 +175,17 @@ _PLATFORM_PREFIXES = (
     "/api/scan/docker-image", "/api/sbom", "/api/yara", "/api/monitor", "/api/ansible",
     "/api/config/keys", "/api/config/agent", "/api/scheduler", "/metrics",
 )
+
+
+# Tarea WS → método que la ejecuta (también lo usan los análisis programados)
+WS_RUNNERS = {
+    "audit": "_run_local_audit", "malware": "_run_malware_scan", "network": "_run_network_scan",
+    "ssh": "_run_ssh_scan", "code": "_run_code_audit", "intel": "_run_intel_scan",
+    "docker": "_run_docker_scan", "services": "_run_services_audit", "tls": "_run_tls_scan",
+    "web_headers": "_run_web_headers_scan", "dns": "_run_dns_scan", "web_exposure": "_run_web_exposure_scan",
+    "api_security": "_run_api_security_scan", "subdomain_enum": "_run_subdomain_enum_scan",
+    "nuclei": "_run_nuclei_scan",
+}
 
 
 def _platform_only(path: str) -> bool:
@@ -384,6 +397,7 @@ class CyberHoundServer:
         self.tenants = TenantStore(Path(cfg.config_path).parent / "tenants.json")
         # Notificaciones, SIEM y ticketing: de la plataforma o de cada organización (ver _integration)
         self._integrations: dict[tuple[str, str], object] = {}
+        self._schedules_running: set[tuple[str, str]] = set()
         self.scheduler: Scheduler | None = None
         self._sbom_cache: dict | None = None
         self._ansible_jobs: list = []
@@ -476,6 +490,11 @@ class CyberHoundServer:
         app.router.add_get ("/api/scheduler",           self.api_scheduler_list)
         app.router.add_post("/api/scheduler/{name}/run",   self.api_scheduler_run)
         app.router.add_post("/api/scheduler/{name}/toggle", self.api_scheduler_toggle)
+        app.router.add_get   ("/api/schedules",            self.api_schedules_list)
+        app.router.add_post  ("/api/schedules",            self.api_schedules_create)
+        app.router.add_patch ("/api/schedules/{sid}",      self.api_schedules_update)
+        app.router.add_delete("/api/schedules/{sid}",      self.api_schedules_delete)
+        app.router.add_post  ("/api/schedules/{sid}/run",  self.api_schedules_run)
 
         # ── Configuración ────────────────────────────────────────────────────
         app.router.add_get ("/api/config/keys",         self.api_get_keys)
@@ -618,7 +637,7 @@ class CyberHoundServer:
                                                   "solo lo puede lanzar el administrador de la plataforma"})
             await ws.close()
             return ws
-        if err := await self._out_of_scope(ws_targets(msg)):
+        if err := await self._out_of_scope(scope_targets(msg)):
             await send({"type": "error", "text": err})
             await ws.close()
             return ws
@@ -629,36 +648,9 @@ class CyberHoundServer:
         self._scan_id_cache[ws_id] = scan_id
 
         try:
-            if task == "audit":
-                await self._run_local_audit(msg, ws_id, send, log, scan_id)
-            elif task == "malware":
-                await self._run_malware_scan(msg, ws_id, send, log, scan_id)
-            elif task == "network":
-                await self._run_network_scan(msg, ws_id, send, log, scan_id)
-            elif task == "ssh":
-                await self._run_ssh_scan(msg, ws_id, send, log, scan_id)
-            elif task == "code":
-                await self._run_code_audit(msg, ws_id, send, log, scan_id)
-            elif task == "intel":
-                await self._run_intel_scan(msg, ws_id, send, log, scan_id)
-            elif task == "docker":
-                await self._run_docker_scan(msg, ws_id, send, log, scan_id)
-            elif task == "services":
-                await self._run_services_audit(msg, ws_id, send, log, scan_id)
-            elif task == "tls":
-                await self._run_tls_scan(msg, ws_id, send, log, scan_id)
-            elif task == "web_headers":
-                await self._run_web_headers_scan(msg, ws_id, send, log, scan_id)
-            elif task == "dns":
-                await self._run_dns_scan(msg, ws_id, send, log, scan_id)
-            elif task == "web_exposure":
-                await self._run_web_exposure_scan(msg, ws_id, send, log, scan_id)
-            elif task == "api_security":
-                await self._run_api_security_scan(msg, ws_id, send, log, scan_id)
-            elif task == "subdomain_enum":
-                await self._run_subdomain_enum_scan(msg, ws_id, send, log, scan_id)
-            elif task == "nuclei":
-                await self._run_nuclei_scan(msg, ws_id, send, log, scan_id)
+            runner = getattr(self, WS_RUNNERS.get(task, ""), None)
+            if runner:
+                await runner(msg, ws_id, send, log, scan_id)
             else:
                 await send({"type": "error", "text": f"Tarea desconocida: {task}"})
         except Exception as e:
@@ -1522,9 +1514,156 @@ class CyberHoundServer:
             if not self.scheduler:
                 return web.json_response({"error": "Scheduler no activo"}, status=503)
             ok = self.scheduler.enable(name, enabled)
-            return web.json_response({"ok": ok})
+            if ok and name in ENTRY_FLAGS:          # que sobreviva a un reinicio
+                setattr(self.cfg.scheduler, ENTRY_FLAGS[name], enabled)
+                self.cfg.save()
+            return web.json_response({"ok": ok}, status=200 if ok else 404)
         except Exception as e:
             return web.json_response({"ok": False, "error": str(e)}, status=500)
+
+    # ── Análisis programados (de cada organización) ───────────────────────────
+
+    async def api_schedules_list(self, request: web.Request) -> web.Response:
+        rows = await self.db.list_schedules()
+        running = {sid for slug, sid in self._schedules_running if slug == current_tenant.get()}
+        return web.json_response([{**r, "running": r["id"] in running} for r in rows])
+
+    async def _schedule_problem(self, data: dict) -> str | None:
+        try:
+            schedules.check_targets(data["task"], data["targets"])
+        except ValueError as e:
+            return str(e)
+        return await self._out_of_scope(scope_targets(schedules.ws_message(data["task"], data["targets"])))
+
+    async def api_schedules_create(self, request: web.Request) -> web.Response:
+        try:
+            data = schedules.validate(await _read_json(request))
+        except ValueError as e:
+            return web.json_response({"error": str(e)}, status=400)
+        if err := await self._schedule_problem(data):
+            return web.json_response({"error": err}, status=400)
+        if await self.db.count_schedules() >= schedules.MAX_PER_TENANT:
+            return web.json_response({"error": f"Máximo {schedules.MAX_PER_TENANT} programaciones"}, status=400)
+        sid = await self.db.create_schedule(data, created_by=request.get("auth_user", ""))
+        await self._audit(request, "schedule_create", data["name"], f"{data['task']} {','.join(data['targets'])[:150]}")
+        return web.json_response(await self.db.get_schedule(sid), status=201)
+
+    async def api_schedules_update(self, request: web.Request) -> web.Response:
+        sid = request.match_info["sid"]
+        current = await self.db.get_schedule(sid)
+        if not current:
+            return web.json_response({"error": "Programación no encontrada"}, status=404)
+        try:
+            data = schedules.validate(await _read_json(request), partial=True)
+        except ValueError as e:
+            return web.json_response({"error": str(e)}, status=400)
+        if "task" in data or "targets" in data:
+            if err := await self._schedule_problem({**current, **data}):
+                return web.json_response({"error": err}, status=400)
+        await self.db.update_schedule(sid, data)
+        await self._audit(request, "schedule_update", current["name"], ",".join(sorted(data)))
+        return web.json_response(await self.db.get_schedule(sid))
+
+    async def api_schedules_delete(self, request: web.Request) -> web.Response:
+        sid = request.match_info["sid"]
+        current = await self.db.get_schedule(sid)
+        if not current or not await self.db.delete_schedule(sid):
+            return web.json_response({"error": "Programación no encontrada"}, status=404)
+        await self._audit(request, "schedule_delete", current["name"])
+        return web.json_response({"ok": True})
+
+    async def api_schedules_run(self, request: web.Request) -> web.Response:
+        sched = await self.db.get_schedule(request.match_info["sid"])
+        if not sched:
+            return web.json_response({"error": "Programación no encontrada"}, status=404)
+        slug = current_tenant.get()
+        if (slug, sched["id"]) in self._schedules_running:
+            return web.json_response({"error": "Ya se está ejecutando"}, status=409)
+        self._start_schedule(slug, sched, triggered_by=request.get("auth_user", "manual"))
+        await self._audit(request, "schedule_run", sched["name"])
+        return web.json_response({"ok": True, "started": True}, status=202)
+
+    def _schedule_slugs(self) -> list[str]:
+        slugs = [DEFAULT_TENANT]
+        if self.cfg.multi_tenant.enabled:
+            slugs += [t.slug for t in self.tenants.list()]
+        return slugs
+
+    async def _schedules_tick(self, now: datetime | None = None) -> list[asyncio.Task]:
+        """Lanza las programaciones que tocan en este minuto (hora local, como el scheduler)."""
+        now = now or datetime.now()
+        started = []
+        for slug in self._schedule_slugs():
+            ctx = current_tenant.set(slug)
+            try:
+                for sched in await self.db.list_schedules():
+                    if schedules.is_due(sched, now) and (slug, sched["id"]) not in self._schedules_running:
+                        started.append(self._start_schedule(slug, sched, triggered_by="schedule", now=now))
+            except Exception as e:  # noqa: BLE001 — una organización con la BD rota no para a las demás
+                logger.error("Programaciones de %s: %s", slug, e)
+            finally:
+                current_tenant.reset(ctx)
+        return started
+
+    async def _schedules_loop(self) -> None:
+        while True:
+            try:
+                await self._schedules_tick()
+            except Exception as e:  # noqa: BLE001
+                logger.error("Bucle de programaciones: %s", e, exc_info=True)
+            now = datetime.now()
+            await asyncio.sleep(60 - now.second - now.microsecond / 1_000_000)
+
+    def _start_schedule(self, slug: str, sched: dict, triggered_by: str, now: datetime | None = None) -> asyncio.Task:
+        key = (slug, sched["id"])
+        self._schedules_running.add(key)
+        ctx = current_tenant.set(slug)        # la tarea hereda el contexto: BD e integraciones del tenant
+        try:
+            task = asyncio.ensure_future(self._run_schedule(slug, sched, triggered_by, now or datetime.now()))
+        finally:
+            current_tenant.reset(ctx)
+        task.add_done_callback(lambda _t: self._schedules_running.discard(key))
+        return task
+
+    async def _run_schedule(self, slug: str, sched: dict, triggered_by: str, now: datetime) -> None:
+        when = now.isoformat(timespec="seconds")
+        await self.db.mark_schedule_run(sched["id"], when, "en curso", None)
+        scan_id = None
+        try:
+            msg = schedules.ws_message(sched["task"], sched["targets"])
+            if err := await self._out_of_scope(scope_targets(msg)):   # el ámbito pudo cambiar después
+                await self.db.mark_schedule_run(sched["id"], when, f"fuera de ámbito: {err}", None)
+                return
+            scan_id = await self.db.create_scan(sched["task"], triggered_by=f"schedule:{triggered_by}")
+            ws_id = f"sched:{slug}:{sched['id']}:{scan_id}"
+            self._scan_id_cache[ws_id] = scan_id
+            seen: dict = {"findings": [], "error": ""}
+
+            async def send(m: dict) -> None:
+                if m.get("type") == "finding":
+                    seen["findings"].append(m["data"].get("severity"))
+                elif m.get("type") == "error":
+                    seen["error"] = m.get("text", "")
+
+            async def log(level: str, text: str) -> None:
+                return None
+
+            try:
+                await getattr(self, WS_RUNNERS[sched["task"]])(msg, ws_id, send, log, scan_id)
+            finally:
+                self._findings_cache.pop(ws_id, None)
+                self._scan_id_cache.pop(ws_id, None)
+            crit = seen["findings"].count("critical")
+            status = f"error: {seen['error']}" if seen["error"] else f"ok: {len(seen['findings'])} hallazgos"
+            await self.db.mark_schedule_run(sched["id"], when, status, scan_id)
+            if crit:
+                await self.notification_manager.send(
+                    f"⏰ {sched['name']}: {crit} hallazgo(s) CRÍTICO(S)", level="critical", scan_id=scan_id)
+        except Exception as e:  # noqa: BLE001
+            logger.error("Programación %s/%s: %s", slug, sched["id"], e, exc_info=True)
+            if scan_id:
+                await self.db.fail_scan(scan_id)
+            await self.db.mark_schedule_run(sched["id"], when, f"error: {e}", scan_id)
 
     # ── Configuración ─────────────────────────────────────────────────────────
 
@@ -2521,8 +2660,11 @@ class CyberHoundServer:
 
         # 5. Scheduler
         if self.cfg.scheduler.enabled:
-            self.scheduler = build_scheduler(self, self.cfg.scheduler)
+            self.scheduler = build_platform_scheduler(self, self.cfg.scheduler)
             await self.scheduler.start()
+
+        # Análisis programados de cada organización (y de la plataforma)
+        self._schedules_task = asyncio.ensure_future(self._schedules_loop())
 
         # 6. Monitor eBPF/auditd en tiempo real (si está habilitado en config)
         if getattr(self.cfg, 'monitor_enabled', True):

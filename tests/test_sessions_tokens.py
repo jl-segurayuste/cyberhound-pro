@@ -175,3 +175,13 @@ async def test_auditoria(clients):
     assert all(e["action"] == "login" for e in await (await adm.get("/api/audit?action=login")).json())
     assert (await ana.get("/api/audit")).status == 403          # solo admin
     assert (await adm.get("/api/audit?limit=x")).status == 400
+
+
+async def test_interruptor_del_scheduler_se_guarda(clients, server):
+    """Antes el interruptor solo cambiaba la memoria: tras reiniciar la tarea volvía a su estado."""
+    from cyberhound.core.scheduler import build_platform_scheduler
+    server.scheduler = build_platform_scheduler(server, server.cfg.scheduler)
+    adm = await clients("admin", ADMIN_PW)
+    assert (await adm.post("/api/scheduler/weekly_malware/toggle", json={"enabled": False})).status == 200
+    assert server.cfg.scheduler.malware_enabled is False
+    assert (await adm.post("/api/scheduler/no_existe/toggle", json={"enabled": False})).status == 404

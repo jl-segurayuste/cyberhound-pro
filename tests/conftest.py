@@ -25,6 +25,10 @@ def _postgres_limpio():
         async def reset():
             conn = await asyncpg.connect(url)
             try:
+                # los pools de tests anteriores quedan abiertos al cerrarse su event loop; sin
+                # esto la suite agota max_connections a mitad de camino
+                await conn.execute("SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                                   "WHERE pid <> pg_backend_pid() AND datname = current_database()")
                 for (schema,) in await conn.fetch("SELECT nspname FROM pg_namespace WHERE nspname LIKE 'tenant\\_%'"):
                     await conn.execute(f'DROP SCHEMA "{schema}" CASCADE')   # esquemas de tenants
                 await conn.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")

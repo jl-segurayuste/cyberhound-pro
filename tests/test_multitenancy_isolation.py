@@ -4,6 +4,8 @@ Antes de 2026-10-20 el modo multi-tenant solo existía como API para crear tenan
 ningún dato estaba separado. Con CH_DB_URL=postgresql://… estos tests comprueban
 también el aislamiento por esquema de PostgreSQL.
 """
+from datetime import datetime
+
 import pytest
 import pytest_asyncio
 from aiohttp.test_utils import TestClient, TestServer
@@ -350,3 +352,56 @@ async def test_integraciones_propias_de_cada_organizacion(env, monkeypatch):
     # el superadmin sí puede usar destinos internos en la plataforma
     assert (await env.sa.post("/api/config/siem", json={"elk_enabled": True, "elk_url": "http://127.0.0.1:9200"})).status == 200
     assert (await env.acme.get("/api/config/keys")).status == 403
+
+
+async def test_analisis_programados_por_organizacion(env, monkeypatch):
+    srv = env.server
+    sched = {"name": "Cabeceras", "task": "web_headers", "targets": ["http://10.10.0.9"], "hour": 3, "minute": 0}
+    r = await env.acme.post("/api/schedules", json=sched)
+    assert r.status == 400 and "permitidos" in (await r.json())["error"]       # sin ámbito
+    await env.sa.patch("/api/tenants/acme", json={"allowed_targets": ["10.10.0.0/24"]})
+    r = await env.acme.post("/api/schedules", json={**sched, "targets": ["http://192.168.1.1"]})
+    assert r.status == 400 and "fuera" in (await r.json())["error"]
+    assert (await env.acme.post("/api/schedules", json={**sched, "task": "audit"})).status == 400
+    r = await env.acme.post("/api/schedules", json=sched)
+    assert r.status == 201, await r.text()
+    sid = (await r.json())["id"]
+    assert [s["id"] for s in await (await env.acme.get("/api/schedules")).json()] == [sid]
+    assert await (await env.contoso.get("/api/schedules")).json() == []
+    assert (await env.contoso.delete(f"/api/schedules/{sid}")).status == 404
+    assert (await env.contoso.post(f"/api/schedules/{sid}/run")).status == 404
+
+    ran = []
+
+    async def fake_run(self, params, ws_id, send, log, scan_id):
+        ran.append((current_tenant.get(), params["urls"]))
+        f = Finding(id="hdr1", category="web", severity="critical", title="Sin HSTS", description="", remediation="")
+        await self._emit_findings([f], ws_id, send, scan_id)
+    monkeypatch.setattr(type(srv), "_run_web_headers_scan", fake_run)
+    sent = []
+
+    async def fake_send(message, level="info", scan_id=None):
+        sent.append((current_tenant.get(), message))
+    token = current_tenant.set("acme")
+    try:
+        monkeypatch.setattr(srv.notification_manager, "send", fake_send)
+    finally:
+        current_tenant.reset(token)
+    tasks = await srv._schedules_tick(datetime(2026, 10, 21, 3, 0, 10))
+    assert len(tasks) == 1
+    await tasks[0]
+    assert ran == [("acme", ["http://10.10.0.9"])] and sent and sent[0][0] == "acme"
+    assert await srv._schedules_tick(datetime(2026, 10, 21, 3, 0, 40)) == []      # no se repite en el mismo minuto
+    s = (await (await env.acme.get("/api/schedules")).json())[0]
+    assert s["last_status"].startswith("ok: 1") and s["last_scan_id"]
+    assert await _history(env.acme)
+    assert await _history(env.contoso) == []
+    # si el ámbito se reduce, la programación ya no se ejecuta
+    await env.sa.patch("/api/tenants/acme", json={"allowed_targets": ["10.20.0.0/24"]})
+    tasks = await srv._schedules_tick(datetime(2026, 10, 22, 3, 0, 10))
+    await tasks[0]
+    s = (await (await env.acme.get("/api/schedules")).json())[0]
+    assert s["last_status"].startswith("fuera de ámbito") and len(ran) == 1
+    assert (await env.acme.patch(f"/api/schedules/{sid}", json={"enabled": False})).status == 200
+    assert await srv._schedules_tick(datetime(2026, 10, 23, 3, 0, 10)) == []
+    assert (await env.acme.delete(f"/api/schedules/{sid}")).status == 200

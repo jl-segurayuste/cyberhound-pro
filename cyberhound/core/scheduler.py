@@ -122,6 +122,20 @@ class Scheduler:
         return False
 
 
+# Tarea → campo de SchedulerSettings que la activa (lo que se guarda al pulsar el interruptor)
+ENTRY_FLAGS = {"daily_audit": "audit_enabled", "weekly_malware": "malware_enabled", "daily_network": "network_enabled"}
+
+
+def build_platform_scheduler(app_ref, cfg) -> Scheduler:
+    """Todas las tareas, activas o no según config.yaml: antes las desactivadas ni se creaban
+    (no se podían encender desde la UI) y el interruptor no se guardaba al reiniciar."""
+    import dataclasses
+    s = build_scheduler(app_ref, dataclasses.replace(cfg, **dict.fromkeys(ENTRY_FLAGS.values(), True)))
+    for name, flag in ENTRY_FLAGS.items():
+        s.enable(name, bool(getattr(cfg, flag, True)))
+    return s
+
+
 def build_scheduler(app_ref, cfg) -> Scheduler:
     """
     Construye el scheduler con las tareas estándar.

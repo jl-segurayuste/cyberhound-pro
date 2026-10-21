@@ -4,6 +4,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest_asyncio
 
+from cyberhound.core.database import DB_VERSION
+from cyberhound.core.database_pg import DB_VERSION as PG_DB_VERSION
 from cyberhound.core.database_pg import create_database
 
 FUTURE = (datetime.now(UTC) + timedelta(hours=8)).isoformat()
@@ -77,7 +79,7 @@ async def test_bd_sqlite_antigua_se_actualiza(tmp_path):
     await d.init()
     await d.create_session("j", "ana", FUTURE)
     with sqlite3.connect(path) as c:
-        assert c.execute("SELECT MAX(version) FROM schema_version").fetchone()[0] == 6
+        assert c.execute("SELECT MAX(version) FROM schema_version").fetchone()[0] == DB_VERSION
 
 
 async def test_bd_postgres_antigua_se_actualiza():
@@ -97,5 +99,5 @@ async def test_bd_postgres_antigua_se_actualiza():
     await d.init()
     await d.create_session("j", "ana", FUTURE)
     assert await d.get_active_session("j")
-    assert await d._val("SELECT MAX(version) FROM schema_version") == 6
+    assert await d._val("SELECT MAX(version) FROM schema_version") == PG_DB_VERSION
     await d.close()
