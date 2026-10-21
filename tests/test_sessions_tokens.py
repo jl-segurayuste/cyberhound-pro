@@ -185,3 +185,12 @@ async def test_interruptor_del_scheduler_se_guarda(clients, server):
     assert (await adm.post("/api/scheduler/weekly_malware/toggle", json={"enabled": False})).status == 200
     assert server.cfg.scheduler.malware_enabled is False
     assert (await adm.post("/api/scheduler/no_existe/toggle", json={"enabled": False})).status == 404
+
+
+async def test_jwt_sin_sesion_no_vale(clients, server):
+    """Un JWT válido pero sin jti (emitido antes de que existieran las sesiones) ya no entra."""
+    import jwt
+    old = jwt.encode({"sub": "ana", "tenant": "default", "exp": int(time.time()) + 3600},
+                     server.cfg.auth.secret, algorithm="HS256")
+    anon = await clients.anon()
+    assert (await anon.get("/api/me", headers={"Authorization": f"Bearer {old}"})).status == 401

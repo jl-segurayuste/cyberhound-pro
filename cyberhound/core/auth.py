@@ -307,6 +307,9 @@ async def auth_middleware(request: web.Request, handler):
         raise web.HTTPUnauthorized(reason="Token JWT requerido")
 
     payload = cfg.verify_jwt(token)
+    # Sin jti no hay sesión que comprobar ni revocar (JWT de antes de 6.5): se pide iniciar sesión otra vez
+    if payload and not payload.get("jti"):
+        payload = None
     if not payload:
         audit_log.auth_failure(_get_real_ip(request), "JWT inválido o expirado")
         # Si es una petición de navegador, redirigir al login con mensaje

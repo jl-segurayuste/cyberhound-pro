@@ -1,0 +1,300 @@
+// Organizaciones, mi cuenta, programados, fixes remotos, auditoría y ámbito.
+// Se cargan en orden (ver index.html); comparten el ámbito global como si fueran un solo fichero.
+'use strict';
+
+// ── Multi-tenant ──────────────────────────────────────────────────────────────
+async function loadTenantSwitch() {
+  const sel = document.getElementById('tenant-switch');
+  if (!sel) return;
+  try {
+    const r = await fetch('/api/tenants');
+    if (!r.ok) return;
+    const tenants = await r.json();
+    sel.innerHTML = '<option value="default">Plataforma</option>' +
+      tenants.map(t => `<option value="${esc(t.slug)}">${esc(t.name)}</option>`).join('');
+    sel.value = USER.tenant;
+    sel.hidden = false;
+  } catch { /* sin selector */ }
+}
+
+async function switchTenant(slug) {
+  const r = await fetch('/api/tenant/switch', {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({slug}),
+  });
+  if (r.ok) location.reload();
+  else toast('Error: ' + ((await r.json()).error || r.status), 'error');
+}
+
+async function loadTenants() {
+  const tbody = document.getElementById('tenants-tbody');
+  if (!tbody || !(USER.multi_tenant && USER.superadmin)) return;
+  try {
+    const tenants = await fetch('/api/tenants').then(r => r.json());
+    tbody.innerHTML = tenants.length ? tenants.map(t => `<tr>
+        <td style="font-family:monospace">${esc(t.slug)}</td><td>${esc(t.name)}</td>
+        <td style="font-size:.78rem;color:var(--text2)">${fmt(t.created_at)}</td>
+        <td style="white-space:nowrap"><input type="text" id="scope-${esc(t.slug)}" value="${esc((t.allowed_targets || []).join(', '))}"
+              placeholder="10.10.0.0/24, ejemplo-demo.es" style="min-width:220px">
+          <button class="btn-secondary small" ${on('click', 'saveTenantScope', t.slug)}>Guardar</button></td>
+        <td style="white-space:nowrap">
+          <button class="btn-secondary small" ${on('click', 'rotateTenantKey', t.slug)}>Nueva clave</button>
+          <button class="btn-secondary small danger" ${on('click', 'deleteTenant', t.slug)}>Dar de baja</button>
+        </td></tr>`).join('')
+      : '<tr><td colspan="5" style="color:var(--text2)">Sin organizaciones todavía.</td></tr>';
+  } catch (e) { tbody.innerHTML = `<tr><td colspan="5">Error: ${esc(e.message)}</td></tr>`; }
+}
+
+async function createTenant() {
+  const val = id => document.getElementById(id)?.value.trim() || '';
+  const msg = document.getElementById('tenant-msg');
+  const body = { slug: val('tenant-slug').toLowerCase(), name: val('tenant-name'), admin_email: val('tenant-email'),
+                 plan: val('tenant-plan') || 'starter', admin_username: val('tenant-admin-user'),
+                 admin_password: document.getElementById('tenant-admin-pass')?.value || '' };
+  if (!body.slug || !body.name) {
+    msg.style.color = 'var(--yellow)'; msg.textContent = 'Indica el identificador y el nombre'; return;
+  }
+  const r = await fetch('/api/tenants', {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body),
+  });
+  const d = await r.json();
+  if (!r.ok) { msg.style.color = 'var(--red)'; msg.textContent = '✗ ' + (d.error || r.status); return; }
+  msg.style.color = 'var(--green)';
+  msg.innerHTML = `✓ Creada <b>${esc(d.slug)}</b>. Clave de agente (guárdala, no se vuelve a mostrar aquí):` +
+                  `<br><code style="word-break:break-all">${esc(d.api_key)}</code>`;
+  ['tenant-slug', 'tenant-name', 'tenant-email', 'tenant-admin-user', 'tenant-admin-pass']
+    .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+  loadTenants(); loadTenantSwitch();
+}
+
+async function deleteTenant(slug) {
+  if (!confirm(`¿Dar de baja la organización "${slug}"? Sus usuarios dejarán de poder entrar; los datos se archivan.`)) return;
+  const r = await fetch(`/api/tenants/${encodeURIComponent(slug)}`, {method: 'DELETE'});
+  if (r.ok) { toast('✓ Organización dada de baja'); loadTenants(); loadTenantSwitch(); }
+  else toast('Error: ' + ((await r.json()).error || r.status), 'error');
+}
+
+async function rotateTenantKey(slug) {
+  const r = await fetch(`/api/tenants/${encodeURIComponent(slug)}/rotate-key`, {method: 'POST'});
+  const d = await r.json();
+  const msg = document.getElementById('tenant-msg');
+  if (!r.ok) { toast('Error: ' + (d.error || r.status), 'error'); return; }
+  msg.style.color = 'var(--green)';
+  msg.innerHTML = `✓ Nueva clave de agente de <b>${esc(slug)}</b> (la anterior deja de valer):` +
+                  `<br><code style="word-break:break-all">${esc(d.api_key)}</code>`;
+}
+
+async function loadTenantAgentKey() {
+  const card = document.getElementById('tenant-agent-key-card');
+  if (!card || !USER.multi_tenant || USER.tenant === 'default' || USER.role !== 'admin') return;
+  try {
+    const r = await fetch('/api/tenant/agent-key');
+    if (!r.ok) return;
+    document.getElementById('tenant-agent-key').textContent = (await r.json()).api_key;
+    card.hidden = false;
+  } catch { /* sin clave */ }
+}
+
+// ── Mi cuenta: contraseña, sesiones y tokens de API ───────────────────────
+function _msg(id, ok, text) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.style.color = ok ? 'var(--green)' : 'var(--red)';
+  el.textContent = (ok ? '✓ ' : '✗ ') + text;
+}
+
+async function changeMyPassword() {
+  const val = id => document.getElementById(id)?.value || '';
+  if (val('acct-pw-new') !== val('acct-pw-new2')) { _msg('acct-pw-msg', false, 'Las dos contraseñas nuevas no coinciden'); return; }
+  const r = await fetch('/api/me/password', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({current: val('acct-pw-current'), new: val('acct-pw-new')}),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) { _msg('acct-pw-msg', false, d.error || r.status); return; }
+  ['acct-pw-current', 'acct-pw-new', 'acct-pw-new2'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+  _msg('acct-pw-msg', true, `Contraseña cambiada (${d.sessions_closed} sesiones cerradas)`);
+  loadSessions();
+}
+
+async function loadSessions() {
+  const tbody = document.getElementById('sessions-tbody');
+  if (!tbody) return;
+  const r = await fetch('/api/sessions');
+  if (!r.ok) { tbody.innerHTML = '<tr><td colspan="4" style="color:var(--text2)">Solo con una sesión de navegador</td></tr>'; return; }
+  const rows = await r.json().catch(() => null);
+  if (!Array.isArray(rows)) { tbody.innerHTML = ''; return; }
+  tbody.innerHTML = rows.map(s => `<tr>
+      <td style="font-size:.78rem">${fmt(s.last_seen)}${s.current ? ' <b>(esta)</b>' : ''}</td>
+      <td style="font-family:monospace;font-size:.78rem">${esc(s.ip)}</td>
+      <td style="font-size:.72rem;color:var(--text2);max-width:260px;overflow:hidden;text-overflow:ellipsis">${esc(s.user_agent)}</td>
+      <td><button class="btn-secondary small danger" ${on('click', 'revokeSession', s.id, s.current)}>${s.current ? 'Salir' : 'Cerrar'}</button></td>
+    </tr>`).join('') || '<tr><td colspan="4" style="color:var(--text2)">Sin sesiones</td></tr>';
+}
+
+async function revokeSession(id, current) {
+  const r = await fetch(`/api/sessions/${encodeURIComponent(id)}`, {method: 'DELETE'});
+  if (current && r.ok) { location.href = '/login'; return; }
+  const d = await r.json().catch(() => ({}));
+  _msg('sessions-msg', r.ok, r.ok ? 'Sesión cerrada' : (d.error || r.status));
+  loadSessions();
+}
+
+async function revokeOtherSessions() {
+  const r = await fetch('/api/sessions/revoke-others', {method: 'POST'});
+  const d = await r.json().catch(() => ({}));
+  _msg('sessions-msg', r.ok, r.ok ? `${d.closed} sesiones cerradas` : (d.error || r.status));
+  loadSessions();
+}
+
+async function loadApiTokens() {
+  const tbody = document.getElementById('tokens-tbody');
+  if (!tbody) return;
+  const r = await fetch('/api/tokens');
+  if (!r.ok) { tbody.innerHTML = ''; return; }
+  const rows = await r.json().catch(() => null);
+  if (!Array.isArray(rows)) { tbody.innerHTML = ''; return; }
+  tbody.innerHTML = rows.map(t => `<tr>
+      <td>${esc(t.name)}</td><td>${esc(t.role)}</td>
+      <td style="font-size:.78rem">${t.expires_at ? fmt(t.expires_at) : 'nunca'}</td>
+      <td style="font-size:.78rem">${t.last_used ? fmt(t.last_used) : '—'}</td>
+      <td><button class="btn-secondary small danger" ${on('click', 'revokeApiToken', t.id)}>Revocar</button></td>
+    </tr>`).join('') || '<tr><td colspan="5" style="color:var(--text2)">Sin tokens</td></tr>';
+}
+
+async function createApiToken() {
+  const name = document.getElementById('token-name')?.value.trim() || '';
+  const box = document.getElementById('token-new');
+  const r = await fetch('/api/tokens', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({name, role: document.getElementById('token-role')?.value,
+                          expires_days: parseInt(document.getElementById('token-days')?.value || '90', 10)}),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) { box.style.color = 'var(--red)'; box.textContent = '✗ ' + (d.error || r.status); return; }
+  box.style.color = 'var(--green)';
+  box.innerHTML = '✓ Token creado. Cópialo ahora, no se vuelve a mostrar:<br>' +
+                  `<code style="word-break:break-all">${esc(d.token)}</code>`;
+  document.getElementById('token-name').value = '';
+  loadApiTokens();
+}
+
+async function revokeApiToken(id) {
+  const r = await fetch(`/api/tokens/${encodeURIComponent(id)}`, {method: 'DELETE'});
+  toast(r.ok ? '✓ Token revocado' : '✗ No se pudo revocar', r.ok ? 'info' : 'error');
+  loadApiTokens();
+}
+
+// ── Análisis programados ──────────────────────────────────────────────────
+const SCHED_TASKS = {web_headers: 'Cabeceras web', web_exposure: 'Exposición web', api_security: 'API / CORS',
+                     tls: 'TLS', dns: 'DNS', subdomain_enum: 'Subdominios', nuclei: 'Nuclei', network: 'Red'};
+const DAY_NAMES = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
+
+async function loadSchedules() {
+  const tbody = document.getElementById('schedules-tbody');
+  if (!tbody) return;
+  const r = await fetch('/api/schedules');
+  if (!r.ok) { tbody.innerHTML = ''; return; }
+  const rows = await r.json().catch(() => null);
+  if (!Array.isArray(rows)) { tbody.innerHTML = ''; return; }
+  const pad = n => String(n).padStart(2, '0');
+  tbody.innerHTML = rows.map(s => `<tr>
+      <td>${esc(s.name)}<div style="font-size:.72rem;color:var(--text2)">${esc(s.targets.join(', '))}</div></td>
+      <td>${esc(SCHED_TASKS[s.task] || s.task)}</td>
+      <td style="font-size:.78rem">${pad(s.hour)}:${pad(s.minute)} · ${s.days.length === 7 ? 'todos los días' : s.days.map(d => DAY_NAMES[d]).join(' ')}</td>
+      <td style="font-size:.78rem">${s.running ? 'en curso…' : (s.last_run ? `${fmt(s.last_run)} · ${esc(s.last_status)}` : '—')}</td>
+      <td style="white-space:nowrap">
+        <button class="fix-btn" ${on('click', 'runSchedule', s.id)}>▶ Ahora</button>
+        <button class="toggle-btn ${s.enabled ? 'active' : ''}" ${on('click', 'toggleSchedule', s.id, !s.enabled)}>${s.enabled ? 'Pausar' : 'Reanudar'}</button>
+        <button class="btn-secondary small danger" ${on('click', 'deleteSchedule', s.id)}>Borrar</button>
+      </td></tr>`).join('') || '<tr><td colspan="5" style="color:var(--text2)">Sin análisis programados</td></tr>';
+}
+
+async function createSchedule() {
+  const val = id => document.getElementById(id)?.value || '';
+  const body = {
+    name: val('sched-name').trim(), task: val('sched-task'),
+    targets: val('sched-targets').split(',').map(t => t.trim()).filter(Boolean),
+    hour: parseInt(val('sched-hour'), 10), minute: parseInt(val('sched-minute'), 10),
+    days: [...document.querySelectorAll('.sched-day:checked')].map(el => parseInt(el.value, 10)),
+  };
+  const r = await fetch('/api/schedules', {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body),
+  });
+  const d = await r.json().catch(() => ({}));
+  _msg('sched-msg', r.ok, r.ok ? `Programado: ${d.name}` : (d.error || r.status));
+  if (r.ok) { document.getElementById('sched-name').value = ''; document.getElementById('sched-targets').value = ''; }
+  loadSchedules();
+}
+
+async function runSchedule(id) {
+  const r = await fetch(`/api/schedules/${encodeURIComponent(id)}/run`, {method: 'POST'});
+  const d = await r.json().catch(() => ({}));
+  toast(r.ok ? '▶ Análisis lanzado en segundo plano' : '✗ ' + (d.error || r.status), r.ok ? 'info' : 'error');
+  loadSchedules();
+}
+
+async function toggleSchedule(id, enabled) {
+  await fetch(`/api/schedules/${encodeURIComponent(id)}`, {
+    method: 'PATCH', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({enabled}),
+  });
+  loadSchedules();
+}
+
+async function deleteSchedule(id) {
+  if (!confirm('¿Borrar esta programación?')) return;
+  await fetch(`/api/schedules/${encodeURIComponent(id)}`, {method: 'DELETE'});
+  loadSchedules();
+}
+
+// ── Fixes remotos aplicados ───────────────────────────────────────────────
+async function loadRemoteFixes() {
+  const tbody = document.getElementById('remote-fixes-tbody');
+  if (!tbody || !USER.permissions.includes('fix')) return;
+  const r = await fetch('/api/fix/remote/history');
+  if (!r.ok) { tbody.innerHTML = ''; return; }
+  const rows = await r.json().catch(() => null);
+  if (!Array.isArray(rows)) { tbody.innerHTML = ''; return; }
+  tbody.innerHTML = rows.map(f => `<tr>
+      <td style="font-size:.78rem">${fmt(f.ts)}</td>
+      <td style="font-family:monospace">${esc(f.host)}</td>
+      <td style="font-size:.78rem">${esc(f.finding_id.split('::').pop())}</td>
+      <td>${esc(f.username)}</td>
+      <td style="font-size:.78rem">${f.undone_at ? `deshecho por ${esc(f.undone_by)}` : (f.undo ? 'aplicado' : 'aplicado (sin deshacer)')}</td>
+      <td>${f.reversible ? `<button class="fix-btn" ${on('click', 'undoFixRemote', f.id, f.host, '$this')}>↶ Deshacer</button>` : ''}</td>
+    </tr>`).join('') || '<tr><td colspan="6" style="color:var(--text2)">Ningún fix remoto todavía</td></tr>';
+}
+
+// ── Registro de auditoría ─────────────────────────────────────────────────
+async function loadAudit() {
+  if (!USER.permissions.includes('users')) return;
+  const tbody = document.getElementById('auditlog-tbody');
+  if (!tbody) return;
+  const q = new URLSearchParams();
+  const val = id => document.getElementById(id)?.value.trim() || '';
+  if (val('auditlog-action')) q.set('action', val('auditlog-action'));
+  if (val('auditlog-user')) q.set('user', val('auditlog-user'));
+  if (val('auditlog-q')) q.set('q', val('auditlog-q'));
+  if (document.getElementById('auditlog-failures')?.checked) q.set('failures', '1');
+  const r = await fetch('/api/audit?' + q.toString());
+  if (!r.ok) { tbody.innerHTML = ''; return; }
+  const rows = await r.json().catch(() => null);
+  if (!Array.isArray(rows)) { tbody.innerHTML = ''; return; }
+  tbody.innerHTML = rows.map(e => `<tr style="${e.ok ? '' : 'color:var(--red)'}">
+      <td style="font-size:.75rem;white-space:nowrap">${fmt(e.ts)}</td><td>${esc(e.username)}</td>
+      <td style="font-family:monospace;font-size:.78rem">${esc(e.action)}${e.ok ? '' : ' ✗'}</td>
+      <td style="font-size:.78rem">${esc(e.target)}</td><td style="font-size:.75rem;color:var(--text2)">${esc(e.detail)}</td>
+      <td style="font-family:monospace;font-size:.75rem">${esc(e.ip)}</td></tr>`).join('')
+    || '<tr><td colspan="6" style="color:var(--text2)">Sin eventos</td></tr>';
+}
+
+// ── Ámbito de cada organización (superadmin) ──────────────────────────────
+async function saveTenantScope(slug) {
+  const raw = document.getElementById(`scope-${slug}`)?.value || '';
+  const r = await fetch(`/api/tenants/${encodeURIComponent(slug)}`, {
+    method: 'PATCH', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({allowed_targets: raw.split(/[\s,]+/).filter(Boolean)}),
+  });
+  const d = await r.json().catch(() => ({}));
+  toast(r.ok ? `✓ Ámbito de ${slug}: ${d.allowed_targets.length} entradas` : '✗ ' + (d.error || r.status), r.ok ? 'info' : 'error');
+  if (r.ok) loadTenants();
+}

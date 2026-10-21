@@ -94,8 +94,10 @@ Los hallazgos con ⚡ tienen **corrección automática**: pulsa **Corregir** (en
 **Corregir en &lt;host&gt;**, que se aplica por SSH en ese host). Revisa antes lo que va a hacer:
 cambios de firewall, SSH o montajes **pueden afectar a servicios** en producción.
 
-- Los fixes locales se pueden **deshacer**: el botón pasa a **↶ Deshacer**. Las instalaciones de
-  paquetes se marcan como no reversibles (no se desinstala nada a ciegas).
+- Los fixes se pueden **deshacer**: el botón pasa a **↶ Deshacer**. En los locales las instalaciones
+  de paquetes se marcan como no reversibles (no se desinstala nada a ciegas). En los remotos se guarda
+  el estado anterior del host; **Configuración › Fixes remotos** lista los aplicados y permite
+  deshacerlos más tarde (usa las credenciales SSH del panel Red).
 - Activar el firewall abre antes SSH y el puerto de CyberHound, para no dejarte fuera.
 - Todo queda en el log de auditoría (`security_audit.log`).
 - **Supresiones**: lo que sea un falso positivo se suprime con un patrón y un motivo
@@ -109,7 +111,15 @@ servidor lo rechaza aunque se intente por la API.
 
 En **Configuración › 2FA** cada usuario activa el doble factor: escanea el QR con una app TOTP,
 guarda los **códigos de recuperación** (solo se muestran una vez) y confirma con un código. A partir
-de ahí el login pide contraseña y código.
+de ahí el login pide contraseña y código. Para desactivarlo también hay que dar un código.
+
+En **Configuración › Mi cuenta** cada usuario cambia su contraseña (se cierran sus demás sesiones),
+ve dónde tiene la sesión abierta y cierra las que no reconozca, y crea **tokens de API** para
+scripts: `curl -H "Authorization: Bearer cht_…" https://<servidor>/api/history`. El token se muestra
+una sola vez, nunca tiene más permisos que tu rol y no sirve para cambiar contraseñas, 2FA ni sesiones.
+
+**Configuración › Auditoría** (solo admin) muestra quién hizo qué y desde qué IP: inicios de sesión
+(también los fallidos), usuarios, contraseñas, 2FA, tokens, fixes remotos y programaciones.
 
 ## 6. Organizaciones (multi-tenant)
 
@@ -117,20 +127,29 @@ Con `multi_tenant.enabled: true`, el admin de la plataforma gestiona organizacio
 **Configuración › Organizaciones** (alta con su primer administrador, nueva clave de agente, baja) y
 puede verlas con el selector de la cabecera. Cada organización entra escribiendo su identificador en
 el campo *Organización* del login y solo ve sus datos; las funciones que actúan sobre el propio
-servidor (menú Sistema, Monitor y la configuración global) no le aparecen. Detalle en el
-[README](../README.md#multi-tenant).
+servidor (menú Sistema, Monitor y la configuración global) no le aparecen.
+
+En la misma tabla se fijan las **redes y dominios permitidos** de cada organización
+(`10.10.0.0/24, ejemplo-demo.es`): solo puede analizar eso, y mientras esté vacío no puede lanzar
+análisis activos. Cada organización configura sus propias notificaciones, SIEM y ticketing, con
+destinos públicos o dentro de su ámbito. Detalle en el [README](../README.md#multi-tenant).
 
 ## 7. Programación y monitorización
 
-- **Tareas programadas** (Configuración › Scheduler): auditoría diaria 02:00, malware semanal
-  (lunes 03:00), red diaria 04:00 y actualización semanal de reglas YARA. Se pueden pausar o lanzar al momento.
+- **Tareas programadas de la plataforma** (Configuración › Scheduler): auditoría diaria 02:00, malware
+  semanal (lunes 03:00), red diaria 04:00 y actualización semanal de reglas YARA. Se pueden pausar
+  (queda guardado en `config.yaml`) o lanzar al momento.
+- **Análisis programados** (Configuración › Programados): cualquier organización, y la plataforma,
+  programa análisis de red, cabeceras web, exposición, API/CORS, TLS, DNS, subdominios o Nuclei a la
+  hora y los días que elija. Cada fila muestra la última ejecución y su resultado; se pueden lanzar
+  ahora, pausar o borrar. Los hallazgos quedan en el Historial y los críticos se notifican.
 - **Monitor en tiempo real** (Gestión › Monitor): comandos sospechosos y cambios en ficheros críticos;
   usa `bpftrace` (eBPF) o, si no está, `auditd`. Necesita privilegios y kernel real (no funciona en un
   contenedor sin privilegios).
 
 ## 8. Integraciones
 
-Desde **Configuración**: SIEM (**Wazuh**, **Elasticsearch**, **Splunk HEC**), ticketing (**Jira Cloud**
+Desde **Configuración** (en multi-tenant, cada organización las suyas): SIEM (**Wazuh**, **Elasticsearch**, **Splunk HEC**), ticketing (**Jira Cloud**
 o **ServiceNow**: un ticket por hallazgo **nuevo** por encima del umbral, sin duplicar a diario),
 notificaciones (email y webhook de Slack/Teams/Discord), **Ansible AWX**, **agentes** (otros servidores
 que envían sus hallazgos a este) y **LDAP/AD**. Cada sección tiene un botón de prueba para verificar la

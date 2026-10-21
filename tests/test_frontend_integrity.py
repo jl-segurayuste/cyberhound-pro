@@ -8,11 +8,13 @@ import re
 from pathlib import Path
 
 STATIC = Path(__file__).resolve().parent.parent / "cyberhound" / "ui" / "static"
-APP = (STATIC / "app.js").read_text(encoding="utf-8")
 IDX = (STATIC / "index.html").read_text(encoding="utf-8")
+# Los scripts de la UI, en el orden en que los carga index.html (comparten el ámbito global)
+JS_FILES = re.findall(r'<script src="/static/(js/[\w.-]+\.js)"></script>', IDX)
+APP = "\n".join((STATIC / f).read_text(encoding="utf-8") for f in JS_FILES)
 
 # Los eventos se declaran como data-on-<evento>="función" (HTML) o con el helper
-# on('<evento>', 'función', ...) (plantillas de app.js); el dispatcher los resuelve
+# on('<evento>', 'función', ...) (plantillas de static/js); el dispatcher los resuelve
 # en window[función], así que deben ser declaraciones `function` (no const/let).
 _DATA_ON_RE = re.compile(r'data-on-[a-z]+="([A-Za-z_$][\w$]*)"')
 _ON_HELPER_RE = re.compile(r"\bon\('[a-z]+',\s*'([A-Za-z_$][\w$]*)'")
@@ -73,3 +75,19 @@ def test_data_panel_loaders_exist():
     referenced = set(re.findall(r'=>\s*(?:\{[^}]*?)?\b(load[A-Z][\w$]*)\s*\(', APP))
     missing = sorted(r for r in referenced if r not in DEFINED)
     assert not missing, f"Cargadores de panel inexistentes: {missing}"
+
+
+def test_index_carga_todos_los_scripts_y_cada_uno_es_estricto():
+    on_disk = sorted(str(p.relative_to(STATIC)) for p in (STATIC / "js").glob("*.js"))
+    assert JS_FILES == on_disk, "index.html debe cargar todos los ficheros de static/js, en orden"
+    for f in JS_FILES:
+        assert "\n'use strict';\n" in (STATIC / f).read_text()[:400], f
+
+
+def test_ninguna_funcion_se_sobrescribe_en_tiempo_de_ejecucion():
+    """Antes showPanel, loadDashboard (dos veces) y toast se reasignaban más abajo para añadirles
+    pasos: el orden de carga decidía qué versión quedaba. Cada función se define una sola vez."""
+    reassigned = re.findall(r"^\s*(?:window\.)?([A-Za-z_$][\w$]*)\s*=\s*(?:async\s+)?function\b", APP, re.M)
+    assert not reassigned, reassigned
+    names = re.findall(r"^(?:async\s+)?function\s+([A-Za-z_$][\w$]*)", APP, re.M)
+    assert not {n for n in names if names.count(n) > 1}

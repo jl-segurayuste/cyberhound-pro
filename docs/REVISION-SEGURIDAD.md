@@ -106,3 +106,25 @@ sesión queda ligada a ella, las cachés en memoria y las notificaciones push se
 sobre el propio servidor queda reservado al superadmin. `tests/test_multitenancy_isolation.py` cubre
 datos, usuarios, supresiones, agentes, caché de hallazgos, push, rutas de plataforma, baja y reutilización
 del identificador, en SQLite y en PostgreSQL.
+
+## 8. Revisión de 2026-10-21 (v6.5.0: cuentas, organizaciones y deshacer)
+
+Al añadir sesiones revocables, tokens de API, auditoría, ámbito e integraciones por organización,
+análisis programados y deshacer fixes remotos se encontraron y corrigieron estos problemas, cada uno
+con su test de regresión:
+
+| # | Severidad | Hallazgo | Corrección |
+|---|---|---|---|
+| 1 | **Alta** | **Sin ámbito en multi-tenant**: cualquier organización podía escanear (red, SSH, web, LDAP) la LAN del propio servidor o las redes de otros clientes. | Redes y dominios permitidos por organización (vacío = ninguno), comprobados en cada análisis, descubrimiento, LDAP, fix remoto y programado; un dominio permitido que resuelve a una IP interna fuera del ámbito se rechaza. `tests/test_scope.py`, `test_ambito_de_analisis_por_organizacion`. |
+| 2 | **Alta** | **Clave SSH de la plataforma al alcance de las organizaciones**: el análisis SSH y el fix remoto usaban por defecto `scan.ssh_key_path`, o la ruta de clave que mandara la petición. | En una organización no se usa ninguna clave del servidor; solo usuario y contraseña. |
+| 3 | **Media** | **Sesiones irrevocables**: salir o cambiar la contraseña solo borraba la cookie; un JWT copiado valía hasta caducar (8 h). | Tabla de sesiones (`jti`) comprobada en cada petición. `tests/test_sessions_tokens.py`. |
+| 4 | **Media** | **2FA desactivable sin código**: con una sesión robada bastaba una petición para quitarlo. | Exige un código TOTP o de recuperación válido. |
+| 5 | **Media** | **SSRF por integraciones** (al abrirlas a las organizaciones): webhook, SIEM o Jira apuntados a `127.0.0.1` o a la LAN harían que el servidor enviara peticiones por el tenant. | Destinos públicos o dentro del ámbito, comprobados al guardar y antes de cada envío. `tests/test_integrations.py`. |
+| 6 | **Media** | **Integraciones compartidas**: todas las organizaciones enviaban sus hallazgos al SIEM, Jira y correo de la plataforma. | Cada organización tiene las suyas. |
+| 7 | **Baja** | **Estado previo del host sin validar** al guardar cómo deshacer un fix remoto (viene del host auditado). | Solo se aceptan valores con forma conocida (misma directiva de sshd, valor de sysctl sin metacaracteres, modo octal, booleanos). |
+| 8 | **Baja** | Lo que el superadmin hacía con su cuenta mirando una organización se auditaba en la organización. | Se audita en la plataforma. |
+
+Además se arreglaron bugs funcionales: la recarga en caliente de notificaciones y SIEM perdía campos
+(servidor SMTP, credenciales de Wazuh/ELK, índice de Splunk), el interruptor del scheduler no se
+guardaba y las notificaciones del navegador para críticos nunca saltaban (el manejador no estaba
+conectado al canal push).

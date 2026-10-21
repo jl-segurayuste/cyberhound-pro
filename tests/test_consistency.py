@@ -8,7 +8,7 @@ from cyberhound.core.config import CyberHoundConfig
 from cyberhound.core.openapi import ENDPOINT_DOCS, build_openapi_spec
 
 ROOT = Path(__file__).resolve().parent.parent
-APP_JS = (ROOT / "cyberhound/ui/static/app.js").read_text()
+APP_JS = "\n".join(p.read_text() for p in sorted((ROOT / "cyberhound/ui/static/js").glob("*.js")))
 INTERNAL = {"GET /", "GET /static", "GET /login", "GET /ws", "GET /ws/push"}
 
 
@@ -40,7 +40,8 @@ def test_openapi_lleva_la_version_y_licencia_del_proyecto():
 def test_una_sola_version_en_todo_el_proyecto():
     """Las versiones a mano (6.0, 6.1.0, 6.2.0, 6.3.0…) no deben volver."""
     files = ["Dockerfile", "install.sh", "docker-compose.yml", "docker-compose.production.yml",
-             "docker/entrypoint.sh", "cyberhound/ui/static/app.js", "cyberhound/ui/static/index.html"]
+             "docker/entrypoint.sh", "cyberhound/ui/static/index.html"]
+    files += [str(p.relative_to(ROOT)) for p in (ROOT / "cyberhound/ui/static/js").glob("*.js")]
     files += [str(p.relative_to(ROOT)) for p in (ROOT / "cyberhound").rglob("*.py")]
     for f in files:
         text = (ROOT / f).read_text()
@@ -56,7 +57,7 @@ def _fn_perms() -> dict[str, str]:
 
 
 def _js_function(fn: str) -> str | None:
-    """Cuerpo de una función de app.js, contando llaves desde la que la abre."""
+    """Cuerpo de una función de la UI (static/js), contando llaves desde la que la abre."""
     m = re.search(rf"^(?:async )?function {fn}\s*\([^)]*\)\s*\{{", APP_JS, re.M)
     if not m:
         return None
@@ -68,13 +69,17 @@ def _js_function(fn: str) -> str | None:
 
 
 def _write_endpoints(fn: str, seen=None) -> set[tuple[str, str]]:
-    """Endpoints de escritura (y /ws) que usa una función de app.js, siguiendo las que llama."""
+    """Endpoints de escritura (y /ws) que usa una función de la UI, siguiendo las que llama.
+
+    Una función llamada que empieza por `if (!hostAccess()) return;` no cuenta: para una
+    organización no hace nada (p. ej. loadSystemStatus desde loadDashboard)."""
+    top = seen is None
     seen = seen or set()
     if fn in seen:
         return set()
     seen.add(fn)
     body = _js_function(fn)
-    if body is None:
+    if body is None or (not top and body.split("{", 1)[1].lstrip().startswith("if (!hostAccess()) return;")):
         return set()
     out = set()
     for call in re.finditer(r"fetch\(\s*[`'\"]([^`'\"]+)[`'\"](?:\s*,\s*\{([^}]*)\})?", body):

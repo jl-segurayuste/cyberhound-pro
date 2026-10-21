@@ -4,7 +4,7 @@
 
 > Analiza tu red, servidores, contenedores, webs y código. Detecta vulnerabilidades, malware y configuraciones inseguras, corrige con un clic (y deshace) y vigila en tiempo real. Una instancia o varias organizaciones aisladas (multi-tenant).
 
-[![Versión](https://img.shields.io/badge/versión-v6.4.0-blue.svg)](cyberhound/__init__.py)
+[![Versión](https://img.shields.io/badge/versión-v6.5.0-blue.svg)](cyberhound/__init__.py)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://python.org)
 [![Tests](https://img.shields.io/badge/tests-690%20passed-green.svg)](#tests)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
@@ -180,7 +180,7 @@ HTML, PDF, playbook Ansible, JSON para SIEM, compliance e importación de audito
 
 ### Gestión › Configuración
 
-API keys, notificaciones, SIEM, ticketing, scheduler, usuarios, supresiones, 2FA, YARA, agentes, LDAP, cuarentena, SBOM, Ansible y organizaciones (multi-tenant).
+API keys, notificaciones, SIEM, ticketing, scheduler, usuarios, supresiones, 2FA, YARA, agentes, LDAP, cuarentena, SBOM, Ansible, mi cuenta (contraseña, sesiones y tokens de API), análisis programados, fixes remotos aplicados, registro de auditoría y organizaciones (multi-tenant).
 
 <img src="docs/img/capturas/settings.png" alt="Gestión › Configuración">
 
@@ -268,7 +268,15 @@ El administrador de `config.yaml` (`auth.username`) siempre es admin. Desde **Co
 | `operator` | Lo anterior + lanzar análisis y aplicar correcciones |
 | `admin` | Lo anterior + configuración, usuarios y supresiones |
 
-El servidor aplica los permisos en cada petición; la interfaz desactiva lo que el rol no permite. Un admin no puede quitarse su propio rol ni desactivarse. Cada usuario puede activar **2FA (TOTP)** con códigos de recuperación de un solo uso.
+El servidor aplica los permisos en cada petición; la interfaz desactiva lo que el rol no permite. Un admin no puede quitarse su propio rol ni desactivarse. Cada usuario puede activar **2FA (TOTP)** con códigos de recuperación de un solo uso; para desactivarlo hace falta un código válido.
+
+En **Configuración › Mi cuenta** cada usuario:
+
+- **Cambia su contraseña**; sus demás sesiones se cierran.
+- **Ve sus sesiones abiertas** (última actividad, IP, navegador) y cierra las que no reconozca. Las sesiones viven en la base de datos: al salir, cambiar la contraseña o desactivar al usuario dejan de valer al momento, aunque alguien haya copiado la cookie. Un admin puede cerrar todas las de otro usuario (`DELETE /api/users/{usuario}/sessions`).
+- **Crea tokens de API** para scripts y CI (`Authorization: Bearer cht_…`), con rol (nunca por encima del suyo) y caducidad. Solo se muestran al crearlos (se guarda su hash) y no sirven para gestionar credenciales: contraseña, 2FA, sesiones ni otros tokens.
+
+**Configuración › Auditoría** (admin) muestra el registro de la organización con filtros por acción, usuario, texto y fallos: inicios de sesión y sus fallos, cambios de usuarios, contraseñas, 2FA, tokens, fixes remotos, programaciones y configuración.
 
 ---
 
@@ -281,15 +289,17 @@ multi_tenant:
   enabled: true
 ```
 
-y se gestionan en **Configuración › Organizaciones** (alta con su primer administrador, nueva clave de agente, baja).
+y se gestionan en **Configuración › Organizaciones** (alta con su primer administrador, redes y dominios permitidos, nueva clave de agente, baja).
 
 - **Datos separados**: cada organización tiene su propia base de datos (un fichero SQLite en `<dir de la BD>/tenants/<slug>.db` o un esquema `tenant_<slug>` en PostgreSQL): escaneos, hallazgos, activos, supresiones, usuarios, 2FA y agentes. La organización "Plataforma" es la BD de siempre, así que activarlo no mueve datos.
 - **Login por organización**: el formulario pide la organización (o la toma del subdominio, `acme.cyberhound.ejemplo-demo.es`). La sesión queda ligada a ella y no se puede cambiar.
 - **Superadmin**: el admin de `config.yaml` (organización vacía en el login) gestiona las organizaciones y puede ver cualquiera con el selector de la cabecera.
-- **Reservado a la plataforma**: lo que actúa sobre el propio servidor o es configuración global (auditoría local, malware, Docker, servicios, código, fixes locales, cuarentena, YARA, SBOM, monitor, Ansible, scheduler, API keys, SIEM, notificaciones, ticketing). Una organización usa los análisis de red, web, DNS, intel, SSH remoto, LDAP e importación.
+- **Ámbito de análisis**: cada organización solo puede analizar las redes, IPs y dominios que el superadmin le permite (un dominio incluye sus subdominios); sin ámbito no puede lanzar análisis activos. Se comprueba en cada análisis, en el descubrimiento de red, LDAP, los fixes remotos y los programados. Un dominio permitido que resuelve a una IP interna fuera del ámbito se rechaza, para que no sirva de puente a la red del servidor. Una organización tampoco puede usar claves SSH guardadas en el servidor.
+- **Integraciones propias**: cada organización configura su correo, webhook, SIEM y Jira/ServiceNow, y recibe solo sus avisos. Sus destinos deben ser públicos o estar en su ámbito (se comprueba al guardar y antes de cada envío).
+- **Reservado a la plataforma**: lo que actúa sobre el propio servidor o es configuración global (auditoría local, malware, Docker, servicios, código, fixes locales, cuarentena, YARA, SBOM, monitor, Ansible, scheduler de la plataforma, API keys de threat intel, modo agente). Una organización usa los análisis de red, web, DNS, intel, SSH remoto, LDAP, importación y sus propios análisis programados.
 - **Agentes**: cada organización tiene su clave de agente (la ve su admin en Configuración › Agentes); sus informes solo llegan a ella.
 - **Baja**: corta al momento sesiones y clave de agente y **archiva** sus datos (no se borran). Si se vuelve a crear el mismo identificador, empieza vacío.
-- Los análisis de una organización salen desde el servidor de la plataforma: limita con el firewall a qué redes puede llegar.
+- Los análisis de una organización salen desde el servidor de la plataforma. El ámbito decide qué puede pedir; el firewall del servidor sigue siendo la última barrera.
 
 <p><img src="docs/img/capturas/organizaciones.png" alt="Configuración › Organizaciones" width="640"> <img src="docs/img/capturas/login-organizacion.png" alt="Login con organización" width="300"></p>
 
@@ -333,6 +343,7 @@ Los hallazgos con ⚡ se corrigen con un clic, en local o en el host remoto dond
 
 - **Deshacer** (fixes locales): cada fix guarda en un journal lo necesario para revertirlo (copia del fichero, permisos previos, estado del servicio o comando inverso) y el botón pasa a **↶ Deshacer**. Las instalaciones de paquetes se marcan como no reversibles: no se desinstala nada a ciegas.
 - **Corrección remota**: el comando lo construye CyberHound a partir del hallazgo (nunca se ejecuta lo que devuelve el host auditado) y se lanza por SSH sin shell, con `sudo -n` si está disponible.
+- **Deshacer** (fixes remotos): al aplicarlo, el host devuelve su estado anterior (la línea de `sshd_config`, el valor del sysctl, si el servicio estaba activo, los permisos del fichero, si ufw estaba apagado) y CyberHound guarda la acción inversa, validada porque viene del host. Se deshace desde el propio botón o desde **Configuración › Fixes remotos**, que lista los aplicados en la organización.
 
 ### Threat intelligence
 
@@ -346,6 +357,7 @@ Busca IPs, dominios, hashes (MD5/SHA1/SHA256) o emails en las fuentes con API ke
 - **Informes**: HTML, PDF, JSON y playbook de Ansible con las correcciones.
 - **Importación**: Nessus, OpenSCAP/XCCDF (RHEL STIG/CIS), CSV y JSON.
 - **Supresiones**: patrones de falsos positivos con motivo y caducidad.
+- **Análisis programados** (Configuración › Programados): red, cabeceras web, exposición, API/CORS, TLS, DNS, subdominios o Nuclei a la hora y los días elegidos, para la plataforma o para cada organización dentro de su ámbito. Se pueden lanzar a mano, pausar y borrar; los críticos avisan por las notificaciones de quien los programó. Aparte, el scheduler de la plataforma hace la auditoría diaria, el malware semanal y la red diaria del propio servidor.
 - **Explicación con IA**: un LLM local (Ollama) explica un hallazgo en lenguaje llano (opcional).
 
 ---
@@ -357,7 +369,9 @@ cyberhound/
 ├── __init__.py              # __version__ (única fuente de la versión)
 ├── __main__.py              # CLI: web / setup / version
 ├── api/
-│   ├── server.py            # aiohttp: UI, WebSocket, API REST, middlewares (CSP, auth, tenant, RBAC)
+│   ├── server.py            # aiohttp: estado, registro de rutas y arranque
+│   ├── common.py            # middlewares (CSP, tenant, RBAC, métricas) y permisos por ruta
+│   ├── handlers/            # endpoints por área: scans, fixes, data, accounts, schedules, config, platform
 │   └── routes/intel_routes.py
 ├── core/
 │   ├── auth.py              # login, JWT, 2FA, rate limit del login
@@ -368,6 +382,10 @@ cyberhound/
 │   ├── database.py          # SQLite (WAL)
 │   ├── database_pg.py       # PostgreSQL (asyncpg), misma interfaz
 │   ├── multitenancy.py      # tenants, BD por tenant y enrutado por petición
+│   ├── scope.py             # ámbito de análisis de cada organización
+│   ├── integrations.py      # notificaciones/SIEM/ticketing por organización, con control de destinos
+│   ├── accounts_db.py       # sesiones, tokens de API y auditoría (SQLite y PostgreSQL)
+│   ├── schedules.py · remote_fixes.py   # análisis programados · fixes remotos que se pueden deshacer
 │   ├── scoring.py · scheduler.py · notifications.py · siem.py · ticketing.py
 │   ├── agent.py · rollback.py · quarantine.py · ebpf_monitor.py · llm.py
 │   ├── ansible_integration.py · openapi.py · executor.py · logging.py · models.py
@@ -376,7 +394,7 @@ cyberhound/
 │                            # web_headers, web_exposure, api_security, dns_security, subdomain_enum,
 │                            # nuclei_scan, intel, ldap_audit, compliance, sbom, audit_import,
 │                            # reports, pdf_report
-└── ui/static/               # SPA: index.html, app.js, style.css (sin JS en línea), Swagger vendorizado
+└── ui/static/               # SPA: index.html, js/ (por áreas, en orden de carga), style.css (sin JS en línea), Swagger
 ```
 
 ---
@@ -454,7 +472,7 @@ Pods como root, contenedores privilegiados, ClusterRoles con `*`, token de Servi
 
 ## API REST y WebSocket
 
-La referencia completa está en **`/api/docs`** (Swagger UI, servida por la propia instancia) y en `/api/openapi.json`: todas las rutas están documentadas (un test lo comprueba). Autenticación: la cookie de sesión del navegador o `Authorization: Bearer <token>`; los agentes usan `Authorization: AgentKey <clave>`.
+La referencia completa está en **`/api/docs`** (Swagger UI, servida por la propia instancia) y en `/api/openapi.json`: todas las rutas están documentadas (un test lo comprueba). Autenticación: la cookie de sesión del navegador o `Authorization: Bearer <token>` (un token de API `cht_…` de Configuración › Mi cuenta, o el JWT de la sesión); los agentes usan `Authorization: AgentKey <clave>`.
 
 ### Endpoints principales
 
@@ -468,12 +486,18 @@ La referencia completa está en **`/api/docs`** (Swagger UI, servida por la prop
 | `GET` | `/api/score/trend` · `/api/score/detail` | Tendencia y desglose del score |
 | `GET` · `POST` | `/api/assets` · `/api/assets/{ip}/authorize` | Inventario de dispositivos |
 | `GET` · `POST` · `DELETE` | `/api/suppressions` | Falsos positivos |
-| `GET` · `POST` · `PATCH` · `DELETE` | `/api/users` | Usuarios |
-| `POST` | `/api/fix/local` · `/api/fix/remote` · `/api/rollback/local` | Corregir y deshacer |
+| `GET` · `POST` · `PATCH` · `DELETE` | `/api/users` · `/api/users/{usuario}/sessions` | Usuarios y cerrar todas sus sesiones |
+| `POST` | `/api/me/password` | Cambiar la propia contraseña |
+| `GET` · `POST` · `DELETE` | `/api/sessions` · `/api/sessions/revoke-others` · `/api/sessions/{id}` | Mis sesiones |
+| `GET` · `POST` · `DELETE` | `/api/tokens` · `/api/tokens/{id}` | Tokens de API |
+| `GET` | `/api/audit` | Registro de auditoría (`action`, `user`, `q`, `failures`, `limit`) |
+| `POST` | `/api/fix/local` · `/api/fix/remote` · `/api/rollback/local` | Corregir y deshacer (local) |
+| `GET` · `POST` | `/api/fix/remote/history` · `/api/fix/remote/undo` | Fixes remotos aplicados y deshacerlos |
+| `GET` · `POST` · `PATCH` · `DELETE` | `/api/schedules` · `/api/schedules/{id}` · `/api/schedules/{id}/run` | Análisis programados |
 | `POST` | `/api/report/{html\|ansible\|json}` · `/api/report/pdf` | Informes |
 | `POST` · `GET` | `/api/intel/scan` · `/api/intel/lookup` | Threat intelligence |
 | `GET` · `POST` | `/api/config/{keys\|notifications\|siem\|ticketing\|agent}` | Configuración |
-| `GET` · `POST` · `PATCH` · `DELETE` | `/api/tenants` | Organizaciones (multi-tenant, superadmin) |
+| `GET` · `POST` · `PATCH` · `DELETE` | `/api/tenants` | Organizaciones y su ámbito (`allowed_targets`) (multi-tenant, superadmin) |
 | `GET` | `/metrics` | Métricas Prometheus (sin sesión solo desde el propio host) |
 
 ### Tareas WebSocket (`/ws`)
@@ -504,6 +528,8 @@ La referencia completa está en **`/api/docs`** (Swagger UI, servida por la prop
 - Contraseñas con **PBKDF2-HMAC-SHA256** (600 000 iteraciones, sal aleatoria); los hashes SHA-256 antiguos se migran al iniciar sesión.
 - **JWT HS256** con secreto persistente en `config.yaml` (0600), en cookie `HttpOnly` + `SameSite=Strict` + `Secure` con HTTPS.
 - **2FA TOTP** con anti-repetición; el secreto se guarda **cifrado** (Fernet, clave derivada del secreto de la instancia) y los códigos de recuperación como hash. El token intermedio "falta el código" nunca vale como sesión.
+- **Sesiones revocables**: cada JWT lleva el id de una sesión guardada en la BD, que se comprueba en cada petición; salir, cambiar la contraseña o desactivar al usuario la invalidan al momento.
+- **Tokens de API** con hash SHA-256 en la BD, rol tope y caducidad; con un token no se gestionan credenciales.
 - **Roles** (viewer/operator/admin) aplicados por middleware en cada petición; usuarios desactivados pierden la sesión al instante.
 - **Rate limiting del login**: 5 intentos en 15 min → bloqueo de 15 min, luego 1 h y 24 h. Detrás de un proxy inverso (`server.trusted_proxies`) usa la IP real del cliente; sin él, ignora `X-Forwarded-For` (no se puede falsear). Localhost nunca se bloquea.
 
@@ -522,7 +548,7 @@ La referencia completa está en **`/api/docs`** (Swagger UI, servida por la prop
 - Certificado RSA 4096 autofirmado en el primer arranque (o el tuyo con `server.tls_cert`/`tls_key`), TLS 1.2+ y cifrados modernos.
 
 ### Auditoría
-`<log_dir>/security_audit.log`: logins (con la IP real), fallos de permisos, fixes aplicados y análisis lanzados.
+`<log_dir>/security_audit.log`: logins (con la IP real), fallos de permisos, fixes aplicados y análisis lanzados. Además, cada organización tiene su registro en la BD (`audit_events`), consultable desde **Configuración › Auditoría** o `/api/audit`.
 
 ---
 
@@ -534,6 +560,7 @@ La referencia completa está en **`/api/docs`** (Swagger UI, servida por la prop
 | **Elasticsearch** | Índice configurable (`cyberhound-findings`), API key o usuario/contraseña |
 | **Splunk** | HTTP Event Collector, índice y sourcetype configurables |
 | **Jira / ServiceNow** | Un ticket por hallazgo **nuevo** por encima del umbral (sin duplicar a diario) |
+| **Por organización** | En multi-tenant, correo, webhook, SIEM y ticketing son de cada organización |
 | **Email / webhooks** | SMTP con TLS; Slack, Teams o Discord por webhook |
 | **AWX / Tower** | Lanza playbooks de remediación |
 | **Agentes** | Otros servidores con CyberHound en modo `agent` envían sus hallazgos a un `manager` |
@@ -653,9 +680,11 @@ Además de las pruebas unitarias hay tests de extremo a extremo sobre la aplicac
 
 ## Roadmap
 
-### ✅ Implementado (v6.4)
+### ✅ Implementado (v6.5)
 
-Todo lo descrito arriba: hardening con fixes y deshacer, red, SSH remoto, malware y cuarentena, Docker/K8s/imágenes/runtime, código y secretos, web (TLS, cabeceras, exposición, API/CORS, Nuclei), DNS y subdominios, threat intelligence, scoring, compliance, SBOM, LDAP/AD (6 checks: AS-REP roasting, admins del dominio, cuentas sin caducidad…), monitor, 2FA, roles, multi-tenant, agentes, SIEM, ticketing, AWX, OpenAPI, SQLite y PostgreSQL, interfaz responsive (escritorio, tablet y móvil).
+Los cambios de cada versión están en [CHANGELOG.md](CHANGELOG.md).
+
+Todo lo descrito arriba: hardening con fixes y deshacer, red, SSH remoto, malware y cuarentena, Docker/K8s/imágenes/runtime, código y secretos, web (TLS, cabeceras, exposición, API/CORS, Nuclei), DNS y subdominios, threat intelligence, scoring, compliance, SBOM, LDAP/AD (6 checks: AS-REP roasting, admins del dominio, cuentas sin caducidad…), monitor, 2FA, roles, sesiones revocables, tokens de API, auditoría, multi-tenant con ámbito e integraciones por organización, análisis programados, deshacer fixes remotos, agentes, SIEM, ticketing, AWX, OpenAPI, SQLite y PostgreSQL, interfaz responsive (escritorio, tablet y móvil).
 
 ### 🔜 Ideas para futuras versiones
 
