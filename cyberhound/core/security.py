@@ -454,7 +454,7 @@ class InputValidator:
         ALLOWED_TASKS = {
             "audit", "malware", "network", "ssh", "code", "intel", "docker", "services",
             "tls", "web_headers", "dns", "web_exposure", "api_security",
-            "subdomain_enum", "nuclei",
+            "subdomain_enum", "nuclei", "scap",
         }
         ALLOWED_MALWARE_MODULES = {"yara", "hash", "auditd", "cron", "webshell"}
         ALLOWED_INTEL_MODULES = {"shodan", "virustotal", "abuseipdb", "greynoise", "otx", "hibp"}
@@ -484,7 +484,7 @@ class InputValidator:
             if wr and isinstance(wr, list):
                 sanitized["web_roots"] = [InputValidator.path(p, "web_roots") for p in wr[:5]]
 
-        elif task in ("ssh", "network"):
+        elif task in ("ssh", "network", "scap"):
             if task == "network":
                 networks_raw = msg.get("networks", "")
                 sanitized["networks"] = ",".join(InputValidator.network_list(networks_raw))
@@ -507,6 +507,12 @@ class InputValidator:
                 if not (isinstance(cred, str) and InputValidator.is_credential_id(cred)):
                     raise ValidationError("ssh_credential", "Credencial SSH no válida")
                 sanitized["ssh_credential"] = cred
+            if task == "scap":
+                from cyberhound.scanners.scap_baseline import DEFAULT_PROFILE, PROFILES
+                profile = msg.get("profile", DEFAULT_PROFILE)
+                if profile not in PROFILES:
+                    raise ValidationError("profile", f"Perfil no permitido: {profile}")
+                sanitized["profile"] = profile
             sanitized["ssh_audit"] = bool(msg.get("ssh_audit", True))
             sanitized["vuln_scan"] = bool(msg.get("vuln_scan", False))
 

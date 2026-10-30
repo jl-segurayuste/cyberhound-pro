@@ -329,3 +329,32 @@ function sshAuditOne(ip, port) {
     },
   });
 }
+
+// Bastionado con perfiles SCAP (CCN-STIC o DISA STIG): oscap en cada host por SSH
+function runScapScan() {
+  const hosts = document.getElementById('scap-hosts')?.value.trim() || '';
+  if (!hosts) { toast('Indica los servidores a auditar', 'error'); return; }
+  const sel = document.getElementById('scap-profile');
+  const profile = sel?.value || 'ccn_intermediate';
+  const label = sel?.selectedOptions[0]?.textContent || profile;
+  btn('btn-scap', true, 'Auditando (puede tardar)…');
+  appendLog('section', `═══ BASTIONADO: ${label} ═══`);
+  wsRun('scap', {hosts, profile, ...sshCredFields()}, {
+    onHostResult(hr) { _updateHostChip(hr); },
+    onFinding(f) {
+      if (f.passed) { appendLog('ok', `${f.source_host}: ${f.title}`); return; }
+      S.findings.network.push(f);
+      document.getElementById('ssh-findings-area').style.display = '';
+      const host = f.source_host || '';
+      const tr = document.createElement('tr');
+      tr.dataset.sev = f.severity; tr.onclick = () => openDrawer(f, host);
+      tr.innerHTML = `
+        <td style="font-family:monospace;font-size:.78rem;color:var(--blue)">${esc(host)}</td>
+        <td>${_sevBadge(f.severity)}</td><td>${esc(f.title)}</td>
+        <td style="font-size:.78rem;color:var(--text2)">${esc((f.remediation||'').substring(0,60))}</td>
+        <td>${f.auto_fix?`<button class="fix-btn remote" ${on('click', 'applyFixRemote', f.id, host, '$this')} data-stop>Fix</button>`:''}</td>`;
+      document.getElementById('network-findings-tbody').appendChild(tr);
+    },
+    onDone() { btn('btn-scap', false, '▶ Auditar bastionado'); },
+  });
+}

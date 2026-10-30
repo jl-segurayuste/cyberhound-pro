@@ -347,6 +347,15 @@ Los hallazgos con ⚡ se corrigen con un clic, en local o en el host remoto dond
 - **Credenciales SSH guardadas** (Configuración › Credenciales SSH): un par de claves ed25519 que genera CyberHound (solo hay que añadir la clave pública a `authorized_keys` de cada equipo), una clave privada pegada o una contraseña. El secreto se guarda cifrado con una clave derivada del secreto de la instancia y de la organización, y la API nunca lo devuelve. Se eligen en el panel Red para auditar, corregir y deshacer, y son las que usan los análisis SSH programados. Un operador puede usarlas pero no verlas; crearlas o borrarlas es de administrador.
 - **Deshacer** (fixes remotos): al aplicarlo, el host devuelve su estado anterior (la línea de `sshd_config`, el valor del sysctl, si el servicio estaba activo, los permisos del fichero, si ufw estaba apagado) y CyberHound guarda la acción inversa, validada porque viene del host. Se deshace desde el propio botón o desde **Configuración › Fixes remotos**, que lista los aplicados en la organización.
 
+### Bastionado CCN-STIC y DISA STIG
+
+En el panel **Red**, *Bastionado de servidores Linux* audita uno o varios servidores por SSH con los perfiles oficiales de SCAP Security Guide: **CCN-STIC** básico, intermedio o avanzado (guía CCN-STIC-610A22 del Centro Criptológico Nacional, la de referencia para el ENS; RHEL 9 y derivadas) o **DISA STIG** (RHEL 8 y 9 y derivadas). No reimplementa las reglas: ejecuta `oscap` en el propio servidor con el contenido de su versión, como recomienda Red Hat.
+
+- **Requisitos en el servidor**: `openscap-scanner` y `scap-security-guide` (`dnf install openscap-scanner scap-security-guide`), y que el usuario SSH pueda usar `sudo` sin contraseña.
+- **Resultado**: un hallazgo por regla que falla (en DISA STIG con su categoría CAT I, II o III) y un resumen con el porcentaje de cumplimiento. Cuentan para el cumplimiento ENS (op.exp.2, configuración de seguridad), PCI-DSS y CIS.
+- **Corrección regla a regla**: con la corrección oficial de SSG para esa regla y solo esa (si no se puede aislar exactamente su bloque del script de SSG, no se ejecuta nada). Antes se guarda `/etc` y después se vuelve a evaluar la regla. Se puede **deshacer**: se restauran los ficheros de `/etc` que cambió y se borran los que creó; los paquetes, servicios y valores aplicados en caliente no se deshacen.
+- Las reglas que pueden dejar sin acceso de administración (SSH, PAM, contraseñas, cortafuegos, sudo, políticas de cifrado, FIPS, arranque, SELinux) **piden confirmación** antes de aplicarse.
+
 ### Threat intelligence
 
 Busca IPs, dominios, hashes (MD5/SHA1/SHA256) o emails en las fuentes con API key configurada, o analiza de golpe las IPs del último escaneo de red. Cada respuesta se traduce en hallazgos con severidad (p. ej. AbuseIPDB ≥75 % → crítico, CVEs en Shodan, detecciones de VirusTotal, pulsos de OTX, brechas de HIBP).
@@ -516,6 +525,7 @@ La referencia completa está en **`/api/docs`** (Swagger UI, servida por la prop
 { "task": "network", "networks": "192.168.1.0/24", "ssh_audit": true }
 { "task": "ssh", "hosts": "192.168.1.10,192.168.1.20", "ssh_user": "root" }
 { "task": "ssh", "hosts": "192.168.1.10", "ssh_credential": "0a1b2c3d" }
+{ "task": "scap", "hosts": "192.168.1.10", "profile": "ccn_intermediate", "ssh_credential": "0a1b2c3d" }
 { "task": "docker", "scan_images_cve": true, "scan_k8s": true }
 { "task": "code", "path": "/var/www/html" }
 { "task": "services" }

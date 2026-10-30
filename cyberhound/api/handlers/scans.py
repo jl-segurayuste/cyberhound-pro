@@ -416,6 +416,36 @@ class ScanHandlers:
                 await log(level, f"✗ {hr.host}: {hr.status} — {hr.error}")
         await self._emit_findings(all_findings, ws_id, send, scan_id)
 
+    async def _run_scap_scan(self, params, ws_id, send, log, scan_id):
+        """Bastionado con un perfil SCAP (CCN-STIC o DISA STIG) en los hosts indicados, por SSH."""
+        from cyberhound.scanners import scap_baseline
+        from cyberhound.scanners.ssh_audit import RemoteAuditor
+        hosts = [h for h in params.get("hosts", "").split() if h]
+        if not hosts:
+            await send({"type": "error", "text": "Sin hosts"})
+            await self.db.fail_scan(scan_id)
+            return
+        profile = params.get("profile", scap_baseline.DEFAULT_PROFILE)
+        name = scap_baseline.PROFILES[profile][0]
+        await log("section", f"{name} en {len(hosts)} hosts (oscap puede tardar varios minutos)…")
+        auditor = RemoteAuditor(await self._ssh_creds(params), host_keys=HostKeyStore(self.db))
+        sem = asyncio.Semaphore(self.cfg.scan.ssh_concurrency)
+
+        async def _one(host: str):
+            async with sem:
+                return await scap_baseline.audit_host(auditor, host, profile)
+
+        all_findings: list[Finding] = []
+        for hr in await asyncio.gather(*[_one(h) for h in hosts]):
+            await send({"type": "host_result", "data": hr.to_dict()})
+            if hr.status == "ok":
+                all_findings.extend(hr.findings)
+                summary = next((f.title for f in hr.findings if f.passed), "")
+                await log("ok", f"✓ {hr.host}: {summary}")
+            else:
+                await log("warn" if hr.status == "unreachable" else "error", f"✗ {hr.host}: {hr.status} — {hr.error}")
+        await self._emit_findings(all_findings, ws_id, send, scan_id)
+
     async def _run_intel_scan(self, params, ws_id, send, log, scan_id):
         from cyberhound.scanners.intel import IntelScanner
         target = params.get("target", "")

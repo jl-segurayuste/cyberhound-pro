@@ -75,6 +75,7 @@ Los hallazgos aparecen en vivo con su severidad y evidencia; pulsa uno para ver 
 |---|---|---|---|
 | Sistema | **Seguridad** | Hardening del SO (31 checks) + score | root |
 | Red | **Mi Red** | Descubrimiento, SO, CVEs y auditoría SSH de cada host | `nmap` (+root para el SO) |
+| Red | **Mi Red › Bastionado** | CCN-STIC (básico, intermedio, avanzado) o DISA STIG con `oscap` por SSH | En el servidor: `openscap-scanner`, `scap-security-guide` y sudo sin contraseña |
 | Sistema | **Malware** | YARA, hashes (VirusTotal/MalwareBazaar), auditd, cron, webshells | — |
 | Sistema | **Docker** | 7 checks de Docker + 11 de Kubernetes, imágenes (Trivy) | Docker / `kubectl` |
 | Sistema | **Código** | bandit, shellcheck, eslint y secretos en una ruta | esas herramientas |
@@ -126,6 +127,24 @@ una sola vez, nunca tiene más permisos que tu rol y no sirve para cambiar contr
 **Configuración › Auditoría** (solo admin) muestra quién hizo qué y desde qué IP: inicios de sesión
 (también los fallidos), usuarios, contraseñas, 2FA, tokens, credenciales SSH, fixes remotos y
 programaciones.
+
+### Bastionado CCN-STIC y DISA STIG
+
+En el panel **Red**, la fila *Bastionado de servidores Linux* audita servidores RHEL y derivadas con
+los perfiles oficiales de OpenSCAP:
+
+1. Escribe los servidores (separados por espacios) y elige el perfil: **CCN-STIC** básico, intermedio
+   o avanzado (categorías BÁSICA, MEDIA y ALTA del ENS; RHEL 9) o **DISA STIG** (RHEL 8 y 9).
+2. Usa la credencial SSH elegida arriba. El usuario necesita `sudo` sin contraseña, y el servidor,
+   los paquetes `openscap-scanner` y `scap-security-guide`.
+3. Pulsa **Auditar bastionado**. Puede tardar unos minutos por servidor. Salen las reglas que no se
+   cumplen y, en el registro, el porcentaje de cumplimiento de cada servidor.
+
+Las reglas con ⚡ se corrigen de una en una con **Fix** y se pueden deshacer: se guarda `/etc` antes y
+se restauran los ficheros que cambió la corrección. Los paquetes instalados, los servicios y los
+valores aplicados en caliente no se deshacen. Las reglas que pueden dejarte sin acceso al servidor
+(SSH, PAM, contraseñas, cortafuegos, sudo, cifrado, arranque, SELinux) **piden confirmación**: antes
+de aceptar, ten otra sesión abierta o acceso por consola.
 
 ### Credenciales SSH guardadas
 

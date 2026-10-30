@@ -146,7 +146,7 @@ async def test_cache_de_hallazgos_no_cruza_tenants(env, monkeypatch):
     env.server._findings_cache["acme:conexion"] = [f]
     from cyberhound.scanners.ssh_audit import RemoteAuditor
 
-    async def fake(self, host, finding):
+    async def fake(self, host, finding, action=None):
         return True, "", None
     monkeypatch.setattr(RemoteAuditor, "apply_fix_remote", fake)
     body = {"finding_id": f.id}

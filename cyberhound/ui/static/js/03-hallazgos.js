@@ -152,7 +152,7 @@ async function fixAll(scope) {
   toast(`✓ ${fixable.length} correcciones aplicadas`);
 }
 
-async function applyFixRemote(findingId, host, btnEl) {
+async function applyFixRemote(findingId, host, btnEl, confirmed) {
   if (btnEl) { btnEl.disabled = true; btnEl.textContent = '…'; }
   try {
     const r = await fetch('/api/fix/remote', {
@@ -160,9 +160,16 @@ async function applyFixRemote(findingId, host, btnEl) {
       body: JSON.stringify({
         finding_id: findingId, host,
         ...sshCredFields(),
+        ...(confirmed ? {confirm: true} : {}),
       }),
     });
     const d = await r.json();
+    // Correcciones de bastionado que pueden dejar sin acceso al host: se confirman antes
+    if (d.needs_confirmation && !confirmed) {
+      if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'Fix'; }
+      if (confirm(`${d.error}\n\nHost: ${host}\n¿Aplicar igualmente?`)) return applyFixRemote(findingId, host, btnEl, true);
+      return;
+    }
     if (d.ok) {
       toast(`✓ Fix aplicado en ${host}`);
       if (btnEl && d.reversible) {

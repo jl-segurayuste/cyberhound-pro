@@ -118,6 +118,9 @@ ENDPOINT_DOCS: dict[str, dict] = {
                 "finding_id": {"type": "string"},
                 "host": {"type": "string"},
                 "ssh_key": {"type": "string"},
+                "confirm": {"type": "boolean",
+                            "description": "Obligatorio (true) en las reglas de bastionado que pueden cortar el "
+                                           "acceso; sin él la respuesta es 409 con needs_confirmation"},
             },
         },
     },
@@ -252,7 +255,9 @@ ENDPOINT_DOCS: dict[str, dict] = {
         "tags": ["WebSocket"],
         "description": "Lanza un análisis y recibe los hallazgos en tiempo real. Enviar {task: 'audit'|"
                        "'malware'|'network'|'ssh'|'docker'|'code'|'services'|'intel'|'tls'|'web_headers'|"
-                       "'web_exposure'|'api_security'|'nuclei'|'dns'|'subdomain_enum', …parámetros}",
+                       "'web_exposure'|'api_security'|'nuclei'|'dns'|'subdomain_enum'|'scap', …parámetros}. "
+                       "scap: {hosts, profile: 'ccn_basic'|'ccn_intermediate'|'ccn_advanced'|'stig', "
+                       "credenciales SSH} — bastionado CCN-STIC o DISA STIG con oscap (sudo sin contraseña).",
     },
     "GET /ws/push": {
         "summary": "WebSocket de notificaciones push",

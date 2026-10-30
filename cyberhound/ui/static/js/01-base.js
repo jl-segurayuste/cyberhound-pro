@@ -57,7 +57,7 @@ const FN_PERMS = {
   runAPISecurityScan: 'scan', runCode: 'scan', runDNSScan: 'scan', runDocker: 'scan', runDockerImageScan: 'scan',
   runIntelScan: 'scan', runLDAPScan: 'scan', runMalware: 'scan', runNetworkScan: 'scan', runNucleiScan: 'scan',
   runRuntimeScan: 'scan', runSchedulerNow: 'scan', runServicesAudit: 'scan', runSubdomainScan: 'scan',
-  runTLSScan: 'scan', runWebExposureScan: 'scan', runWebHeadersScan: 'scan', sshAuditOne: 'scan',
+  runTLSScan: 'scan', runWebExposureScan: 'scan', runWebHeadersScan: 'scan', sshAuditOne: 'scan', runScapScan: 'scan',
   explainFinding: 'scan', downloadSBOM: 'scan', generateSBOM: 'scan', importAuditFile: 'scan', loadCompliance: 'scan',
   addSuppression: 'config', removeSuppression: 'config', suppressFinding: 'config', toggleScheduler: 'config',
   saveAgentConfig: 'config', saveKeys: 'config', saveNotifications: 'config', saveSIEM: 'config',

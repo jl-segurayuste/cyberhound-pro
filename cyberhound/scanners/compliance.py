@@ -132,6 +132,19 @@ CATEGORY_TO_CONTROLS: dict[str, list[Control]] = {
         Control("ISO-A.18.1",    "Cumplimiento con requisitos legales", "iso27001", "A.18 Cumplimiento", "medium"),
     ],
 
+    # ── Bastionado con perfiles SCAP (scanners/scap_baseline.py) ─────────────
+    "ccn-stic": [
+        Control("ENS-OP.EXP.2",  "Configuración de seguridad (CCN-STIC)", "ens", "Marco Operacional — Explotación", "high"),
+        Control("ENS-MP.SI.2",   "Configuración segura del SO",      "ens",      "Marco Operacional", "high"),
+        Control("ISO-A.12.6.2",  "Restricciones en la instalación de software", "iso27001", "A.12 Seguridad en operaciones", "medium"),
+        Control("CIS-4.1",       "Configuración segura de SO",       "cis",      "Control 4", "high"),
+    ],
+    "disa-stig": [
+        Control("ENS-MP.SI.2",   "Configuración segura del SO",      "ens",      "Marco Operacional", "high"),
+        Control("PCI-2.2",       "Normas de configuración del sistema", "pci-dss", "Requerimiento 2", "high"),
+        Control("CIS-4.1",       "Configuración segura de SO",       "cis",      "Control 4", "high"),
+    ],
+
     # ── LDAP / AD ────────────────────────────────────────────────────────────
     "ldap/accounts": [
         Control("ENS-OP.ACC.2",  "Gestión de identidades",           "ens",      "Marco Operacional", "high"),
@@ -232,6 +245,8 @@ def analyze_compliance(
     # Identificar qué controles están fallando (tienen un finding asociado)
     failed_control_ids: dict[str, list[str]] = {}  # ctrl_id → finding_titles
     for finding in findings:
+        if finding.passed:   # p. ej. el resumen de cumplimiento de un perfil SCAP
+            continue
         category = finding.category or ""
         # Buscar también por prefijo de categoría
         matched_controls = CATEGORY_TO_CONTROLS.get(category, [])

@@ -146,7 +146,7 @@ WS_RUNNERS = {
     "docker": "_run_docker_scan", "services": "_run_services_audit", "tls": "_run_tls_scan",
     "web_headers": "_run_web_headers_scan", "dns": "_run_dns_scan", "web_exposure": "_run_web_exposure_scan",
     "api_security": "_run_api_security_scan", "subdomain_enum": "_run_subdomain_enum_scan",
-    "nuclei": "_run_nuclei_scan",
+    "nuclei": "_run_nuclei_scan", "scap": "_run_scap_scan",
 }
 
 

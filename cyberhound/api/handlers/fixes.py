@@ -82,9 +82,15 @@ class FixHandlers:
                 creds = await self._ssh_creds(body)
             except ValueError as e:
                 return web.json_response({"ok": False, "error": str(e)}, status=400)
+            from cyberhound.scanners import scap_baseline
             from cyberhound.scanners.ssh_audit import RemoteAuditor
+            if scap_baseline.needs_confirmation(finding) and body.get("confirm") is not True:
+                return web.json_response({"ok": False, "needs_confirmation": True, "error": (
+                    "Esta corrección puede cortar el acceso de administración al host (SSH, PAM, contraseñas, "
+                    "cortafuegos, sudo, cifrado o arranque). Confírmala para aplicarla.")}, status=409)
             action = RemoteAuditor.remote_fix_action(finding)
-            ok, msg, undo = await RemoteAuditor(creds, host_keys=HostKeyStore(self.db)).apply_fix_remote(host, finding)
+            ok, msg, undo = await RemoteAuditor(creds, host_keys=HostKeyStore(self.db)).apply_fix_remote(
+                host, finding, action)
             audit_log.fix_applied(fid, user, host, False)
             fix_id = None
             if ok:

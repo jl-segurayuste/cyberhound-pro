@@ -26,6 +26,7 @@ from cyberhound.core import sshd_config
 from cyberhound.core.logging import get_logger
 from cyberhound.core.models import Finding, HostResult
 from cyberhound.core.ssh_host_keys import known_hosts_line
+from cyberhound.scanners import scap_baseline
 
 logger = get_logger("ssh_audit")
 
@@ -332,6 +333,8 @@ print(json.dumps(findings))
     @staticmethod
     def remote_fix_action(finding: Finding) -> dict | None:
         """Acción de corrección para un hallazgo de la auditoría remota (None si no hay)."""
+        if scap_baseline.is_scap_finding(finding):
+            return scap_baseline.remote_fix_action(finding)
         fid = finding.id.split("::", 1)[-1]
         if fid.startswith("ssh_") and fid[4:] in REMOTE_SSH_PARAMS:
             return {"action": "ssh_param", "param": fid[4:], "value": "no"}
@@ -461,6 +464,8 @@ done(False, "acción desconocida")
         if not isinstance(before, dict):
             return None
         act = action.get("action")
+        if act == "scap_rule":
+            return scap_baseline.undo_action(action, before)
         if act == "ssh_param":
             # Cada cambio: fichero (relativo a /etc/ssh, dentro de él), línea anterior de la misma
             # opción (o None si se añadió) y la línea que puso el fix
@@ -502,13 +507,17 @@ done(False, "acción desconocida")
 
     @classmethod
     def _fix_payload(cls, action: dict) -> str:
+        if str(action.get("action", "")).startswith("scap_"):
+            return scap_baseline.fix_payload(action)
         # repr() de un str es un literal Python válido: la acción viaja como dato, no como código
         return f"A = __import__('json').loads({json.dumps(action)!r})\n" + cls.REMOTE_FIX_SCRIPT
 
     async def _run_remote_action(self, host: str, action: dict) -> dict:
         try:
             async with await self._connect(host) as conn:
-                r = await conn.run(await self._python_cmd(conn), input=self._fix_payload(action), timeout=90)
+                # Las correcciones SCAP generan el script del perfil y vuelven a evaluar la regla
+                timeout = 1500 if str(action.get("action", "")).startswith("scap_") else 90
+                r = await conn.run(await self._python_cmd(conn), input=self._fix_payload(action), timeout=timeout)
                 out = (r.stdout or "").strip().splitlines()
                 res = json.loads(out[-1]) if out else {"ok": False, "msg": (r.stderr or "")[:300]}
         except asyncssh.HostKeyNotVerifiable:
@@ -523,11 +532,13 @@ done(False, "acción desconocida")
             logger.error("Acción remota falló en %s: %s", host, res.get("msg"))
         return res
 
-    async def apply_fix_remote(self, host: str, finding: Finding) -> tuple[bool, str, dict | None]:
+    async def apply_fix_remote(self, host: str, finding: Finding,
+                               action: dict | None = None) -> tuple[bool, str, dict | None]:
         """Aplica en el host remoto la corrección de un hallazgo de su auditoría.
 
+        `action`: la que ya calculó quien llama (así lo que se registra es lo que se ejecuta).
         Devuelve (ok, mensaje, acción para deshacerla o None si no se puede deshacer)."""
-        action = self.remote_fix_action(finding)
+        action = action or self.remote_fix_action(finding)
         if action is None:
             return False, f"Sin corrección remota automática para {finding.id}", None
         res = await self._run_remote_action(host, action)

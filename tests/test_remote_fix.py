@@ -189,7 +189,7 @@ async def test_fix_local_no_aplica_hallazgos_remotos_en_este_servidor(client, mo
 async def test_fix_remoto_usa_el_host_del_hallazgo(client, monkeypatch):
     seen = []
 
-    async def fake(self, host, finding):
+    async def fake(self, host, finding, action=None):
         seen.append(host)
         return False, "sin conexión", None
     monkeypatch.setattr(RemoteAuditor, "apply_fix_remote", fake)

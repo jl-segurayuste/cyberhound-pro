@@ -136,7 +136,7 @@ def ws_targets(msg: dict) -> list[str] | None:
     task = msg["task"]
     if task == "network":
         return [n for n in msg.get("networks", "").split(",") if n]
-    if task == "ssh":
+    if task in ("ssh", "scap"):
         return msg.get("hosts", "").split()
     if task in ("web_exposure", "api_security", "web_headers", "nuclei"):
         return msg.get("urls", [])

@@ -4,6 +4,30 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/); v
 [SemVer](https://semver.org/lang/es/). Cada versión publicada tiene su etiqueta `vX.Y.Z` y su
 release en GitHub, con la imagen Docker correspondiente en GHCR.
 
+## [6.8.0] — 2026-10-31
+
+### Añadido
+- **Bastionado CCN-STIC y DISA STIG** (panel Red › *Bastionado de servidores Linux*, tarea WS `scap`):
+  auditoría por SSH con los perfiles oficiales de SCAP Security Guide, ejecutando `oscap` en el
+  servidor con el contenido de su propia versión. Perfiles CCN-STIC básico, intermedio y avanzado
+  (CCN-STIC-610A22, RHEL 9 y derivadas) y DISA STIG (RHEL 8 y 9 y derivadas; con la categoría CAT I,
+  II o III de cada regla). Un hallazgo por regla que falla y un resumen con el porcentaje de
+  cumplimiento; cuentan para ENS (op.exp.2), PCI-DSS y CIS.
+- Corrección remota regla a regla con la corrección oficial de SSG, deshacer (copia de `/etc` antes;
+  se guarda solo lo que cambió) y **confirmación obligatoria** (`confirm: true` en `/api/fix/remote`)
+  para las reglas que pueden cortar el acceso de administración.
+
+### Corregido
+- `oscap xccdf generate fix --rule` ignora `--rule` (oscap 1.3) y devuelve el script del perfil
+  entero: ahora se extrae el bloque de la regla y solo ese, y si no se puede aislar exactamente uno no
+  se ejecuta nada. Visto en las pruebas antes de publicar: corregir una regla aplicaba las 140 del
+  perfil.
+- En Rocky y AlmaLinux se usa su propio contenido SCAP (`ssg-rl8`, `ssg-almalinux9`): con el de RHEL
+  todas las reglas salen «no aplica». Una evaluación sin ninguna regla aplicable es un error, no un 0 %.
+- El fix remoto registraba una acción calculada aparte de la que se ejecutaba.
+- El resumen de cumplimiento (hallazgo `passed`) ya no cuenta como control fallido en el informe de
+  cumplimiento.
+
 ## [6.7.0] — 2026-10-21
 
 ### Añadido
