@@ -3,7 +3,7 @@
 Checklist de aceptación que **complementa** la suite automática. Se ejecuta antes de publicar una
 versión; casi todo está automatizado en [`scripts/e2e/`](../scripts/e2e/README.md).
 
-- **Última ejecución:** 2026-10-21 · v6.7.0 · `master`
+- **Última ejecución:** 2026-10-31 · v6.8.0 · `master`
 - **Entorno:** Ubuntu 24.04, Python 3.12, Chromium (Playwright), SQLite y PostgreSQL 16; Docker 27 para el stack de producción
 - **Resultado global:** ✅ Apto — ver la [revisión de seguridad](REVISION-SEGURIDAD.md#10-revisión-de-2026-10-21-v670-claves-de-host-ssh) para lo encontrado y corregido en esta ronda
 
@@ -13,12 +13,13 @@ Leyenda: ✅ pasa · ⚠️ pasa con observación · ❌ falla
 
 | ID | Qué | Cómo | Resultado | Estado |
 |----|-----|------|-----------|--------|
-| TC-AUTO-01 | Tests unitarios, de integración y de coherencia (SQLite) | `pytest tests/` | 748 pasan (1 omitido: solo PostgreSQL) | ✅ |
-| TC-AUTO-02 | La misma suite contra PostgreSQL 16 | `CH_DB_URL=postgresql://… pytest tests/` | 749 pasan | ✅ |
+| TC-AUTO-01 | Tests unitarios, de integración y de coherencia (SQLite) | `pytest tests/` | 768 pasan (1 omitido: solo PostgreSQL) | ✅ |
+| TC-AUTO-02 | La misma suite contra PostgreSQL 16 | `CH_DB_URL=postgresql://… pytest tests/` | En 6.8.0, solo en el CI (job PostgreSQL 16) | ✅ |
 | TC-AUTO-03 | Lint | `ruff check cyberhound tests` | sin avisos | ✅ |
 | TC-AUTO-05 | Migración de una BD 6.5.0 (v7) a v8 | BD creada con el código publicado y abierta con el nuevo, en SQLite y PostgreSQL | Los programados se conservan y admiten credencial | ✅ |
 | TC-AUTO-06 | Playbook con `ansible-playbook` real | Contenedor Debian 12 con sshd, drop-in de cloud-init y un bloque `Match` | `sshd -T` con valores seguros, `Match` intacto, 2ª pasada `changed=0` | ✅ |
 | TC-AUTO-07 | Scripts remotos con Python 3.6 (RHEL 8) | Contenedor `python:3.6` con un drop-in de cloud-init y un `Match` | Auditoría con todos los checks; los 5 tipos de fix y su deshacer; sshd idéntico al original | ✅ |
+| TC-AUTO-08 | Bastionado SCAP real por SSH | Contenedores CentOS Stream 9 y Rocky 8 (Python 3.6) con OpenSCAP, sshd y un usuario con sudo | CCN-STIC y DISA STIG auditan; corregir una regla cambia solo sus ficheros, la regla pasa y el deshacer los deja como estaban | ✅ |
 | TC-AUTO-04 | CI | GitHub Actions: lint, Python 3.11 y 3.12, PostgreSQL, análisis de seguridad, imagen | verde | ✅ |
 
 ## 2. Interfaz (navegador real) — `scripts/e2e/ui.py`
