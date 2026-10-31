@@ -4,6 +4,16 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/); v
 [SemVer](https://semver.org/lang/es/). Cada versión publicada tiene su etiqueta `vX.Y.Z` y su
 release en GitHub, con la imagen Docker correspondiente en GHCR.
 
+## [6.8.1] — 2026-11-01
+
+### Seguridad
+- `constraints.txt` (el que usa `install.sh`) fijaba versiones con vulnerabilidades conocidas: PyJWT
+  2.13.0 (15), aiohttp 3.14.1 (14), cryptography 49.0.0 (2), asyncssh 2.23.1, dnspython 2.8.0 y
+  multidict 6.7.1. Regenerado con las versiones actuales (pip-audit: sin vulnerabilidades conocidas) y
+  subidos los mínimos de `pyproject.toml` a versiones corregidas: PyJWT 2.15, aiohttp 3.14.4,
+  cryptography 50.0, asyncssh 2.24, dnspython 2.9 y multidict 6.9.1. La imagen Docker no usaba el
+  lockfile y ya instalaba versiones corregidas.
+
 ## [6.8.0] — 2026-10-31
 
 ### Añadido

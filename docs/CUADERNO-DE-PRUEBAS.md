@@ -3,7 +3,7 @@
 Checklist de aceptación que **complementa** la suite automática. Se ejecuta antes de publicar una
 versión; casi todo está automatizado en [`scripts/e2e/`](../scripts/e2e/README.md).
 
-- **Última ejecución:** 2026-10-31 · v6.8.0 · `master`
+- **Última ejecución:** 2026-11-01 · v6.8.1 · `master`
 - **Entorno:** Ubuntu 24.04, Python 3.12, Chromium (Playwright), SQLite y PostgreSQL 16; Docker 27 para el stack de producción
 - **Resultado global:** ✅ Apto — ver la [revisión de seguridad](REVISION-SEGURIDAD.md#10-revisión-de-2026-10-21-v670-claves-de-host-ssh) para lo encontrado y corregido en esta ronda
 
