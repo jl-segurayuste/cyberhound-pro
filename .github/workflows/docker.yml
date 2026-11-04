@@ -21,8 +21,8 @@ jobs:
     name: Lint (ruff)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
@@ -43,10 +43,10 @@ jobs:
         python-version: ["3.11", "3.12", "3.13", "3.14"]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
@@ -75,7 +75,7 @@ jobs:
             --cov-report=xml
 
       - name: Upload cobertura a Codecov
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v7
         if: matrix.python-version == '3.12'
         with:
           file: coverage.xml
@@ -97,8 +97,8 @@ jobs:
         options: >-
           --health-cmd "pg_isready -U ch -d ch" --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
@@ -118,8 +118,8 @@ jobs:
     needs: test
 
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
@@ -163,13 +163,13 @@ jobs:
       digest: ${{ steps.build.outputs.digest }}
 
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
+      - uses: actions/checkout@v7
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
 
       - name: Login a GHCR
         if: github.event_name == 'push'
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY_GHCR }}
           username: ${{ github.actor }}
@@ -177,7 +177,7 @@ jobs:
 
       - name: Extraer metadatos
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: |
             ${{ env.REGISTRY_GHCR }}/${{ env.IMAGE_NAME }}
@@ -189,7 +189,7 @@ jobs:
 
       - name: Build y push imagen multi-arch
         id: build
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64,linux/arm64
@@ -218,7 +218,7 @@ jobs:
       actions: read
       id-token: write
       packages: write
-    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_container_slsa3.yml@v2.0.0
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_container_slsa3.yml@v2.1.0
     with:
       image: ${{ needs.docker.outputs.image }}
       digest: ${{ needs.docker.outputs.digest }}
@@ -236,7 +236,7 @@ jobs:
       contents: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -258,7 +258,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Crear release en GitHub
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           body: |
             ${{ steps.changelog.outputs.notes }}
