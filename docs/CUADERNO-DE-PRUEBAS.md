@@ -5,7 +5,7 @@ versión; casi todo está automatizado en [`scripts/e2e/`](../scripts/e2e/README
 
 - **Última ejecución:** 2026-11-04 · v6.8.3 · `master` (batería E2E completa y suite automática; TC-AUTO-05 a 08 no se han repetido: no cambia lo que prueban)
 - **Entorno:** Ubuntu 24.04, Python 3.12, Chromium (Playwright), SQLite y PostgreSQL 16; Docker 27 para el stack de producción
-- **Resultado global:** ✅ Apto — ver la [revisión de seguridad](REVISION-SEGURIDAD.md#10-revisión-de-2026-10-21-v670-claves-de-host-ssh) para lo encontrado y corregido en esta ronda
+- **Resultado global:** ✅ Apto — ver la [revisión de seguridad](REVISION-SEGURIDAD.md#11-revisiones-de-2026-11-01-y-2026-11-04-v681-a-v683-y-sin-publicar) para lo encontrado y corregido en esta ronda
 
 Leyenda: ✅ pasa · ⚠️ pasa con observación · ❌ falla
 

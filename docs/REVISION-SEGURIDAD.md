@@ -1,6 +1,7 @@
 # Revisión de seguridad y QA — CyberHound Pro
 
-> Revisión inicial: **2026-06-14** (§1-6) · Última revisión: **2026-10-20** ([§7](#7-revisión-de-2026-10-20-qa-de-extremo-a-extremo--seguridad)).
+> Revisión inicial: **2026-06-14** (§1-6) · Última revisión: **2026-11-04** ([§11](#11-revisiones-de-2026-11-01-y-2026-11-04-v681-a-v683-y-sin-publicar)).
+> §1-6 describen el estado de junio de 2026 (incluido el despliegue de entonces); se conservan como registro.
 > Alcance: backend (`cyberhound/`) + UI (`cyberhound/ui`).
 > Rol: QA + CISO. Resultado de 2026-06-14: **suite 560 verde, ruff limpio**, 2 hallazgos
 > corregidos, exposición **solo interna** verificada.
@@ -164,3 +165,14 @@ Después, en la misma versión:
 |---|---|---|---|
 | 1 | **Alta** | **Sin verificación de la clave de host SSH**: todas las conexiones usaban `known_hosts=None`. Quien suplantara un equipo del ámbito (ARP o DNS en la LAN) recibía la contraseña guardada o escrita, y el análisis programado la enviaba cada noche sin nadie delante. | TOFU por organización (`core/ssh_host_keys.py`, BD v9): la primera conexión guarda la clave de host:puerto y las siguientes exigen la misma; si no, se corta antes de autenticar. El administrador ve y olvida claves en Credenciales SSH (auditado). `tests/test_ssh_host_keys.py` con un servidor SSH real que cambia de clave en el mismo puerto, y la E2E hace lo mismo con `sshd.py`. |
 | 2 | Baja | El aviso de clave no verificable nunca se mostraba (`HostKeyNotVerifiable` se capturaba antes como `DisconnectError`, "inalcanzable"). | Orden de los `except` corregido; estado `hostkey_changed` con el motivo en el panel Red. |
+
+## 11. Revisiones de 2026-11-01 y 2026-11-04 (v6.8.1 a v6.8.3 y sin publicar)
+
+| # | Severidad | Hallazgo | Corrección |
+|---|---|---|---|
+| 1 | **Alta** | `constraints.txt` (el de `install.sh`) fijaba versiones con vulnerabilidades conocidas (PyJWT, aiohttp, cryptography, asyncssh, dnspython, multidict). Dependabot estaba desactivado. | Lockfile regenerado sin vulnerabilidades conocidas, mínimos subidos en `pyproject.toml` y Dependabot activado (v6.8.1). |
+| 2 | Media | Informes XML importados (Nessus, XCCDF) sin protección frente a entidades/DTD. | `defusedxml` (v6.8.2). |
+| 3 | Media | Con FIPS activo, `md5()`/`sha1()` fallaban y el monitor de ficheros y los IDs de nuclei dejaban de funcionar. | `usedforsecurity=False` (v6.8.2). |
+| 4 | Baja | Varios fallos funcionales: la remediación de reglas XCCDF con `<fixtext>` se perdía, un `null` en un JSON importado rompía la importación, un token CSRF enviado como fichero daba 500, una cancelación se tomaba por ticket creado, `ssl=None` hacia AWX y procesos zombi tras un timeout. | Corregidos con tests (v6.8.3); bandit y mypy pasan a bloquear el CI. |
+| 5 | Media (funcional) | «Actualizar reglas YARA» fallaba siempre: las cuatro URLs daban 404. La actualización semanal que documentaba el manual no se programaba nunca. | Fuentes que existen, fijadas a un commit (670 reglas que compilan juntas, test de fuentes); quitada la tarea semanal (sin publicar). |
+
