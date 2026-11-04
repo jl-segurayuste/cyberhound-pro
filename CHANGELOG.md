@@ -4,7 +4,7 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/); v
 [SemVer](https://semver.org/lang/es/). Cada versión publicada tiene su etiqueta `vX.Y.Z` y su
 release en GitHub, con la imagen Docker correspondiente en GHCR.
 
-## [6.8.4] — 2026-11-04
+## [6.8.4] — 2026-11-05
 
 ### Corregido
 - Reglas YARA: las cuatro URLs de «Actualizar reglas» daban 404 (ficheros movidos en la rama principal)
