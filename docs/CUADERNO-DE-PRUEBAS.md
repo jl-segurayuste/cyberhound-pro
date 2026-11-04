@@ -3,7 +3,7 @@
 Checklist de aceptación que **complementa** la suite automática. Se ejecuta antes de publicar una
 versión; casi todo está automatizado en [`scripts/e2e/`](../scripts/e2e/README.md).
 
-- **Última ejecución:** 2026-11-04 · v6.8.3 · `master` (batería E2E completa y suite automática; TC-AUTO-05 a 08 no se han repetido: no cambia lo que prueban)
+- **Última ejecución:** 2026-11-04 · v6.8.4 · `master` (batería E2E completa y suite automática; TC-AUTO-05 a 08 no se han repetido: no cambia lo que prueban)
 - **Entorno:** Ubuntu 24.04, Python 3.12, Chromium (Playwright), SQLite y PostgreSQL 16; Docker 27 para el stack de producción
 - **Resultado global:** ✅ Apto — ver la [revisión de seguridad](REVISION-SEGURIDAD.md#11-revisiones-de-2026-11-01-y-2026-11-04-v681-a-v683-y-sin-publicar) para lo encontrado y corregido en esta ronda
 
@@ -13,8 +13,8 @@ Leyenda: ✅ pasa · ⚠️ pasa con observación · ❌ falla
 
 | ID | Qué | Cómo | Resultado | Estado |
 |----|-----|------|-----------|--------|
-| TC-AUTO-01 | Tests unitarios, de integración y de coherencia (SQLite) | `pytest tests/` | 771 pasan (1 omitido: solo PostgreSQL) en Python 3.11, 3.12 y 3.14, sin avisos | ✅ |
-| TC-AUTO-02 | La misma suite contra PostgreSQL 16 | `CH_DB_URL=postgresql://… pytest tests/` | En 6.8.3, solo en el CI (job PostgreSQL 16) | ✅ |
+| TC-AUTO-01 | Tests unitarios, de integración y de coherencia (SQLite) | `pytest tests/` | 773 pasan (1 omitido: solo PostgreSQL) en Python 3.11, 3.12 y 3.14, sin avisos | ✅ |
+| TC-AUTO-02 | La misma suite contra PostgreSQL 16 | `CH_DB_URL=postgresql://… pytest tests/` | En 6.8.4, solo en el CI (job PostgreSQL 16) | ✅ |
 | TC-AUTO-03 | Lint, tipos y seguridad | `ruff check cyberhound tests`, `mypy cyberhound/`, `bandit -r cyberhound/ -x cyberhound/ui/ --severity-level medium --confidence-level medium` | sin avisos ni errores | ✅ |
 | TC-AUTO-05 | Migración de una BD 6.5.0 (v7) a v8 | BD creada con el código publicado y abierta con el nuevo, en SQLite y PostgreSQL | Los programados se conservan y admiten credencial | ✅ |
 | TC-AUTO-06 | Playbook con `ansible-playbook` real | Contenedor Debian 12 con sshd, drop-in de cloud-init y un bloque `Match` | `sshd -T` con valores seguros, `Match` intacto, 2ª pasada `changed=0` | ✅ |
