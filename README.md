@@ -6,7 +6,7 @@
 
 [![Versión](https://img.shields.io/badge/versión-v6.8.3-blue.svg)](cyberhound/__init__.py)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://python.org)
-[![Tests](https://img.shields.io/badge/tests-729%20passed-green.svg)](#tests)
+[![Tests](https://img.shields.io/badge/tests-771%20passed-green.svg)](#tests)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
 
 ---
@@ -407,7 +407,8 @@ cyberhound/
 ├── scanners/                # hardening, network, ssh_audit, malware, docker_scan, kubernetes_scan,
 │                            # docker_image_scan, runtime_scan, code, secrets, services_audit, tls_scan,
 │                            # web_headers, web_exposure, api_security, dns_security, subdomain_enum,
-│                            # nuclei_scan, intel, ldap_audit, compliance, sbom, audit_import,
+│                            # nuclei_scan, intel, ldap_audit, scap_baseline (CCN-STIC / DISA STIG),
+│                            # compliance, sbom, audit_import,
 │                            # reports, pdf_report
 └── ui/static/               # SPA: index.html, js/ (por áreas, en orden de carga), style.css (sin JS en línea), Swagger
 ```
@@ -651,7 +652,7 @@ Para cambiar la contraseña o el puerto: `cyberhound setup` (asistente) o `print
 | `CH_USERNAME` · `CH_PASSWORD` | Usuario y contraseña del primer arranque (Docker; vacía = se genera) |
 | `CH_SECRET` | Secreto de las sesiones JWT |
 | `CH_TRUSTED_PROXIES` | Proxies inversos de confianza (IP, CIDR o nombre, separados por comas) |
-| `CH_TLS_DIR` | Dónde guardar el certificado autofirmado |
+| `CH_TLS_DIR` | Dónde guardar el certificado autofirmado (por defecto `/etc/cyberhound/tls` si se puede escribir; si no, `<datos>/tls`; Docker: `/data/tls`) |
 | `SHODAN_API_KEY` · `VT_API_KEY` · `ABUSEIPDB_KEY` · `GREYNOISE_KEY` · `OTX_KEY` · `HIBP_API_KEY` | Threat intelligence |
 | `CH_SMTP_PASSWORD` · `CH_WEBHOOK_URL` | Notificaciones |
 | `CH_WAZUH_URL` · `CH_WAZUH_USER` · `CH_WAZUH_PASS` | API de Wazuh |
@@ -668,7 +669,7 @@ Los secretos que llegan por entorno no se copian al fichero.
 
 ## Tests
 
-**749 tests** en 57 ficheros (`tests/test_*.py`), que el CI ejecuta en Python 3.11 y 3.12 y otra vez contra PostgreSQL 16.
+**771 tests** en 58 ficheros (`tests/test_*.py`), que el CI ejecuta en Python 3.11, 3.12, 3.13 y 3.14 y otra vez contra PostgreSQL 16, además de una ejecución semanal.
 
 ```bash
 pip install -e ".[test]"
@@ -701,7 +702,7 @@ Además de las pruebas unitarias hay tests de extremo a extremo sobre la aplicac
 
 ## Roadmap
 
-### ✅ Implementado (v6.7)
+### ✅ Implementado (v6.8)
 
 Los cambios de cada versión están en [CHANGELOG.md](CHANGELOG.md).
 

@@ -7,7 +7,7 @@ SRC_DIR="$(cd "$(dirname "$0")" && pwd)"
 VERSION="$(sed -n 's/^__version__ = "\(.*\)"/\1/p' "$SRC_DIR/cyberhound/__init__.py")"
 INSTALL_DIR="/opt/cyberhound"
 VENV_DIR="/opt/cyberhound/venv"
-CONFIG_DIR="/root/.cyberhound"          # = CH_DATA_DIR: config, BD, cuarentena, reglas YARA, certificado
+CONFIG_DIR="/root/.cyberhound"          # = CH_DATA_DIR: config, BD, cuarentena, reglas YARA (el certificado va a /etc/cyberhound/tls)
 LOG_DIR="/var/log/cyberhound"
 SERVICE_FILE="/etc/systemd/system/cyberhound.service"
 

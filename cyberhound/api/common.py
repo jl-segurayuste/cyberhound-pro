@@ -60,18 +60,27 @@ async def _read_json(request) -> dict:
 
 
 # ── Repositorios de reglas YARA públicos ──────────────────────────────────────
+# Fuentes de reglas YARA, fijadas a un commit: antes apuntaban a la rama principal y a ficheros que ya no
+# existen (las cuatro URLs daban 404 y «Actualizar reglas» fallaba siempre). Para renovarlas, cambiar el
+# commit tras revisar las reglas nuevas.
+_YARA_RULES = "https://raw.githubusercontent.com/Yara-Rules/rules/0f93570194a80d2f2032869055808b0ddcdfb360"
+_ELASTIC = "https://raw.githubusercontent.com/elastic/protections-artifacts/c7b3b2eb7fe9a0c73282003d81da4c0e2d32941d/yara/rules"
 YARA_SOURCES = {
     "default": [
-        ("https://raw.githubusercontent.com/Yara-Rules/rules/master/malware/MALW_Ransomware.yar",
-         "ransomware.yar"),
-        ("https://raw.githubusercontent.com/Yara-Rules/rules/master/malware/MALW_webshell.yar",
-         "webshells.yar"),
-        ("https://raw.githubusercontent.com/elastic/protections-artifacts/main/yara/rules/Linux_Backdoor.yar",
-         "linux_backdoor.yar"),
+        (f"{_YARA_RULES}/webshells/WShell_THOR_Webshells.yar", "webshells_thor.yar"),
+        (f"{_YARA_RULES}/webshells/WShell_ChinaChopper.yar", "webshell_chinachopper.yar"),
+        (f"{_YARA_RULES}/webshells/WShell_PHP_in_images.yar", "webshell_php_in_images.yar"),
+        (f"{_ELASTIC}/Linux_Backdoor_Generic.yar", "linux_backdoor_generic.yar"),
+        (f"{_ELASTIC}/Linux_Backdoor_Bash.yar", "linux_backdoor_bash.yar"),
+        (f"{_ELASTIC}/Linux_Backdoor_Tinyshell.yar", "linux_backdoor_tinyshell.yar"),
+        (f"{_ELASTIC}/Linux_Ransomware_Babuk.yar", "linux_ransomware_babuk.yar"),
+        (f"{_ELASTIC}/Linux_Ransomware_BlackBasta.yar", "linux_ransomware_blackbasta.yar"),
+        (f"{_ELASTIC}/Linux_Ransomware_Conti.yar", "linux_ransomware_conti.yar"),
     ],
     "community": [
-        ("https://raw.githubusercontent.com/Yara-Rules/rules/master/malware/MALW_Coinminer.yar",
-         "coinminer.yar"),
+        (f"{_YARA_RULES}/malware/MALW_XMRIG_Miner.yar", "xmrig_miner.yar"),
+        (f"{_YARA_RULES}/malware/MALW_Monero_Miner_installer.yar", "monero_miner_installer.yar"),
+        (f"{_ELASTIC}/Linux_Cryptominer_Generic.yar", "linux_cryptominer_generic.yar"),
     ],
 }
 

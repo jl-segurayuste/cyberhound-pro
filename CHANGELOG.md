@@ -4,6 +4,19 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/); v
 [SemVer](https://semver.org/lang/es/). Cada versión publicada tiene su etiqueta `vX.Y.Z` y su
 release en GitHub, con la imagen Docker correspondiente en GHCR.
 
+## [Sin publicar]
+
+### Corregido
+- Reglas YARA: las cuatro URLs de «Actualizar reglas» daban 404 (ficheros movidos en la rama principal)
+  y la actualización fallaba siempre. Ahora: webshells de Yara-Rules, puertas traseras y ransomware de
+  Linux de Elastic y mineros (*community*), fijados a un commit (670 reglas que compilan juntas).
+- Quitada la «actualización semanal de reglas YARA» del scheduler: dependía de una opción que no existía
+  y nunca se programaba.
+
+### Documentación
+- README: número de tests y versiones de Python del CI, `scap_baseline` en la arquitectura, ruta por
+  defecto del certificado (`CH_TLS_DIR`). Manual: YARA y el caso «arranca en HTTP».
+
 ## [6.8.3] — 2026-11-04
 
 ### Corregido

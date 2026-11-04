@@ -184,8 +184,10 @@ destinos públicos o dentro de su ámbito. Detalle en el [README](../README.md#m
 ## 7. Programación y monitorización
 
 - **Tareas programadas de la plataforma** (Configuración › Scheduler): auditoría diaria 02:00, malware
-  semanal (lunes 03:00), red diaria 04:00 y actualización semanal de reglas YARA. Se pueden pausar
-  (queda guardado en `config.yaml`) o lanzar al momento.
+  semanal (lunes 03:00) y red diaria 04:00. Se pueden pausar (queda guardado en `config.yaml`) o
+  lanzar al momento. Las reglas YARA se descargan con **Actualizar reglas** (Configuración › YARA):
+  webshells (Yara-Rules), puertas traseras y ransomware de Linux (Elastic) y, en *community*, mineros;
+  las fuentes están fijadas a un commit concreto.
 - **Análisis programados** (Configuración › Programados): cualquier organización, y la plataforma,
   programa análisis de red, auditoría SSH, cabeceras web, exposición, API/CORS, TLS, DNS, subdominios
   o Nuclei a la hora y los días que elija. La auditoría SSH necesita una **credencial SSH guardada**;
@@ -224,7 +226,7 @@ panel Intel lo indica.
 
 | Síntoma | Causa / solución |
 |---|---|
-| Arranca en HTTP "inseguro" | No pudo crear el certificado: el directorio de datos (`CH_DATA_DIR`, por defecto `~/.cyberhound`) no es escribible |
+| Arranca en HTTP "inseguro" | No pudo crear el certificado: no se puede escribir ni en `CH_TLS_DIR` (por defecto `/etc/cyberhound/tls`) ni en `<datos>/tls` (`CH_DATA_DIR`, por defecto `~/.cyberhound`) |
 | "Errores de configuración" al arrancar | El mensaje dice qué campo y en qué fichero; p. ej. falta la contraseña → `cyberhound setup --config <fichero>` |
 | Nuclei devuelve 0 hallazgos | Falta el binario o las plantillas: instala `nuclei` + `nuclei -update-templates` |
 | "OS detection requiere root" | Ejecuta CyberHound como root (o el análisis de red con `sudo`) |
