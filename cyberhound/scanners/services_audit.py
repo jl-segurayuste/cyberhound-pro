@@ -256,7 +256,7 @@ async def audit_mysql() -> list[Finding]:
                 "Añadir en [mysqld]:\nbind-address = 127.0.0.1",
                 auto_fix=False,
             ))
-        elif "0.0.0.0" in config or "bind-address = ::" in config:
+        elif "0.0.0.0" in config or "bind-address = ::" in config:  # nosec B104 - detecta servicios expuestos, no abre ningún socket
             findings.append(_f(
                 "mysql_bind_all", "mysql", "critical",
                 "MySQL escuchando en todas las interfaces",
@@ -411,7 +411,7 @@ async def audit_redis() -> list[Finding]:
 
         # bind — si escucha en todas las interfaces
         bind_match = re.search(r"^\s*bind\s+(.+)", content, re.MULTILINE)
-        if not bind_match or "0.0.0.0" in bind_match.group(1):
+        if not bind_match or "0.0.0.0" in bind_match.group(1):  # nosec B104 - detecta servicios expuestos, no abre ningún socket
             findings.append(_f(
                 "redis_bind_all", "redis", "critical",
                 "Redis: escuchando en todas las interfaces de red",
@@ -489,7 +489,7 @@ async def audit_mongodb() -> list[Finding]:
     bind_match = re.search(r"bindIp\s*:\s*(.+)", content)
     if bind_match:
         bind_val = bind_match.group(1).strip()
-        if "0.0.0.0" in bind_val:
+        if "0.0.0.0" in bind_val:  # nosec B104 - detecta servicios expuestos, no abre ningún socket
             findings.append(_f(
                 "mongo_bind_all", "mongodb", "critical",
                 "MongoDB: escuchando en todas las interfaces (0.0.0.0)",

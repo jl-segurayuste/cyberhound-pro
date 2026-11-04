@@ -549,7 +549,7 @@ async def check_tmp_noexec() -> list[Finding]:
     if content is None:
         return []
     results = []
-    for mount_point, check_label in [("/tmp", "tmp"), ("/var/tmp", "var_tmp")]:
+    for mount_point, check_label in [("/tmp", "tmp"), ("/var/tmp", "var_tmp")]:  # nosec B108 - audita las opciones de montaje de /tmp
         mounted_noexec = False
         mounted_nosuid = False
         for line in content.splitlines():
@@ -701,11 +701,11 @@ async def check_openssh_version() -> list[Finding]:
 async def check_sticky_bit_tmp() -> list[Finding]:
     """Verifica que /tmp tenga sticky bit activado."""
     try:
-        mode = Path("/tmp").stat().st_mode
+        mode = Path("/tmp").stat().st_mode  # nosec B108 - audita el sticky bit de /tmp
         if not (mode & 0o1000):  # sticky bit
             return [_f(
                 "tmp_no_sticky_bit", "filesystem", "high",
-                "/tmp sin sticky bit",
+                "/tmp sin sticky bit",  # nosec B108 - texto del hallazgo
                 "Sin sticky bit en /tmp cualquier usuario puede borrar ficheros de otros usuarios.",
                 "chmod +t /tmp",
                 auto_fix=True,
@@ -1226,8 +1226,8 @@ class HardeningFixer:
         return ok, err
 
     async def _fix_sticky_bit(self) -> tuple[bool, str]:
-        self._record(snapshot_chmod("/tmp"))
-        return await self._run(["chmod", "+t", "/tmp"])
+        self._record(snapshot_chmod("/tmp"))  # nosec B108 - corrige el sticky bit de /tmp
+        return await self._run(["chmod", "+t", "/tmp"])  # nosec B108 - corrige el sticky bit de /tmp
 
     async def _fix_openssh(self) -> tuple[bool, str]:
         self._record(irreversible("actualización de paquete 'openssh-server' (no se revierte la versión)"))

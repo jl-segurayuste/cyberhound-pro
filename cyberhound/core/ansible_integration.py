@@ -171,7 +171,7 @@ _EXACT: dict[str, list[dict]] = {
                 "ansible.builtin.systemd_service": {
                     "name": "{{ 'chrony' if ansible_facts.os_family == 'Debian' else 'chronyd' }}",
                     "enabled": True, "state": "started"}}],
-    "tmp_no_sticky_bit": [_mode("/tmp", "1777")],
+    "tmp_no_sticky_bit": [_mode("/tmp", "1777")],  # nosec B108 - corrige los permisos del propio /tmp
     "ctrlaltdel_enabled": [{"name": "CyberHound: enmascarar ctrl-alt-del.target",
                             "ansible.builtin.systemd_service": {"name": "ctrl-alt-del.target", "masked": True}}],
     "core_dumps_enabled": [

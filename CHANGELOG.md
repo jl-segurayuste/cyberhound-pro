@@ -4,6 +4,25 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/); v
 [SemVer](https://semver.org/lang/es/). Cada versión publicada tiene su etiqueta `vX.Y.Z` y su
 release en GitHub, con la imagen Docker correspondiente en GHCR.
 
+## [6.8.2] — 2026-11-04
+
+### Seguridad
+- Los informes XML importados (Nessus, XCCDF/OpenSCAP) se leen con `defusedxml`: un fichero con
+  entidades o DTD se rechaza con un error claro en vez de procesarse.
+
+### Corregido
+- En servidores con FIPS activado, `hashlib.md5()`/`sha1()` fallan si no se indica
+  `usedforsecurity=False`: la vigilancia de ficheros críticos (eBPF) y los IDs de hallazgos de nuclei
+  dejaban de funcionar. Solo se usan para detectar cambios e identificar, no para seguridad.
+- Sustituidas APIs obsoletas: `aiohttp.BasicAuth` (Wazuh, Jira, ServiceNow) por la cabecera
+  `Authorization` con `aiohttp.encode_basic_auth()`, y `datetime.utcnow()` en los tokens.
+
+### CI
+- Bandit pasa a bloquear el pipeline (antes terminaba en `|| true`); los falsos positivos quedan
+  marcados con `# nosec` y su motivo.
+- Tests también en Python 3.13 y 3.14, ejecución semanal programada y la imagen solo se publica en
+  `push` (no en las ejecuciones programadas ni manuales).
+
 ## [6.8.1] — 2026-11-01
 
 ### Seguridad
@@ -162,6 +181,9 @@ release en GitHub, con la imagen Docker correspondiente en GHCR.
 
 Las versiones anteriores no tienen registro de cambios; su historia está en `git log`.
 
+[6.8.2]: https://github.com/jl-segurayuste/cyberhound-pro/releases/tag/v6.8.2
+[6.8.1]: https://github.com/jl-segurayuste/cyberhound-pro/releases/tag/v6.8.1
+[6.8.0]: https://github.com/jl-segurayuste/cyberhound-pro/releases/tag/v6.8.0
 [6.7.0]: https://github.com/jl-segurayuste/cyberhound-pro/releases/tag/v6.7.0
 [6.6.0]: https://github.com/jl-segurayuste/cyberhound-pro/releases/tag/v6.6.0
 [6.5.0]: https://github.com/jl-segurayuste/cyberhound-pro/releases/tag/v6.5.0

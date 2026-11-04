@@ -187,10 +187,10 @@ class SIEMIntegration:
             connector=aiohttp.TCPConnector(ssl=False),
         ) as session:
             # Obtener token JWT de Wazuh
-            auth = aiohttp.BasicAuth(self.cfg.wazuh_api_user, self.cfg.wazuh_api_pass)
+            auth = {"Authorization": aiohttp.encode_basic_auth(self.cfg.wazuh_api_user, self.cfg.wazuh_api_pass)}
             async with session.post(
                 f"{self.cfg.wazuh_api_url}/security/user/authenticate",
-                auth=auth,
+                headers=auth,
             ) as resp:
                 data = await resp.json()
                 token = data.get("data", {}).get("token", "")

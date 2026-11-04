@@ -131,7 +131,7 @@ class ScoringContext:
 
         for f in findings:
             # Si hay servicios escuchando en 0.0.0.0, hay exposición
-            if f.category == "network" and "0.0.0.0" in (f.evidence or ""):
+            if f.category == "network" and "0.0.0.0" in (f.evidence or ""):  # nosec B104 - busca el texto en la evidencia, no abre ningún socket
                 open_ports += 1
             if "svc_listen_all" in f.id:
                 open_ports += 1

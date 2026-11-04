@@ -21,6 +21,7 @@ dependencies = [
     "colorama>=0.4",
     "jinja2>=3.0",
     "dnspython>=2.9",
+    "defusedxml>=0.7.1",   # parseo seguro de los informes XML importados
     "fpdf2>=2.7",
     "multidict>=6.9.1",   # la trae aiohttp; mínimo sin vulnerabilidades conocidas
 ]

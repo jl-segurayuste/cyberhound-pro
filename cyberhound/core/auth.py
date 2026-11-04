@@ -91,8 +91,8 @@ class AuthConfig:
             "sub": username,
             # Organización de la sesión (multi-tenant); la fija el login y nadie la puede cambiar
             "tenant": tenant,
-            "iat": datetime.utcnow(),
-            "exp": datetime.utcnow() + self.token_ttl,
+            "iat": datetime.now(UTC),
+            "exp": datetime.now(UTC) + self.token_ttl,
             # Id de la sesión (tabla sessions): cerrar sesión o cambiar la contraseña la revoca
             "jti": jti or secrets.token_hex(16),
         }
@@ -122,8 +122,8 @@ class AuthConfig:
             "sub": username,
             "tenant": tenant,
             "purpose": "pending_2fa",
-            "iat": datetime.utcnow(),
-            "exp": datetime.utcnow() + _PENDING_2FA_TTL,
+            "iat": datetime.now(UTC),
+            "exp": datetime.now(UTC) + _PENDING_2FA_TTL,
         }
         return jwt.encode(payload, self.secret, algorithm="HS256")
 

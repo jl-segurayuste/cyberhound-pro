@@ -39,6 +39,9 @@ import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 
+from defusedxml import DefusedXmlException
+from defusedxml.ElementTree import fromstring as safe_fromstring  # ficheros subidos: sin entidades/DTD
+
 from cyberhound.core.logging import get_logger
 from cyberhound.core.models import Finding
 
@@ -156,7 +159,7 @@ def parse_nessus(content: str | bytes, source_file: str = "scan.nessus") -> Impo
         if isinstance(content, bytes):
             content = content.decode("utf-8", errors="replace")
 
-        root = ET.fromstring(content)
+        root = safe_fromstring(content)
 
         # Buscar Report o Policy para metadata
         report = root.find(".//Report")
@@ -226,6 +229,8 @@ def parse_nessus(content: str | bytes, source_file: str = "scan.nessus") -> Impo
 
     except ET.ParseError as e:
         errors.append(f"XML inválido: {e}")
+    except DefusedXmlException as e:
+        errors.append(f"XML rechazado (entidades o DTD no permitidas): {e!r}")
     except Exception as e:
         errors.append(f"Error parseando Nessus: {e}")
         logger.error("parse_nessus: %s", e, exc_info=True)
@@ -295,7 +300,7 @@ def parse_xccdf(content: str | bytes, source_file: str = "results.xml") -> Impor
         if isinstance(content, bytes):
             content = content.decode("utf-8", errors="replace")
 
-        root = ET.fromstring(content)
+        root = safe_fromstring(content)
 
         # Detectar namespace
         ns_prefix = ""
@@ -430,6 +435,8 @@ def parse_xccdf(content: str | bytes, source_file: str = "results.xml") -> Impor
 
     except ET.ParseError as e:
         errors.append(f"XML inválido: {e}")
+    except DefusedXmlException as e:
+        errors.append(f"XML rechazado (entidades o DTD no permitidas): {e!r}")
     except Exception as e:
         errors.append(f"Error parseando XCCDF: {e}")
         logger.error("parse_xccdf: %s", e, exc_info=True)

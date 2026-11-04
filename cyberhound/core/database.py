@@ -570,7 +570,7 @@ class Database(AccountsMixin, SchedulesMixin, RemoteFixesMixin, SSHCredentialsMi
         sets = ", ".join(f"{k}=?" for k in fields)
         async with aiosqlite.connect(str(self.path)) as db:
             await db.execute(
-                f"UPDATE users SET {sets} WHERE username=?",
+                f"UPDATE users SET {sets} WHERE username=?",  # nosec B608 - columnas filtradas por la lista blanca 'allowed'
                 [*fields.values(), username],
             )
             await db.commit()

@@ -116,9 +116,9 @@ class TicketingIntegration:
                 "labels": ["cyberhound", f.severity, f.category],
             }
         }
-        auth = aiohttp.BasicAuth(self.cfg.jira_email, self.cfg.jira_api_token)
+        auth = {"Authorization": aiohttp.encode_basic_auth(self.cfg.jira_email, self.cfg.jira_api_token)}
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as session:
-            async with session.post(url, json=payload, auth=auth) as resp:
+            async with session.post(url, json=payload, headers=auth) as resp:
                 if resp.status not in (200, 201):
                     body = await resp.text()
                     raise RuntimeError(f"Jira respondió {resp.status}: {body[:200]}")
@@ -140,10 +140,10 @@ class TicketingIntegration:
             "impact": impact,
             "category": "security",
         }
-        auth = aiohttp.BasicAuth(self.cfg.servicenow_user, self.cfg.servicenow_password)
-        headers = {"Accept": "application/json", "Content-Type": "application/json"}
+        headers = {"Accept": "application/json", "Content-Type": "application/json",
+                   "Authorization": aiohttp.encode_basic_auth(self.cfg.servicenow_user, self.cfg.servicenow_password)}
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as session:
-            async with session.post(url, json=payload, auth=auth, headers=headers) as resp:
+            async with session.post(url, json=payload, headers=headers) as resp:
                 if resp.status not in (200, 201):
                     body = await resp.text()
                     raise RuntimeError(f"ServiceNow respondió {resp.status}: {body[:200]}")

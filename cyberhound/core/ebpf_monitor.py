@@ -207,7 +207,7 @@ tracepoint:syscalls:sys_enter_execve
                     # Solo hash de ficheros pequeños
                     if p.stat().st_size < 1_000_000:
                         import hashlib
-                        file_state[cf] = (mtime, hashlib.md5(p.read_bytes()).hexdigest())
+                        file_state[cf] = (mtime, hashlib.md5(p.read_bytes(), usedforsecurity=False).hexdigest())
                     else:
                         file_state[cf] = (mtime, "")
                 except (PermissionError, OSError):
@@ -236,7 +236,7 @@ tracepoint:syscalls:sys_enter_execve
                         )
                     import hashlib
                     if p.stat().st_size < 1_000_000:
-                        file_state[cf] = (mtime, hashlib.md5(p.read_bytes()).hexdigest())
+                        file_state[cf] = (mtime, hashlib.md5(p.read_bytes(), usedforsecurity=False).hexdigest())
                     else:
                         file_state[cf] = (mtime, "")
                 except (PermissionError, OSError):

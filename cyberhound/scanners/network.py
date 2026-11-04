@@ -282,7 +282,7 @@ class NetworkScanner:
     def _parse_nmap_xml(self, xml_output: str, device: NetworkDevice) -> NetworkDevice:
         """Parsea la salida XML de nmap y rellena el NetworkDevice."""
         try:
-            root = ET.fromstring(xml_output)
+            root = ET.fromstring(xml_output)  # nosec B314 - salida XML del nmap local, no un fichero subido
             device.raw_nmap_xml = xml_output
 
             for host_el in root.findall("host"):

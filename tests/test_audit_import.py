@@ -319,3 +319,16 @@ class TestUtilities:
 
     def test_nessus_category_tls(self):
         assert _nessus_category("SSL Certificate Problem", "https", []) == "vulnerability/tls"
+
+
+BOMBA_ENTIDADES = (
+    '<?xml version="1.0"?><!DOCTYPE l [<!ENTITY a "aaaa"><!ENTITY b "&a;&a;&a;">]>'
+    "<NessusClientData_v2>&b;</NessusClientData_v2>"
+)
+
+
+@pytest.mark.parametrize("parser", [parse_nessus, parse_xccdf])
+def test_xml_con_entidades_se_rechaza(parser):
+    r = parser(BOMBA_ENTIDADES)
+    assert r.findings == []
+    assert any("XML rechazado" in e for e in r.errors)

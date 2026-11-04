@@ -107,7 +107,7 @@ def finding_from_result(obj: dict) -> Finding | None:
     evidence = " · ".join(evidence_parts)[:1000]
 
     # ID estable y único: plantilla + dónde coincidió.
-    digest = hashlib.sha1(f"{template_id}|{matched_at}".encode()).hexdigest()[:10]
+    digest = hashlib.sha1(f"{template_id}|{matched_at}".encode(), usedforsecurity=False).hexdigest()[:10]
 
     return Finding(
         id=f"nuclei_{template_id}_{digest}",
