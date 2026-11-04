@@ -293,7 +293,7 @@ class TOTPManager:
             last = user.get("totp_last_counter")
             if last is None or step > last:
                 await self.db.update_totp_last_counter(username, step)
-                if self.key and not stored.startswith(_SEALED):
+                if self.key and secret and not stored.startswith(_SEALED):
                     await self.db.update_user(username, totp_secret=seal_secret(secret, self.key))
                 return True, "TOTP válido"
 

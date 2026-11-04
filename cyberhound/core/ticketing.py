@@ -96,7 +96,7 @@ class TicketingIntegration:
         results = await asyncio.gather(*tasks, return_exceptions=True)
         out: list[TicketResult] = []
         for system, result in zip(systems, results, strict=False):
-            if isinstance(result, Exception):
+            if isinstance(result, BaseException):
                 logger.warning("Ticketing %s: error creando ticket para %s: %s", system, f.id, result)
             else:
                 out.append(result)

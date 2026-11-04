@@ -68,16 +68,17 @@ async def test_auditoria_y_filtros(db):
 async def test_bd_sqlite_antigua_se_actualiza(tmp_path):
     """Una BD de una versión anterior (sin las tablas nuevas) se migra al abrirla."""
     import sqlite3
+    from contextlib import closing
 
     from cyberhound.core.database import Database
     path = tmp_path / "vieja.db"
-    with sqlite3.connect(path) as c:
+    with closing(sqlite3.connect(path)) as c, c:  # el with de sqlite3 no cierra
         c.executescript("CREATE TABLE schema_version (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);"
                         "INSERT INTO schema_version VALUES (5, '2026-01-01');")
     d = Database(path)
     await d.init()
     await d.create_session("j", "ana", FUTURE)
-    with sqlite3.connect(path) as c:
+    with closing(sqlite3.connect(path)) as c, c:  # el with de sqlite3 no cierra
         assert c.execute("SELECT MAX(version) FROM schema_version").fetchone()[0] == DB_VERSION
 
 

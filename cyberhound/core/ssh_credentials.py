@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import secrets
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 from cyberhound.core.security import InputValidator, ValidationError
 from cyberhound.core.totp import _fernet
@@ -122,14 +123,16 @@ def to_ssh_credentials(row: dict, key: str, slug: str):
     if secret is None:
         raise ValueError(f"No se puede descifrar la credencial SSH '{row['name']}' "
                          "(¿ha cambiado auth.secret?): vuelve a guardarla")
+    is_key = row["kind"] == "key"
     return SSHCredentials(username=row["username"], port=int(row["port"]), use_server_keys=False,
-                          **({"private_key": secret} if row["kind"] == "key" else {"password": secret}))
+                          private_key=secret if is_key else None, password=None if is_key else secret)
 
 
 class SSHCredentialsMixin:
-    async def _run(self, sql: str, *args) -> int: ...
-    async def _rows(self, sql: str, *args) -> list[dict]: ...
-    async def _val(self, sql: str, *args): ...
+    if TYPE_CHECKING:  # los implementan Database y DatabasePG
+        async def _run(self, sql: str, *args) -> int: ...
+        async def _rows(self, sql: str, *args) -> list[dict]: ...
+        async def _val(self, sql: str, *args): ...
 
     async def list_ssh_credentials(self) -> list[dict]:
         return [public_view(r) for r in await self._rows("SELECT * FROM ssh_credentials ORDER BY name")]

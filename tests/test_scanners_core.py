@@ -110,11 +110,11 @@ class TestCodeAuditor:
 
     def test_class_has_full_analysis(self):
         """CodeAuditor tiene el método full_analysis."""
-        import asyncio
+        import inspect
 
         from cyberhound.scanners.code import CodeAuditor
         assert hasattr(CodeAuditor, "full_analysis")
-        assert asyncio.iscoroutinefunction(CodeAuditor.full_analysis)
+        assert inspect.iscoroutinefunction(CodeAuditor.full_analysis)
 
 
 # ── Network scanner ───────────────────────────────────────────────────────────

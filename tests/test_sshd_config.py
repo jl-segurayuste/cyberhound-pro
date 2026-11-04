@@ -2,6 +2,8 @@
 
 sshd usa el primer valor de cada opción, lee los Include donde aparecen y lo de un Match solo vale
 para esas conexiones. Antes la auditoría y el fix solo miraban sshd_config."""
+from pathlib import Path
+
 import pytest
 
 from cyberhound.core import sshd_config
@@ -54,11 +56,11 @@ def test_plan_y_deshacer(conf):
     before = {p.name: p.read_text() for p in conf.rglob("*") if p.is_file()}
     new, changes = sshd_config.plan_set("PasswordAuthentication", "no")
     for path, text in new.items():
-        open(path, "w").write(text)
+        Path(path).write_text(text)
     assert sshd_config.effective()["passwordauthentication"][0] == "no"
     assert "    PasswordAuthentication yes" in (conf / "sshd_config").read_text()
     for path, text in sshd_config.plan_undo(changes).items():
-        open(path, "w").write(text)
+        Path(path).write_text(text)
     assert {p.name: p.read_text() for p in conf.rglob("*") if p.is_file()} == before
 
 

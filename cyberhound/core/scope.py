@@ -89,7 +89,7 @@ class Scope:
             except ValueError:
                 net = None
             if net is not None:
-                if any(net.version == n.version and net.subnet_of(n) for n in self.networks):
+                if any(net.version == n.version and net.subnet_of(n) for n in self.networks):  # type: ignore[arg-type]  # misma versión comprobada
                     return None
                 return f"{t} está fuera de las redes permitidas a esta organización"
         host = host_of(t)

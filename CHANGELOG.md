@@ -4,6 +4,33 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/); v
 [SemVer](https://semver.org/lang/es/). Cada versión publicada tiene su etiqueta `vX.Y.Z` y su
 release en GitHub, con la imagen Docker correspondiente en GHCR.
 
+## [6.8.3] — 2026-11-04
+
+### Corregido
+- Importación XCCDF/OpenSCAP: la remediación de las reglas con `<fixtext>` (sin `<fix>`) se perdía,
+  porque un elemento XML sin hijos se evalúa como falso. Ahora se extrae (test de regresión).
+- Importación JSON: un `"findings": null` o `"source_host": null` rompía la importación; se tratan
+  como vacíos.
+- CSRF (login y formularios): un token enviado como fichero provocaba un error 500 en vez de un 403.
+- Ticketing: una cancelación (`CancelledError`) se trataba como ticket creado.
+- AWX/AAP: con `verify_ssl` activo se pasaba `ssl=None` a aiohttp; ahora se verifica con el contexto
+  por defecto.
+- Un comando que agota el timeout se recoge tras matarlo (quedaba como proceso zombi).
+- Rollback: una acción guardada sin ruta o sin comando se informa como no reversible en vez de fallar.
+
+### Cambiado
+- Claves tipadas de aiohttp (`web.AppKey`/`web.RequestKey`, en `cyberhound/core/web_keys.py`) en
+  lugar de cadenas en `app[...]` y `request[...]`; los tests fallan si vuelve a aparecer una cadena.
+- Las redirecciones que ponen o quitan cookies devuelven una respuesta 302 en vez de un `HTTPFound`
+  (devolver la excepción está obsoleto en aiohttp).
+- `asyncio.get_running_loop()` en lugar de `get_event_loop()`; `datetime.fromtimestamp(..., UTC)` en
+  los logs JSON (mismo formato).
+- La suite ya no oculta los `DeprecationWarning`: 0 avisos en Python 3.11, 3.12 y 3.14 (antes 259).
+
+### CI
+- mypy bloqueante (0 errores; antes 39 y `|| true`), con las dependencias instaladas para que vea los
+  tipos reales.
+
 ## [6.8.2] — 2026-11-04
 
 ### Seguridad
@@ -181,6 +208,7 @@ release en GitHub, con la imagen Docker correspondiente en GHCR.
 
 Las versiones anteriores no tienen registro de cambios; su historia está en `git log`.
 
+[6.8.3]: https://github.com/jl-segurayuste/cyberhound-pro/releases/tag/v6.8.3
 [6.8.2]: https://github.com/jl-segurayuste/cyberhound-pro/releases/tag/v6.8.2
 [6.8.1]: https://github.com/jl-segurayuste/cyberhound-pro/releases/tag/v6.8.1
 [6.8.0]: https://github.com/jl-segurayuste/cyberhound-pro/releases/tag/v6.8.0

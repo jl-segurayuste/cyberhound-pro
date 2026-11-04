@@ -18,7 +18,7 @@ env:
 jobs:
   # ── Linting (ruff) ──────────────────────────────────────────────────────────
   lint:
-    name: Lint (ruff)
+    name: Lint (ruff + mypy)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -26,12 +26,13 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-      - name: Instalar ruff y mypy
-        run: pip install ruff mypy
+      - name: Instalar ruff, mypy y el paquete
+        # Con las dependencias instaladas mypy ve los tipos reales (aiohttp, etc.).
+        run: pip install -c constraints.txt -e . ruff "mypy==2.4.1"
       - name: Ruff check
         run: ruff check cyberhound/ tests/
-      - name: Mypy type-check (informativo)
-        run: mypy cyberhound/ || true
+      - name: Mypy type-check
+        run: mypy cyberhound/
 
   # ── Tests ───────────────────────────────────────────────────────────────────
   test:

@@ -9,6 +9,7 @@ from cyberhound.api.common import (
     _scope_status,
 )
 from cyberhound.core.logging import get_logger
+from cyberhound.core.web_keys import AUTH_USER
 
 logger = get_logger("api")
 
@@ -142,7 +143,7 @@ class DataHandlers:
             pattern = str(body.get("pattern", "")).strip()[:200]
             reason  = str(body.get("reason", "")).strip()[:500]
             expires = body.get("expires_at")
-            user    = request.get("auth_user", "unknown")
+            user    = request.get(AUTH_USER, "unknown")
             if not pattern or not reason:
                 return web.json_response({"error": "pattern y reason son obligatorios"}, status=400)
             await self.db.add_suppression(pattern, reason, user, expires)

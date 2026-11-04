@@ -32,9 +32,14 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from cyberhound.core.logging import get_logger
 from cyberhound.core.paths import DATA_DIR
+
+if TYPE_CHECKING:
+    from cyberhound.core.database import Database
+    from cyberhound.core.database_pg import DatabasePG
 
 logger = get_logger("multitenancy")
 
@@ -227,6 +232,7 @@ class TenantDatabases:
             return self._dbs[slug]
         if not TENANT_SLUG_RE.match(slug) or slug in RESERVED_SLUGS:
             raise ValueError(f"Tenant inválido: {slug!r}")
+        db: Database | DatabasePG
         if self._db_url.startswith("postgresql://"):
             from cyberhound.core.database_pg import DatabasePG
             db = DatabasePG(self._db_url, schema=schema_for(slug))

@@ -4,7 +4,7 @@
 
 > Analiza tu red, servidores, contenedores, webs y código. Detecta vulnerabilidades, malware y configuraciones inseguras, corrige con un clic (y deshace) y vigila en tiempo real. Una instancia o varias organizaciones aisladas (multi-tenant).
 
-[![Versión](https://img.shields.io/badge/versión-v6.8.2-blue.svg)](cyberhound/__init__.py)
+[![Versión](https://img.shields.io/badge/versión-v6.8.3-blue.svg)](cyberhound/__init__.py)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://python.org)
 [![Tests](https://img.shields.io/badge/tests-729%20passed-green.svg)](#tests)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)

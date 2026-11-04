@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import secrets
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from aiohttp import web
 
@@ -67,6 +68,10 @@ from cyberhound.core.security import (
     TLSManager,
     set_trusted_proxies,
 )
+from cyberhound.core.web_keys import AUTH_CONFIG_KEY, CSP_NONCE, SERVER_KEY, SUPERADMIN
+
+if TYPE_CHECKING:
+    from cyberhound.core.ebpf_monitor import EBPFMonitor
 
 logger = get_logger("api")
 
@@ -100,7 +105,7 @@ class CyberHoundServer(ScanHandlers, FixHandlers, DataHandlers, AccountHandlers,
         self.scheduler: Scheduler | None = None
         self._sbom_cache: dict | None = None
         self._ansible_jobs: list = []
-        self._ebpf_monitor = None
+        self._ebpf_monitor: EBPFMonitor | None = None
 
         # Modo agente
         from cyberhound.core.agent import AgentConfig, AgentManager, AgentReporter
@@ -128,9 +133,9 @@ class CyberHoundServer(ScanHandlers, FixHandlers, DataHandlers, AccountHandlers,
             ],
             client_max_size=10 * 1024 * 1024,
         )
-        app["auth_config"] = auth_cfg
+        app[AUTH_CONFIG_KEY] = auth_cfg
         self._auth_secret = auth_cfg.secret     # cifra las credenciales SSH guardadas
-        app["server"] = self
+        app[SERVER_KEY] = self
 
         setup_auth_routes(app, auth_cfg)
         register_intel_routes(app)
@@ -300,7 +305,7 @@ class CyberHoundServer(ScanHandlers, FixHandlers, DataHandlers, AccountHandlers,
         spa_path = Path(__file__).parent.parent / "ui" / "static" / "index.html"
         if spa_path.exists():
             html = spa_path.read_text(encoding="utf-8")
-            nonce = request.get("csp_nonce", "")
+            nonce = request.get(CSP_NONCE, "")
             # Solo los <script> inline (no los <script src=...>) reciben el nonce.
             html = html.replace("<script>", f'<script nonce="{nonce}">')
             return web.Response(text=html, content_type="text/html")
@@ -322,7 +327,7 @@ class CyberHoundServer(ScanHandlers, FixHandlers, DataHandlers, AccountHandlers,
 
     def _may_touch_host(self, request: web.Request) -> bool:
         """Lo que actúa sobre este servidor: en multi-tenant solo el superadmin."""
-        return not self.cfg.multi_tenant.enabled or bool(request.get("superadmin"))
+        return not self.cfg.multi_tenant.enabled or bool(request.get(SUPERADMIN))
 
     def _find_cached(self, finding_id: str) -> Finding | None:
         for _ws, fl in self._own_caches():

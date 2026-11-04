@@ -207,7 +207,7 @@ async def scan_image_filesystem(image: str, max_size_mb: int = 200) -> list[Find
             pass
 
     # Exportar imagen a tar en memoria
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     with tempfile.NamedTemporaryFile(suffix=".tar", delete=True) as tmp:
         proc_save = await run_command(
             ["docker", "save", "-o", tmp.name, image],

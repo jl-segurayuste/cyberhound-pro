@@ -54,7 +54,7 @@ async def scan_target(host: str, port: int = 443, timeout: int = 10) -> list[Fin
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     try:
         cert_bin, protocol, cipher = await asyncio.wait_for(
             loop.run_in_executor(None, _fetch_cert, host, port, ctx, timeout),

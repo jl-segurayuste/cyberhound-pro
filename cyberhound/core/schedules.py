@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import secrets
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 from cyberhound.core.security import InputValidator, ValidationError
 
@@ -132,9 +133,10 @@ def _decode(row: dict) -> dict:
 
 
 class SchedulesMixin:
-    async def _run(self, sql: str, *args) -> int: ...
-    async def _rows(self, sql: str, *args) -> list[dict]: ...
-    async def _val(self, sql: str, *args): ...
+    if TYPE_CHECKING:  # los implementan Database y DatabasePG
+        async def _run(self, sql: str, *args) -> int: ...
+        async def _rows(self, sql: str, *args) -> list[dict]: ...
+        async def _val(self, sql: str, *args): ...
 
     async def list_schedules(self) -> list[dict]:
         return [_decode(r) for r in await self._rows("SELECT * FROM schedules ORDER BY created_at")]

@@ -26,6 +26,7 @@ from cyberhound.core.security import (
     ValidationError,
 )
 from cyberhound.core.ssh_host_keys import HostKeyStore
+from cyberhound.core.web_keys import AUTH_USER
 
 logger = get_logger("api")
 
@@ -37,7 +38,7 @@ class ScanHandlers:
         ws = web.WebSocketResponse(heartbeat=30)
         await ws.prepare(request)
         ws_id = self._new_ws_id()
-        user = request.get("auth_user", "anonymous")
+        user = request.get(AUTH_USER, "anonymous")
         logger.info("WS conectado: %s user=%s", ws_id, user)
 
         async def send(msg: dict) -> None:

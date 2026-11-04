@@ -51,11 +51,12 @@ async def run_command(
         )
     except TimeoutError:
         proc.kill()
+        await proc.wait()  # recoge el proceso: sin esto queda zombi
         logger.error("Comando agotó el timeout (%ds): %s", timeout, " ".join(cmd))
         raise
 
     result = subprocess.CompletedProcess(
-        cmd, proc.returncode,
+        cmd, proc.returncode if proc.returncode is not None else -1,
         stdout.decode(errors="replace"),
         stderr.decode(errors="replace"),
     )
@@ -88,7 +89,7 @@ async def read_file_async(path: str, max_bytes: int = 10 * 1024 * 1024) -> str |
             return content
         except ImportError:
             # Fallback a ThreadPoolExecutor
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             def _read() -> str:
                 with open(path, encoding="utf-8", errors="replace") as f:
                     return f.read(max_bytes)
@@ -144,7 +145,7 @@ async def find_files_async(
             logger.error("Error recorriendo %s: %s", root, e)
         return results
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     try:
         return await asyncio.wait_for(
             loop.run_in_executor(_pool, _find),

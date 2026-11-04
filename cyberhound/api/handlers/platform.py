@@ -21,11 +21,14 @@ from cyberhound.core.multitenancy import (
     DEFAULT_TENANT,
     current_tenant,
 )
+from cyberhound.core.web_keys import AUTH_USER, CSP_NONCE, SUPERADMIN, USER_ROLE
 
 logger = get_logger("api")
 
 
 class PlatformHandlers:
+    _sbom_cache: dict | None
+
     # ── WebSocket push — notificaciones sin polling ───────────────────────────
 
     async def push_websocket_handler(self, request: web.Request) -> web.WebSocketResponse:
@@ -56,7 +59,7 @@ class PlatformHandlers:
         """Envía un evento a todos los clientes push conectados."""
         if not self._push_clients:
             return
-        message = {"type": event_type, "data": data, "ts": asyncio.get_event_loop().time()}
+        message = {"type": event_type, "data": data, "ts": asyncio.get_running_loop().time()}
         tenant = current_tenant.get()   # el del escaneo que genera el evento
         for ws, ws_tenant in list(self._push_clients.items()):
             if ws_tenant != tenant:
@@ -76,7 +79,7 @@ class PlatformHandlers:
 
     async def api_swagger_ui(self, request: web.Request) -> web.Response:
         from cyberhound.core.openapi import SWAGGER_UI_HTML
-        nonce = request.get("csp_nonce", "")
+        nonce = request.get(CSP_NONCE, "")
         html = SWAGGER_UI_HTML.replace("<script>", f'<script nonce="{nonce}">')
         return web.Response(text=html, content_type="text/html")
 
@@ -192,7 +195,7 @@ class PlatformHandlers:
                                                      password_hash=passwords.hash_password(admin_pw)))
             finally:
                 current_tenant.reset(ctx)
-        logger.info("Tenant creado por %s: %s", request.get("auth_user"), tenant.slug)
+        logger.info("Tenant creado por %s: %s", request.get(AUTH_USER), tenant.slug)
         return web.json_response(tenant.to_dict(include_key=True), status=201)
 
     async def api_tenant_get(self, request: web.Request) -> web.Response:
@@ -216,7 +219,7 @@ class PlatformHandlers:
         if not self.tenants.delete(slug):
             return web.json_response({"error": "Tenant no encontrado"}, status=404)
         await self.tenant_dbs.archive(slug)
-        logger.info("Tenant dado de baja por %s: %s", request.get("auth_user"), slug)
+        logger.info("Tenant dado de baja por %s: %s", request.get(AUTH_USER), slug)
         return web.json_response({"ok": True})
 
     async def api_tenant_rotate_key(self, request: web.Request) -> web.Response:
@@ -230,13 +233,13 @@ class PlatformHandlers:
         tenant = self.tenants.get(current_tenant.get())
         if not self.cfg.multi_tenant.enabled or not tenant:
             return web.json_response({"error": "Solo en una organización (modo multi-tenant)"}, status=404)
-        if request.get("user_role") != "admin":
+        if request.get(USER_ROLE) != "admin":
             return web.json_response({"error": "Solo el administrador de la organización"}, status=403)
         return web.json_response({"tenant": tenant.slug, "api_key": tenant.api_key})
 
     async def api_tenant_switch(self, request: web.Request) -> web.Response:
         """El superadmin elige qué tenant mira la UI (cookie ch_tenant)."""
-        if not self.cfg.multi_tenant.enabled or not request.get("superadmin"):
+        if not self.cfg.multi_tenant.enabled or not request.get(SUPERADMIN):
             return web.json_response({"error": "Solo el administrador de la plataforma"}, status=403)
         slug = str((await _read_json(request)).get("slug") or DEFAULT_TENANT)
         if slug != DEFAULT_TENANT and not self.tenants.is_active(slug):
@@ -395,7 +398,7 @@ class PlatformHandlers:
             deep      = body.get("deep", True)
             max_imgs  = min(int(body.get("max_images", 5)), 10)
             max_mb    = int(body.get("max_size_mb", 200))
-            user      = request.get("auth_user", "unknown")
+            user      = request.get(AUTH_USER, "unknown")
 
             from cyberhound.scanners.docker_image_scan import DockerImageScanner
             scan_id  = await self.db.create_scan("docker_image", triggered_by=user)
@@ -541,7 +544,7 @@ class PlatformHandlers:
             filepath   = str(body.get("filepath", "")).strip()
             finding_id = str(body.get("finding_id", ""))
             title      = str(body.get("title", ""))
-            user       = request.get("auth_user", "unknown")
+            user       = request.get(AUTH_USER, "unknown")
             if not filepath:
                 return web.json_response({"ok": False, "error": "filepath requerido"}, status=400)
             from cyberhound.core.quarantine import quarantine_file
@@ -603,7 +606,7 @@ class PlatformHandlers:
         """Ejecuta un audit de LDAP/AD y devuelve los hallazgos."""
         try:
             body   = await _read_json(request)
-            user   = request.get("auth_user", "unknown")
+            user   = request.get(AUTH_USER, "unknown")
             if err := await self._out_of_scope([body.get("uri", "")]):
                 return web.json_response({"error": err}, status=_scope_status(err))
             from cyberhound.scanners.ldap_audit import LDAPAuditor

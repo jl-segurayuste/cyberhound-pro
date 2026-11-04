@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import secrets
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 REMOTE_FIXES_TABLE = """
 CREATE TABLE IF NOT EXISTS remote_fixes (
@@ -36,8 +37,9 @@ def _decode(row: dict) -> dict:
 
 
 class RemoteFixesMixin:
-    async def _run(self, sql: str, *args) -> int: ...
-    async def _rows(self, sql: str, *args) -> list[dict]: ...
+    if TYPE_CHECKING:  # los implementan Database y DatabasePG
+        async def _run(self, sql: str, *args) -> int: ...
+        async def _rows(self, sql: str, *args) -> list[dict]: ...
 
     async def add_remote_fix(self, host: str, finding_id: str, action: dict, undo: dict | None,
                              username: str = "", message: str = "") -> str:

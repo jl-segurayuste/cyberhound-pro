@@ -160,7 +160,7 @@ class SIEMIntegration:
         # Prefijo de longitud (protocolo Wazuh)
         msg = struct.pack(">I", len(payload)) + payload
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         try:
             if self.cfg.wazuh_api_url:
                 await self._send_wazuh_api(event)

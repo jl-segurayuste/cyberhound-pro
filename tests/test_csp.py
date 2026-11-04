@@ -4,13 +4,14 @@ from aiohttp import web
 from aiohttp.test_utils import make_mocked_request
 
 from cyberhound.api.server import security_headers_middleware
+from cyberhound.core.web_keys import CSP_NONCE
 
 
 @pytest.mark.asyncio
 async def test_csp_script_src_uses_nonce_not_unsafe_inline():
     async def handler(request):
         # El middleware fija un nonce por petición antes de llamar al handler.
-        assert request["csp_nonce"]
+        assert request[CSP_NONCE]
         return web.Response(text="ok")
 
     req = make_mocked_request("GET", "/")

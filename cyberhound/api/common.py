@@ -11,6 +11,7 @@ from cyberhound.core.auth import (
     AGENT_ROUTES,
     TENANT_COOKIE,
     cap_role,
+    redirect,
 )
 from cyberhound.core.logging import audit_log, get_logger
 from cyberhound.core.multitenancy import (
@@ -20,6 +21,18 @@ from cyberhound.core.multitenancy import (
 from cyberhound.core.paths import YARA_DIR
 from cyberhound.core.security import (
     _get_real_ip,
+)
+from cyberhound.core.web_keys import (
+    AUTH_JTI,
+    AUTH_TENANT,
+    AUTH_TOKEN_ROLE,
+    AUTH_USER,
+    CSP_NONCE,
+    SERVER_KEY,
+    SUPERADMIN,
+    TENANT,
+    TENANT_AGENT_KEY,
+    USER_ROLE,
 )
 
 logger = get_logger("api")
@@ -170,31 +183,31 @@ async def tenant_middleware(request: web.Request, handler):
     superadmin (admin de config.yaml en "default") puede mirar otro con X-Tenant o
     la cookie ch_tenant. Los agentes se identifican con la API key de su tenant.
     """
-    server = request.app["server"]
+    server = request.app[SERVER_KEY]
     slug, superadmin = DEFAULT_TENANT, False
-    user = request.get("auth_user")
+    user = request.get(AUTH_USER)
     if user:
-        superadmin = request.get("auth_tenant", DEFAULT_TENANT) == DEFAULT_TENANT and user == server.cfg.auth.username
+        superadmin = request.get(AUTH_TENANT, DEFAULT_TENANT) == DEFAULT_TENANT and user == server.cfg.auth.username
     if server.cfg.multi_tenant.enabled:
         if request.path in AGENT_ROUTES:
             tenant = server.tenants.get_by_api_key(
                 server.agent_manager.extract_agent_key(request.headers.get("Authorization", "")))
             if tenant:
                 slug = tenant.slug
-                request["tenant_agent_key"] = True
+                request[TENANT_AGENT_KEY] = True
         elif user:
-            slug = request.get("auth_tenant", DEFAULT_TENANT)
+            slug = request.get(AUTH_TENANT, DEFAULT_TENANT)
             if superadmin:
                 wanted = request.headers.get("X-Tenant") or request.cookies.get(TENANT_COOKIE) or DEFAULT_TENANT
                 if wanted != DEFAULT_TENANT and server.tenants.is_active(wanted):
                     slug = wanted
             elif not server.tenants.is_active(slug):
                 return web.json_response({"error": "Organización desactivada"}, status=401)
-    elif user and request.get("auth_tenant", DEFAULT_TENANT) != DEFAULT_TENANT:
+    elif user and request.get(AUTH_TENANT, DEFAULT_TENANT) != DEFAULT_TENANT:
         # Sesión de un tenant con el modo multi-tenant ya desactivado: no vale en "default"
         return web.json_response({"error": "Sesión de una organización: el modo multi-tenant está desactivado"},
                                  status=401)
-    request["tenant"], request["superadmin"] = slug, superadmin
+    request[TENANT], request[SUPERADMIN] = slug, superadmin
     await server.tenant_dbs.ensure(slug)
     ctx = current_tenant.set(slug)
     try:
@@ -205,7 +218,7 @@ async def tenant_middleware(request: web.Request, handler):
 
 @contextlib.contextmanager
 def _own_tenant_ctx(request: web.Request):
-    ctx = current_tenant.set(request.get("auth_tenant", DEFAULT_TENANT))
+    ctx = current_tenant.set(request.get(AUTH_TENANT, DEFAULT_TENANT))
     try:
         yield
     finally:
@@ -216,9 +229,9 @@ async def _in_own_tenant(request: web.Request, method: str, *args, **kwargs):
     """Llama a db.<method> en la BD del tenant del propio usuario: la sesión, los tokens y la cuenta
     del superadmin viven en "default" aunque esté mirando otra organización. Se pasa el nombre y no
     el método porque self.db.<x> ya resuelve la BD del tenant que está activo al evaluarlo."""
-    ctx = current_tenant.set(request.get("auth_tenant", DEFAULT_TENANT))
+    ctx = current_tenant.set(request.get(AUTH_TENANT, DEFAULT_TENANT))
     try:
-        return await getattr(request.app["server"].db, method)(*args, **kwargs)
+        return await getattr(request.app[SERVER_KEY].db, method)(*args, **kwargs)
     finally:
         current_tenant.reset(ctx)
 
@@ -226,29 +239,29 @@ async def _in_own_tenant(request: web.Request, method: str, *args, **kwargs):
 @web.middleware
 async def rbac_middleware(request: web.Request, handler):
     """Aplica ROLE_PERMISSIONS. Antes los roles se guardaban pero ningún endpoint los comprobaba."""
-    user = request.get("auth_user")
+    user = request.get(AUTH_USER)
     if not user or request.path in AGENT_ROUTES:   # modo sin auth, rutas públicas o agentes
         return await handler(request)
-    server = request.app["server"]
-    jti = request.get("auth_jti")
+    server = request.app[SERVER_KEY]
+    jti = request.get(AUTH_JTI)
     if jti and not await _in_own_tenant(request, "get_active_session", jti):
         # Sesión cerrada (logout, cambio de contraseña, "cerrar todas") aunque el JWT no haya caducado
         if "text/html" in request.headers.get("Accept", "") or request.path == "/":
-            resp = web.HTTPFound("/login?error=Sesión+cerrada.+Inicia+sesión+de+nuevo.")
+            resp = redirect("/login?error=Sesión+cerrada.+Inicia+sesión+de+nuevo.")
             resp.del_cookie("ch_token")
             return resp
         return web.json_response({"error": "Sesión cerrada"}, status=401)
-    if server.cfg.multi_tenant.enabled and not request.get("superadmin") and _platform_only(request.path):
+    if server.cfg.multi_tenant.enabled and not request.get(SUPERADMIN) and _platform_only(request.path):
         return web.json_response({"error": "Reservado al administrador de la plataforma"}, status=403)
-    if request.get("superadmin"):
+    if request.get(SUPERADMIN):
         role = "admin"   # el admin de config.yaml nunca puede quedarse sin acceso
     else:
         db_user = await server.db.get_user(user)
         if not db_user:  # desactivado después de iniciar sesión
             return web.json_response({"error": "Usuario desactivado"}, status=401)
         role = db_user["role"]
-    role = cap_role(role, request.get("auth_token_role"))
-    request["user_role"] = role
+    role = cap_role(role, request.get(AUTH_TOKEN_ROLE))
+    request[USER_ROLE] = role
     needed = _required_permission(request.method, request.path)
     if needed not in ROLE_PERMISSIONS.get(role, set()):
         audit_log.auth_failure(_get_real_ip(request), f"'{user}' ({role}) sin permiso '{needed}' en {request.path}")
@@ -308,7 +321,7 @@ async def security_headers_middleware(request: web.Request, handler):
     # atributos on* (eventos delegados vía data-on-*), así que script-src-attr
     # es 'none': ni siquiera un atributo inyectado puede ejecutar JS.
     nonce = secrets.token_urlsafe(16)
-    request["csp_nonce"] = nonce
+    request[CSP_NONCE] = nonce
     response = await handler(request)
     response.headers.update({
         "X-Content-Type-Options":  "nosniff",
@@ -335,7 +348,7 @@ async def request_logger_middleware(request: web.Request, handler):
         METRICS.observe(request.method, response.status, elapsed)
         logger.info("%s %s %d %.0fms user=%s",
                     request.method, request.path, response.status, elapsed,
-                    request.get("auth_user", "anonymous"))
+                    request.get(AUTH_USER, "anonymous"))
         return response
     except web.HTTPException as e:
         elapsed = (time.monotonic() - start) * 1000

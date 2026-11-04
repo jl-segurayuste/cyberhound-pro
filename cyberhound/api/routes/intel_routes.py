@@ -17,6 +17,7 @@ from aiohttp import web
 
 from cyberhound.core.logging import get_logger
 from cyberhound.core.models import Finding
+from cyberhound.core.web_keys import SERVER_KEY
 
 logger = get_logger("api.intel")
 
@@ -66,7 +67,7 @@ async def api_intel_scan(request: web.Request) -> web.Response:
 
     Body: {"targets": ["1.2.3.4", "evil.com"], "modules": ["shodan","vt","abuseipdb"]}
     """
-    server = request.app["server"]
+    server = request.app[SERVER_KEY]
     try:
         body    = await _read_json(request)
         targets = body.get("targets") or []
@@ -126,7 +127,7 @@ async def api_intel_lookup(request: web.Request) -> web.Response:
     GET /api/intel/lookup?target=1.2.3.4&modules=shodan,vt
     Búsqueda rápida de una sola IP/dominio.
     """
-    server = request.app["server"]
+    server = request.app[SERVER_KEY]
     try:
         target  = request.rel_url.query.get("target", "").strip()
         modules = request.rel_url.query.get("modules", "").split(",")
@@ -163,7 +164,7 @@ async def api_intel_lookup(request: web.Request) -> web.Response:
 
 async def api_intel_history(request: web.Request) -> web.Response:
     """GET /api/intel/history — historial de scans de intel."""
-    server = request.app["server"]
+    server = request.app[SERVER_KEY]
     try:
         limit = max(1, min(int(request.rel_url.query.get("limit", "20")), 200))
     except ValueError:
@@ -174,7 +175,7 @@ async def api_intel_history(request: web.Request) -> web.Response:
 
 async def api_intel_config(request: web.Request) -> web.Response:
     """GET /api/intel/config — qué módulos están disponibles (tienen API key)."""
-    server = request.app["server"]
+    server = request.app[SERVER_KEY]
     keys = server.cfg.api_keys
     from cyberhound.scanners.intel import ALL_MODULES
     status = {m: bool(getattr(keys, m, None)) for m in ALL_MODULES}

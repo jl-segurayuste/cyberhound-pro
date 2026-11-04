@@ -332,3 +332,9 @@ def test_xml_con_entidades_se_rechaza(parser):
     r = parser(BOMBA_ENTIDADES)
     assert r.findings == []
     assert any("XML rechazado" in e for e in r.errors)
+
+
+def test_xccdf_fixtext_sin_hijos_da_remediacion():
+    # Un Element sin hijos es falso en ElementTree: el <fixtext> de solo texto se perdía.
+    r = parse_xccdf(XCCDF_SAMPLE)
+    assert any("PermitRootLogin no" in (f.remediation or "") for f in r.findings)

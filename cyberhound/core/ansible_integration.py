@@ -282,7 +282,7 @@ def build_playbook(findings: list[Finding], target: str = "localhost") -> tuple[
     for f in findings:
         host = _host_of(f, target)
         tasks = finding_tasks(f) if host else []
-        if not tasks:
+        if not host or not tasks:
             if f.severity != "info":
                 manual.append(f)
             continue
@@ -368,7 +368,7 @@ class AWXClient:
     def __init__(self, cfg: AWXConfig) -> None:
         self.cfg = cfg
 
-    async def launch_job_template(self, template_id: int, extra_vars: dict = None) -> AnsibleJob:
+    async def launch_job_template(self, template_id: int, extra_vars: dict | None = None) -> AnsibleJob:
         """Lanza un job template en AWX y devuelve el job."""
         import ssl
 
@@ -391,7 +391,7 @@ class AWXClient:
 
         try:
             async with aiohttp.ClientSession(headers=headers) as session:
-                async with session.post(url, json=payload, ssl=ssl_ctx) as resp:
+                async with session.post(url, json=payload, ssl=ssl_ctx or True) as resp:
                     if resp.status not in (200, 201, 202):
                         body = await resp.text()
                         return AnsibleJob(

@@ -18,6 +18,7 @@ from cyberhound.core import passwords, totp
 from cyberhound.core.auth import AuthConfig, setup_auth_routes
 from cyberhound.core.database import Database, UserRecord
 from cyberhound.core.totp import TOTPManager
+from cyberhound.core.web_keys import SERVER_KEY
 
 _PASSWORD = "clave-de-prueba-1234"
 
@@ -41,7 +42,7 @@ async def db(tmp_path):
 async def client(db):
     cfg = AuthConfig(username="admin", password_hash=passwords.hash_password(_PASSWORD), secret="x" * 32)
     app = web.Application()
-    app["server"] = _FakeServer(db)
+    app[SERVER_KEY] = _FakeServer(db)
     setup_auth_routes(app, cfg)
     c = TestClient(TestServer(app))
     await c.start_server()

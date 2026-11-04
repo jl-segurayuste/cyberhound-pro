@@ -16,6 +16,7 @@ from cyberhound.core.multitenancy import (
     current_tenant,
 )
 from cyberhound.core.paths import YARA_DIR
+from cyberhound.core.web_keys import AUTH_USER, TENANT_AGENT_KEY
 
 logger = get_logger("api")
 
@@ -170,7 +171,7 @@ class ConfigHandlers:
         auth  = request.headers.get("Authorization", "")
         key   = self.agent_manager.extract_agent_key(auth)
         # Clave global (tenant "default") o la API key del tenant (la reconoce tenant_middleware)
-        if not (request.get("tenant_agent_key") or self.agent_manager.verify_agent_key(key)):
+        if not (request.get(TENANT_AGENT_KEY) or self.agent_manager.verify_agent_key(key)):
             return web.json_response({"error": "Clave de agente inválida"}, status=401)
         try:
             payload = await _read_json(request)
@@ -185,7 +186,7 @@ class ConfigHandlers:
     async def api_agent_heartbeat(self, request: web.Request) -> web.Response:
         auth = request.headers.get("Authorization", "")
         key  = self.agent_manager.extract_agent_key(auth)
-        if not (request.get("tenant_agent_key") or self.agent_manager.verify_agent_key(key)):
+        if not (request.get(TENANT_AGENT_KEY) or self.agent_manager.verify_agent_key(key)):
             return web.json_response({"error": "Clave inválida"}, status=401)
         payload = await _read_json(request)
         await self.agent_manager.receive_heartbeat(payload)
@@ -237,7 +238,7 @@ class ConfigHandlers:
             return web.json_response({"error": str(e)}, status=400)
         if await self.db.count_ssh_credentials() >= ssh_credentials.MAX_PER_TENANT:
             return web.json_response({"error": f"Máximo {ssh_credentials.MAX_PER_TENANT} credenciales"}, status=400)
-        cid = await self.db.create_ssh_credential(data, created_by=request.get("auth_user", ""))
+        cid = await self.db.create_ssh_credential(data, created_by=request.get(AUTH_USER, ""))
         await self._audit(request, "ssh_credential_create", data["name"],
                           f"{data['username']}, puerto {data['port']}, {data['fingerprint'] or 'contraseña'}")
         return web.json_response(ssh_credentials.public_view(await self.db.get_ssh_credential(cid)), status=201)

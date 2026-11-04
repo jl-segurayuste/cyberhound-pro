@@ -409,10 +409,8 @@ def parse_xccdf(content: str | bytes, source_file: str = "results.xml") -> Impor
                         fix_el = find_one(rule_def, "fix")
                         if fix_el is not None:
                             remediation = ET.tostring(fix_el, encoding="unicode", method="text")[:500]
-                        elif find_one(rule_def, "fixtext"):
-                            remediation = ET.tostring(
-                                find_one(rule_def, "fixtext"), encoding="unicode", method="text"
-                            )[:500]
+                        elif (fixtext_el := find_one(rule_def, "fixtext")) is not None:
+                            remediation = ET.tostring(fixtext_el, encoding="unicode", method="text")[:500]
 
                         for ref in find_all(rule_def, "reference"):
                             if ref.text:
@@ -667,7 +665,7 @@ def _parse_json(content: str | bytes, source_file: str) -> ImportResult:
         if isinstance(data, list):
             items = data
         elif isinstance(data, dict):
-            items = data.get("findings", data.get("results", data.get("vulnerabilities", [])))
+            items = data.get("findings") or data.get("results") or data.get("vulnerabilities") or []
         else:
             items = []
 
@@ -682,7 +680,7 @@ def _parse_json(content: str | bytes, source_file: str) -> ImportResult:
                 description=item.get("description", "")[:500],
                 remediation=item.get("remediation", item.get("solution", ""))[:500],
                 evidence=item.get("evidence", ""),
-                source_host=item.get("source_host", item.get("host", "")),
+                source_host=item.get("source_host") or item.get("host") or "",
                 auto_fix=bool(item.get("auto_fix", False)),
             )
             if f.title:

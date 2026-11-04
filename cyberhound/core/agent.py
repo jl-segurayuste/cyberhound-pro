@@ -43,7 +43,7 @@ class AgentConfig:
     agent_name:  str = ""             # nombre identificativo (default: hostname)
 
     # Si mode == "manager": qué agentes están registrados
-    registered_agents: list[str] = None   # lista de agent_names permitidos
+    registered_agents: list[str] | None = None   # lista de agent_names permitidos
 
     def __post_init__(self):
         if not self.agent_name:

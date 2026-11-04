@@ -13,6 +13,7 @@ from cyberhound.core import ssh_credentials
 from cyberhound.core.logging import audit_log, get_logger
 from cyberhound.core.multitenancy import current_tenant
 from cyberhound.core.ssh_host_keys import HostKeyStore
+from cyberhound.core.web_keys import AUTH_USER
 
 logger = get_logger("api")
 
@@ -23,9 +24,9 @@ class FixHandlers:
     async def api_fix_local(self, request: web.Request) -> web.Response:
         try:
             body  = await _read_json(request)
-            fid   = body.get("finding_id")
+            fid   = str(body.get("finding_id") or "")
             dry   = body.get("dry_run", False)
-            user  = request.get("auth_user", "unknown")
+            user  = request.get(AUTH_USER, "unknown")
             finding = self._find_cached(fid)
             if not finding:
                 return web.json_response({"ok": False, "error": "Finding no encontrado"}, status=404)
@@ -65,8 +66,8 @@ class FixHandlers:
     async def api_fix_remote(self, request: web.Request) -> web.Response:
         try:
             body = await _read_json(request)
-            fid  = body.get("finding_id")
-            user = request.get("auth_user", "unknown")
+            fid  = str(body.get("finding_id") or "")
+            user = request.get(AUTH_USER, "unknown")
             finding = self._find_cached(fid)
             if not finding:
                 return web.json_response({"ok": False, "error": "Finding no encontrado"}, status=404)
@@ -115,8 +116,8 @@ class FixHandlers:
             await self.db.touch_ssh_credential(row["id"])
             return creds
         return SSHCredentials(
-            username=params.get("ssh_user", self.cfg.scan.ssh_default_user),
-            port=int(params.get("ssh_port", self.cfg.scan.ssh_default_port)),
+            username=params.get("ssh_user") or self.cfg.scan.ssh_default_user,
+            port=int(params.get("ssh_port") or self.cfg.scan.ssh_default_port),
             key_path=self._ssh_key(params.get("ssh_key")),
             password=params.get("ssh_password") or None,
             use_server_keys=self._tenant_obj() is None,
@@ -164,7 +165,7 @@ class FixHandlers:
             creds = await self._ssh_creds(body)
         except ValueError as e:
             return web.json_response({"ok": False, "error": str(e)}, status=400)
-        user = request.get("auth_user", "unknown")
+        user = request.get(AUTH_USER, "unknown")
         if not await self.db.mark_remote_fix_undone(fix["id"], user):
             return web.json_response({"ok": False, "error": "Este fix no se puede deshacer: ya se deshizo"}, status=409)
         from cyberhound.scanners.ssh_audit import RemoteAuditor
@@ -199,8 +200,8 @@ class FixHandlers:
         """Revierte el último fix local aplicado a un finding."""
         try:
             body = await _read_json(request)
-            fid  = body.get("finding_id")
-            user = request.get("auth_user", "unknown")
+            fid  = str(body.get("finding_id") or "")
+            user = request.get(AUTH_USER, "unknown")
             if not fid:
                 return web.json_response({"ok": False, "error": "finding_id requerido"}, status=400)
             from cyberhound.core.rollback import rollback_finding

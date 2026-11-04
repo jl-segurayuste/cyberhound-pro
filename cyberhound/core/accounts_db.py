@@ -8,6 +8,7 @@ sesiones, tokens y auditoría de una organización no se mezclan con los de otra
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
 
 ACCOUNTS_TABLES = """
 CREATE TABLE IF NOT EXISTS sessions (
@@ -57,9 +58,10 @@ def _now() -> str:
 
 
 class AccountsMixin:
-    async def _run(self, sql: str, *args) -> int: ...        # filas afectadas
-    async def _rows(self, sql: str, *args) -> list[dict]: ...
-    async def _val(self, sql: str, *args): ...
+    if TYPE_CHECKING:  # los implementan Database y DatabasePG
+        async def _run(self, sql: str, *args) -> int: ...        # filas afectadas
+        async def _rows(self, sql: str, *args) -> list[dict]: ...
+        async def _val(self, sql: str, *args): ...
 
     # ── Sesiones ──────────────────────────────────────────────────────────────
 

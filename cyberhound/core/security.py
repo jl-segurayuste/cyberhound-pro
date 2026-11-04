@@ -644,7 +644,7 @@ class CsrfProtection:
             except Exception:
                 form_token = ""
 
-            if not form_token or not secrets.compare_digest(cookie_token, form_token):
+            if not isinstance(form_token, str) or not form_token or not secrets.compare_digest(cookie_token, form_token):
                 logger.warning(
                     "CSRF: token inválido en POST %s desde %s",
                     request.path, _get_real_ip(request),

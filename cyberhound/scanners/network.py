@@ -329,8 +329,7 @@ class NetworkScanner:
                             service=  service_el.get("name", "") if service_el is not None else "",
                             product=  service_el.get("product", "") if service_el is not None else "",
                             version=  service_el.get("version", "") if service_el is not None else "",
-                            cpe=      (service_el.find("cpe").text if service_el is not None
-                                       and service_el.find("cpe") is not None else ""),
+                            cpe=      ((service_el.findtext("cpe") or "") if service_el is not None else ""),
                         )
                         device.open_ports.append(port)
 

@@ -9,6 +9,7 @@ se corta y un administrador decide si olvidarla (Configuración › Credenciales
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 SSH_HOST_KEYS_TABLE = """
 CREATE TABLE IF NOT EXISTS ssh_host_keys (
@@ -28,8 +29,9 @@ def known_hosts_line(host: str, port: int, key: str) -> str:
 
 
 class SSHHostKeysMixin:
-    async def _run(self, sql: str, *args) -> int: ...
-    async def _rows(self, sql: str, *args) -> list[dict]: ...
+    if TYPE_CHECKING:  # los implementan Database y DatabasePG
+        async def _run(self, sql: str, *args) -> int: ...
+        async def _rows(self, sql: str, *args) -> list[dict]: ...
 
     async def list_ssh_host_keys(self) -> list[dict]:
         return await self._rows("SELECT * FROM ssh_host_keys ORDER BY host, port")

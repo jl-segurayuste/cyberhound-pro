@@ -214,7 +214,13 @@ class RollbackJournal:
 # ──────────────────────────────────────────────────────────────────────────────
 
 async def _undo_action(a: Action, runner=run_command) -> tuple[bool, str]:
+    if a.kind in ("file", "chmod") and not a.path:
+        return False, f"Acción {a.kind} sin ruta: no se puede deshacer"
+    if a.kind == "command" and not a.cmd:
+        return False, "Acción command sin comando: no se puede deshacer"
+
     if a.kind == "file":
+        assert a.path
         p = Path(a.path)
         try:
             if a.existed:
@@ -231,6 +237,7 @@ async def _undo_action(a: Action, runner=run_command) -> tuple[bool, str]:
             return False, f"fallo restaurando {a.path}: {e}"
 
     if a.kind == "chmod":
+        assert a.path
         try:
             if Path(a.path).exists() and a.mode is not None:
                 os.chmod(a.path, a.mode)
@@ -255,6 +262,7 @@ async def _undo_action(a: Action, runner=run_command) -> tuple[bool, str]:
         return ok, "; ".join(msgs)
 
     if a.kind == "command":
+        assert a.cmd
         r = await runner(a.cmd, timeout=60, check=False)
         ok = r.returncode == 0
         return ok, f"{' '.join(a.cmd)} → rc={r.returncode}"

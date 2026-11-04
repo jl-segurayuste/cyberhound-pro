@@ -19,6 +19,7 @@ from cyberhound.core.multitenancy import (
 )
 from cyberhound.core.scheduler import ENTRY_FLAGS
 from cyberhound.core.scope import ws_targets as scope_targets
+from cyberhound.core.web_keys import AUTH_USER, SUPERADMIN, USER_ROLE
 
 logger = get_logger("api")
 
@@ -33,15 +34,15 @@ class ScheduleHandlers:
 
     async def api_me(self, request: web.Request) -> web.Response:
         """Usuario de la sesión, su rol y permisos (la UI desactiva lo que daría 403)."""
-        role = request.get("user_role", "admin")   # sin auth (localhost) todo está permitido
+        role = request.get(USER_ROLE, "admin")   # sin auth (localhost) todo está permitido
         slug = current_tenant.get()
         tenant = self.tenants.get(slug)
         return web.json_response({
-            "username": request.get("auth_user", ""), "role": role,
+            "username": request.get(AUTH_USER, ""), "role": role,
             "permissions": sorted(ROLE_PERMISSIONS.get(role, set())),
             "multi_tenant": self.cfg.multi_tenant.enabled,
             "tenant": slug, "tenant_name": tenant.name if tenant else "Plataforma",
-            "superadmin": bool(request.get("superadmin")) or not request.get("auth_user"),
+            "superadmin": bool(request.get(SUPERADMIN)) or not request.get(AUTH_USER),
             # False = la UI oculta lo que actúa sobre el servidor o es configuración global
             "host_access": self._may_touch_host(request),
         })
@@ -95,7 +96,7 @@ class ScheduleHandlers:
             return web.json_response({"error": err}, status=400)
         if await self.db.count_schedules() >= schedules.MAX_PER_TENANT:
             return web.json_response({"error": f"Máximo {schedules.MAX_PER_TENANT} programaciones"}, status=400)
-        sid = await self.db.create_schedule(data, created_by=request.get("auth_user", ""))
+        sid = await self.db.create_schedule(data, created_by=request.get(AUTH_USER, ""))
         await self._audit(request, "schedule_create", data["name"], f"{data['task']} {','.join(data['targets'])[:150]}")
         return web.json_response(await self.db.get_schedule(sid), status=201)
 
@@ -130,7 +131,7 @@ class ScheduleHandlers:
         slug = current_tenant.get()
         if (slug, sched["id"]) in self._schedules_running:
             return web.json_response({"error": "Ya se está ejecutando"}, status=409)
-        self._start_schedule(slug, sched, triggered_by=request.get("auth_user", "manual"))
+        self._start_schedule(slug, sched, triggered_by=request.get(AUTH_USER, "manual"))
         await self._audit(request, "schedule_run", sched["name"])
         return web.json_response({"ok": True, "started": True}, status=202)
 

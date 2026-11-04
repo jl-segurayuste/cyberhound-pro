@@ -111,7 +111,7 @@ class NotificationManager:
 
         # Enviar en executor para no bloquear el event loop
         import asyncio
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         await loop.run_in_executor(None, self._smtp_send, msg)
 
     def _smtp_send(self, msg: MIMEMultipart) -> None:

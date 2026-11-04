@@ -155,6 +155,11 @@ API_TOKEN_PREFIX = "cht_"
 _ROLE_ORDER = {"viewer": 0, "operator": 1, "admin": 2}
 
 
+def redirect(location: str) -> web.Response:
+    """302 al que se le pueden poner/quitar cookies (devolver un HTTPFound está obsoleto en aiohttp)."""
+    return web.Response(status=302, headers={"Location": location})
+
+
 def make_api_token(tenant: str) -> tuple[str, str, str]:
     """(token completo, id, hash del secreto). Formato: cht_<tenant>.<id>.<secreto>."""
     token_id, secret = secrets.token_hex(6), secrets.token_urlsafe(32)
@@ -178,7 +183,7 @@ async def _verify_api_token(request: web.Request, raw: str) -> str | None:
         tenant, token_id, secret = raw[len(API_TOKEN_PREFIX):].split(".", 2)
     except ValueError:
         return None
-    server = request.app.get("server")
+    server = request.app.get(SERVER_KEY)
     if server is None or not await _open_tenant(server, tenant):
         return None
     ctx = current_tenant.set(tenant)
@@ -193,8 +198,8 @@ async def _verify_api_token(request: web.Request, raw: str) -> str | None:
             await server.db.touch_api_token(token_id)
     finally:
         current_tenant.reset(ctx)
-    request["auth_user"], request["auth_tenant"] = row["username"], tenant
-    request["auth_token_id"], request["auth_token_role"] = token_id, row["role"]
+    request[AUTH_USER], request[AUTH_TENANT] = row["username"], tenant
+    request[AUTH_TOKEN_ID], request[AUTH_TOKEN_ROLE] = token_id, row["role"]
     return row["username"]
 
 
@@ -251,7 +256,7 @@ def _extract_basic(request: web.Request) -> tuple[str, str] | None:
 @web.middleware
 async def auth_middleware(request: web.Request, handler):
     """Middleware de autenticación con rate limiting integrado."""
-    cfg: AuthConfig = request.app["auth_config"]
+    cfg: AuthConfig = request.app[AUTH_CONFIG_KEY]
 
     # Rutas públicas siempre pasan
     if request.path in PUBLIC_ROUTES or request.path.startswith(PUBLIC_PREFIXES):
@@ -279,7 +284,7 @@ async def auth_middleware(request: web.Request, handler):
                 headers={"Retry-After": str(wait)},
             )
         creds = _extract_basic(request)
-        if not creds or not await verify_credentials(cfg, request.app.get("server"), *creds):
+        if not creds or not await verify_credentials(cfg, request.app.get(SERVER_KEY), *creds):
             await _login_rate_limiter.record_failure(ip)
             audit_log.auth_failure(ip, "Basic Auth fallido")
             raise web.HTTPUnauthorized(
@@ -287,7 +292,7 @@ async def auth_middleware(request: web.Request, handler):
             )
         await _login_rate_limiter.record_success(ip)
         audit_log.auth_success(ip, creds[0])
-        request["auth_user"] = creds[0]
+        request[AUTH_USER] = creds[0]
         return await handler(request)
 
     # Token de API ("Authorization: Bearer cht_…"), para scripts y CI
@@ -314,15 +319,15 @@ async def auth_middleware(request: web.Request, handler):
         audit_log.auth_failure(_get_real_ip(request), "JWT inválido o expirado")
         # Si es una petición de navegador, redirigir al login con mensaje
         if "text/html" in request.headers.get("Accept", "") or request.path == "/":
-            response = web.HTTPFound("/login?error=Sesión+expirada.+Inicia+sesión+de+nuevo.")
+            response = redirect("/login?error=Sesión+expirada.+Inicia+sesión+de+nuevo.")
             response.del_cookie(AUTH_COOKIE)  # limpiar cookie inválida
             return response
         raise web.HTTPUnauthorized(reason="Token JWT inválido o expirado")
 
     audit_log.auth_success(_get_real_ip(request), payload["sub"])
-    request["auth_user"] = payload["sub"]
-    request["auth_tenant"] = payload.get("tenant", DEFAULT_TENANT)
-    request["auth_jti"] = payload.get("jti")   # rbac_middleware comprueba que la sesión siga viva
+    request[AUTH_USER] = payload["sub"]
+    request[AUTH_TENANT] = payload.get("tenant", DEFAULT_TENANT)
+    request[AUTH_JTI] = payload.get("jti")   # rbac_middleware comprueba que la sesión siga viva
     return await handler(request)
 
 
@@ -338,7 +343,7 @@ def _is_https(request: web.Request) -> bool:
 
 def setup_auth_routes(app: web.Application, cfg: AuthConfig) -> None:
     """Registra las rutas de login/logout con rate limiting y CSRF."""
-    app["auth_config"] = cfg
+    app[AUTH_CONFIG_KEY] = cfg
 
     # Tarea periódica de limpieza del rate limiter
     async def _cleanup_task():
@@ -347,10 +352,10 @@ def setup_auth_routes(app: web.Application, cfg: AuthConfig) -> None:
             await _login_rate_limiter.cleanup_expired()
 
     async def on_startup(app):
-        app["_rl_cleanup"] = asyncio.ensure_future(_cleanup_task())
+        app[RL_CLEANUP_KEY] = asyncio.ensure_future(_cleanup_task())
 
     async def on_cleanup(app):
-        app["_rl_cleanup"].cancel()
+        app[RL_CLEANUP_KEY].cancel()
 
     app.on_startup.append(on_startup)
     app.on_cleanup.append(on_cleanup)
@@ -363,7 +368,7 @@ def setup_auth_routes(app: web.Application, cfg: AuthConfig) -> None:
         # Contraseña ya verificada, falta el código -- muestra el paso 2 en
         # vez del formulario de usuario/contraseña.
         template = _CODE_HTML if pending_token and cfg.verify_pending_2fa_token(pending_token) else _LOGIN_HTML
-        server = request.app.get("server")
+        server = request.app.get(SERVER_KEY)
         tenant_field = ""
         if _mt_enabled(server):
             # Vacío = la plataforma (superadmin); el subdominio la rellena si coincide con un tenant
@@ -404,13 +409,13 @@ def setup_auth_routes(app: web.Application, cfg: AuthConfig) -> None:
             # Redirigir al login para que el navegador obtenga la cookie
             raise web.HTTPFound("/login?error=Sesión+expirada.+Intenta+de+nuevo.")
 
-        if not form_token or not secrets.compare_digest(cookie_token, form_token):
+        if not isinstance(form_token, str) or not form_token or not secrets.compare_digest(cookie_token, form_token):
             logger.warning("Login CSRF: token inválido desde %s", ip)
             audit_log.auth_failure(ip, "CSRF mismatch en /login")
             raise web.HTTPFound("/login?error=Error+de+seguridad.+Recarga+la+página.")
 
         https = _is_https(request)
-        server = request.app.get("server")
+        server = request.app.get(SERVER_KEY)
 
         # ── Segundo paso: la contraseña ya se verificó, falta el código 2FA.
         # Bug real encontrado 2026-08-09: este paso NO EXISTÍA -- totp_enabled
@@ -423,7 +428,7 @@ def setup_auth_routes(app: web.Application, cfg: AuthConfig) -> None:
             if claims and server is not None and not await _open_tenant(server, pending_tenant):
                 pending_user = None
             if not pending_user:
-                response = web.HTTPFound(
+                response = redirect(
                     "/login?error=Sesión+de+verificación+expirada.+Inicia+sesión+de+nuevo."
                 )
                 response.del_cookie(PENDING_2FA_COOKIE)
@@ -444,7 +449,7 @@ def setup_auth_routes(app: web.Application, cfg: AuthConfig) -> None:
                 audit_log.auth_failure(ip, f"2FA incorrecto para '{pending_user}'")
                 await _audit(server, pending_tenant, "login", pending_user, ip, "código 2FA incorrecto", ok=False)
                 if blocked:
-                    response = web.HTTPFound(
+                    response = redirect(
                         f"/login?error=Cuenta+bloqueada+{block_time}s+por+múltiples+intentos."
                     )
                     response.del_cookie(PENDING_2FA_COOKIE)
@@ -454,7 +459,7 @@ def setup_auth_routes(app: web.Application, cfg: AuthConfig) -> None:
             await _login_rate_limiter.record_success(ip)
             token = await _start_session(server, cfg, request, pending_user, pending_tenant)
             audit_log.auth_success(ip, pending_user)
-            response = web.HTTPFound("/")
+            response = redirect("/")
             response.set_cookie(
                 AUTH_COOKIE, token,
                 httponly=True, samesite="Strict", secure=https,
@@ -513,7 +518,7 @@ def setup_auth_routes(app: web.Application, cfg: AuthConfig) -> None:
         # ── ¿El usuario tiene 2FA activo? Si sí, aún no se le deja entrar ────
         if db_user and db_user.get("totp_enabled"):
             pending_token = cfg.issue_pending_2fa_token(username, tenant)
-            response = web.HTTPFound("/login")
+            response = redirect("/login")
             response.set_cookie(
                 PENDING_2FA_COOKIE, pending_token,
                 httponly=True, samesite="Strict", secure=https,
@@ -526,7 +531,7 @@ def setup_auth_routes(app: web.Application, cfg: AuthConfig) -> None:
         token = await _start_session(server, cfg, request, username, tenant)
         audit_log.auth_success(ip, username)
 
-        response = web.HTTPFound("/")
+        response = redirect("/")
         response.set_cookie(
             AUTH_COOKIE, token,
             httponly=True,
@@ -541,7 +546,7 @@ def setup_auth_routes(app: web.Application, cfg: AuthConfig) -> None:
     async def logout(request: web.Request) -> web.Response:
         # La sesión se revoca en el servidor: la cookie sola ya no vale aunque alguien la copiara
         payload = cfg.verify_jwt(request.cookies.get(AUTH_COOKIE, "")) if request.cookies.get(AUTH_COOKIE) else None
-        server = request.app.get("server")
+        server = request.app.get(SERVER_KEY)
         if payload and payload.get("jti") and server is not None:
             tenant = payload.get("tenant", DEFAULT_TENANT)
             if await _open_tenant(server, tenant):
@@ -551,7 +556,7 @@ def setup_auth_routes(app: web.Application, cfg: AuthConfig) -> None:
                 finally:
                     current_tenant.reset(ctx)
                 await _audit(server, tenant, "logout", payload.get("sub", ""), _get_real_ip(request))
-        response = web.HTTPFound("/login")
+        response = redirect("/login")
         response.del_cookie(AUTH_COOKIE)
         response.del_cookie(PENDING_2FA_COOKIE)
         response.del_cookie(CsrfProtection.COOKIE_NAME)
@@ -623,6 +628,17 @@ def _h(s: str) -> str:
 
 
 import asyncio  # noqa: E402 — import al final para evitar circular
+
+from cyberhound.core.web_keys import (
+    AUTH_CONFIG_KEY,
+    AUTH_JTI,
+    AUTH_TENANT,
+    AUTH_TOKEN_ID,
+    AUTH_TOKEN_ROLE,
+    AUTH_USER,
+    RL_CLEANUP_KEY,
+    SERVER_KEY,
+)
 
 _LOGIN_HTML = """<!DOCTYPE html>
 <html lang="es">

@@ -152,7 +152,7 @@ class AgentSettings:
     manager_url:        str        = ""
     agent_key:          str        = ""
     agent_name:         str        = ""
-    registered_agents:  list       = None
+    registered_agents:  list | None = None
 
     def __post_init__(self):
         if self.registered_agents is None:

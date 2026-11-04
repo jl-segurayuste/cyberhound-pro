@@ -26,6 +26,15 @@ from cyberhound.core.multitenancy import (
 from cyberhound.core.security import (
     _get_real_ip,
 )
+from cyberhound.core.web_keys import (
+    AUTH_CONFIG_KEY,
+    AUTH_JTI,
+    AUTH_TENANT,
+    AUTH_TOKEN_ID,
+    AUTH_USER,
+    SUPERADMIN,
+    USER_ROLE,
+)
 
 logger = get_logger("api")
 
@@ -63,7 +72,7 @@ class AccountHandlers:
                 # el borrado es lógico (active=0): reutilizar el nombre reactiva la fila
                 await self.db.update_user(username, password_hash=pw_hash, role=role, active=1)
             logger.info("Usuario '%s' creado con rol '%s' por %s",
-                        username, role, request.get("auth_user"))
+                        username, role, request.get(AUTH_USER))
             await self._audit(request, "user_create", username, f"rol={role}")
             return web.json_response({"ok": True})
         except Exception as e:
@@ -73,7 +82,7 @@ class AccountHandlers:
         try:
             username = request.match_info["username"]
             body = await _read_json(request)
-            if username in (request.get("auth_user"), self.cfg.auth.username) and (
+            if username in (request.get(AUTH_USER), self.cfg.auth.username) and (
                 ("role" in body and body["role"] != "admin") or ("active" in body and not body["active"])
             ):
                 return web.json_response(
@@ -106,7 +115,7 @@ class AccountHandlers:
 
     async def api_users_delete(self, request: web.Request) -> web.Response:
         username = request.match_info["username"]
-        current  = request.get("auth_user", "")
+        current  = request.get(AUTH_USER, "")
         if username in (current, self.cfg.auth.username):
             return web.json_response({"error": "No puedes eliminar tu propio usuario ni el admin principal"}, status=400)
         if not await self._user_exists(username):
@@ -122,7 +131,7 @@ class AccountHandlers:
         username = request.match_info["username"]
         if not await self._user_exists(username):
             return web.json_response({"error": "Usuario no encontrado"}, status=404)
-        n = await self.db.revoke_user_sessions(username, keep_jti=request.get("auth_jti"))
+        n = await self.db.revoke_user_sessions(username, keep_jti=request.get(AUTH_JTI))
         t = await self.db.revoke_user_api_tokens(username)
         await self._audit(request, "sessions_revoke", username, f"{n} sesiones, {t} tokens")
         return web.json_response({"ok": True, "sessions": n, "tokens": t})
@@ -134,7 +143,7 @@ class AccountHandlers:
         """Evento de auditoría (Configuración › Auditoría) en la BD del tenant actual; con own=True en la
         del propio usuario: lo que el superadmin hace con su cuenta no aparece en la organización que mira."""
         try:
-            args = (action, request.get("auth_user", "") or "", _get_real_ip(request), target, detail, ok)
+            args = (action, request.get(AUTH_USER, "") or "", _get_real_ip(request), target, detail, ok)
             if own:
                 await _in_own_tenant(request, "add_audit_event", *args)
             else:
@@ -144,9 +153,9 @@ class AccountHandlers:
 
     def _browser_session_only(self, request: web.Request) -> web.Response | None:
         """Con un token de API no se gestionan credenciales (contraseña, 2FA, sesiones, tokens)."""
-        if request.get("auth_token_id"):
+        if request.get(AUTH_TOKEN_ID):
             return web.json_response({"error": "Necesita una sesión de navegador, no un token de API"}, status=403)
-        if not request.get("auth_user"):
+        if not request.get(AUTH_USER):
             return web.json_response({"error": "Sin sesión"}, status=401)
         return None
 
@@ -155,10 +164,10 @@ class AccountHandlers:
             return err
         body = await _read_json(request)
         current, new = str(body.get("current", "")), str(body.get("new", ""))
-        user = request["auth_user"]
+        user = request[AUTH_USER]
         if len(new) < 8:
             return web.json_response({"error": "La contraseña nueva necesita 8 caracteres"}, status=400)
-        platform_admin = bool(request.get("superadmin"))
+        platform_admin = bool(request.get(SUPERADMIN))
         if platform_admin:
             ok = passwords.verify_password(current, self.cfg.auth.password_hash or "")
         else:
@@ -170,18 +179,18 @@ class AccountHandlers:
         new_hash = passwords.hash_password(new)
         if platform_admin:   # el admin de la plataforma vive en config.yaml
             self.cfg.auth.password_hash = new_hash
-            request.app["auth_config"].password_hash = new_hash
+            request.app[AUTH_CONFIG_KEY].password_hash = new_hash
             self.cfg.save()
         await _in_own_tenant(request, "update_user", user, password_hash=new_hash)
-        n = await _in_own_tenant(request, "revoke_user_sessions", user, keep_jti=request.get("auth_jti"))
+        n = await _in_own_tenant(request, "revoke_user_sessions", user, keep_jti=request.get(AUTH_JTI))
         await self._audit(request, "password_change", user, f"{n} sesiones cerradas", own=True)
         return web.json_response({"ok": True, "sessions_closed": n})
 
     async def api_sessions_list(self, request: web.Request) -> web.Response:
         if err := self._browser_session_only(request):
             return err
-        jti = request.get("auth_jti")
-        rows = await _in_own_tenant(request, "list_sessions", request["auth_user"])
+        jti = request.get(AUTH_JTI)
+        rows = await _in_own_tenant(request, "list_sessions", request[AUTH_USER])
         return web.json_response([{**{k: v for k, v in r.items() if k != "jti"}, "id": r["jti"][:8],
                                    "current": r["jti"] == jti} for r in rows])
 
@@ -190,26 +199,26 @@ class AccountHandlers:
         if err := self._browser_session_only(request):
             return err
         short = request.match_info["jti"]
-        own = await _in_own_tenant(request, "list_sessions", request["auth_user"])
+        own = await _in_own_tenant(request, "list_sessions", request[AUTH_USER])
         mine = [r["jti"] for r in own if r["jti"].startswith(short)]
         if len(short) < 8 or len(mine) != 1:
             return web.json_response({"error": "Sesión no encontrada"}, status=404)
-        await _in_own_tenant(request, "revoke_session", mine[0], request["auth_user"])
-        await self._audit(request, "session_revoke", request["auth_user"], short, own=True)
-        return web.json_response({"ok": True, "current": mine[0] == request.get("auth_jti")})
+        await _in_own_tenant(request, "revoke_session", mine[0], request[AUTH_USER])
+        await self._audit(request, "session_revoke", request[AUTH_USER], short, own=True)
+        return web.json_response({"ok": True, "current": mine[0] == request.get(AUTH_JTI)})
 
     async def api_sessions_revoke_others(self, request: web.Request) -> web.Response:
         if err := self._browser_session_only(request):
             return err
-        n = await _in_own_tenant(request, "revoke_user_sessions", request["auth_user"],
-                                 keep_jti=request.get("auth_jti"))
-        await self._audit(request, "sessions_revoke", request["auth_user"], f"{n} sesiones (menos la actual)", own=True)
+        n = await _in_own_tenant(request, "revoke_user_sessions", request[AUTH_USER],
+                                 keep_jti=request.get(AUTH_JTI))
+        await self._audit(request, "sessions_revoke", request[AUTH_USER], f"{n} sesiones (menos la actual)", own=True)
         return web.json_response({"ok": True, "closed": n})
 
     async def api_tokens_list(self, request: web.Request) -> web.Response:
         if err := self._browser_session_only(request):
             return err
-        return web.json_response(await _in_own_tenant(request, "list_api_tokens", request["auth_user"]))
+        return web.json_response(await _in_own_tenant(request, "list_api_tokens", request[AUTH_USER]))
 
     async def api_tokens_create(self, request: web.Request) -> web.Response:
         """Token de API para scripts/CI. El secreto solo se muestra ahora; se guarda su hash."""
@@ -217,17 +226,17 @@ class AccountHandlers:
             return err
         body = await _read_json(request)
         name = str(body.get("name", "")).strip()
-        role = str(body.get("role") or request.get("user_role", "viewer"))
+        role = str(body.get("role") or request.get(USER_ROLE, "viewer"))
         days = body.get("expires_days", 90)
         if not name:
             return web.json_response({"error": "Ponle un nombre al token"}, status=400)
-        if role not in ROLE_PERMISSIONS or cap_role(request.get("user_role", "viewer"), role) != role:
+        if role not in ROLE_PERMISSIONS or cap_role(request.get(USER_ROLE, "viewer"), role) != role:
             return web.json_response({"error": "El token no puede tener más permisos que tu rol"}, status=400)
         if days not in (None, 0) and not (isinstance(days, int) and 1 <= days <= 365):
             return web.json_response({"error": "Caducidad entre 1 y 365 días (o sin caducidad)"}, status=400)
-        token, token_id, token_hash = make_api_token(request.get("auth_tenant", DEFAULT_TENANT))
+        token, token_id, token_hash = make_api_token(request.get(AUTH_TENANT, DEFAULT_TENANT))
         expires = (datetime.now(UTC) + timedelta(days=days)).isoformat() if days else None
-        await _in_own_tenant(request, "create_api_token", token_id, request["auth_user"], name,
+        await _in_own_tenant(request, "create_api_token", token_id, request[AUTH_USER], name,
                              token_hash, role, expires)
         await self._audit(request, "token_create", name, f"rol={role} caduca={expires or 'nunca'}", own=True)
         return web.json_response({"id": token_id, "token": token, "role": role, "expires_at": expires}, status=201)
@@ -236,7 +245,7 @@ class AccountHandlers:
         if err := self._browser_session_only(request):
             return err
         tid = request.match_info["token_id"]
-        if not await _in_own_tenant(request, "revoke_api_token", tid, request["auth_user"]):
+        if not await _in_own_tenant(request, "revoke_api_token", tid, request[AUTH_USER]):
             return web.json_response({"error": "Token no encontrado"}, status=404)
         await self._audit(request, "token_revoke", tid, own=True)
         return web.json_response({"ok": True})
@@ -266,11 +275,11 @@ class AccountHandlers:
         """Inicia la configuración de 2FA — devuelve QR y secreto."""
         if err := self._browser_session_only(request):
             return err
-        user = request.get("auth_user", "")
+        user = request.get(AUTH_USER, "")
         if not user:
             return web.json_response({"error": "Sin sesión"}, status=401)
         from cyberhound.core.totp import TOTPManager
-        mgr = TOTPManager(self.db, request.app["auth_config"].secret)
+        mgr = TOTPManager(self.db, request.app[AUTH_CONFIG_KEY].secret)
         data = await mgr.setup_2fa(user)
         return web.json_response({
             "secret":         data["secret"],
@@ -287,14 +296,14 @@ class AccountHandlers:
         """Activa el 2FA verificando el primer código."""
         if err := self._browser_session_only(request):
             return err
-        user = request.get("auth_user", "")
+        user = request.get(AUTH_USER, "")
         try:
             body = await _read_json(request)
             code = str(body.get("code", "")).strip()
         except Exception:
             return web.json_response({"ok": False, "error": "Body inválido"}, status=400)
         from cyberhound.core.totp import TOTPManager
-        ok = await TOTPManager(self.db, request.app["auth_config"].secret).activate_2fa(user, code)
+        ok = await TOTPManager(self.db, request.app[AUTH_CONFIG_KEY].secret).activate_2fa(user, code)
         if ok:
             logger.info("2FA activado para '%s'", user)
         await self._audit(request, "2fa_enable", user, "" if ok else "código incorrecto", ok=ok, own=True)
@@ -307,11 +316,11 @@ class AccountHandlers:
     async def _api_2fa_disable(self, request: web.Request) -> web.Response:
         """Desactiva el 2FA del usuario actual: exige un código válido (TOTP o de recuperación).
         Antes no pedía nada y quien tuviera una sesión robada podía quitar el 2FA de la cuenta."""
-        user = request.get("auth_user", "")
+        user = request.get(AUTH_USER, "")
         if err := self._browser_session_only(request):
             return err
         from cyberhound.core.totp import TOTPManager
-        mgr = TOTPManager(self.db, request.app["auth_config"].secret)
+        mgr = TOTPManager(self.db, request.app[AUTH_CONFIG_KEY].secret)
         status = await self.db.get_user(user)
         if status and status.get("totp_enabled"):
             code = str((await _read_json(request)).get("code", "")).strip()
@@ -330,7 +339,7 @@ class AccountHandlers:
 
     async def _api_2fa_status(self, request: web.Request) -> web.Response:
         """Devuelve el estado del 2FA del usuario actual."""
-        user = request.get("auth_user", "")
+        user = request.get(AUTH_USER, "")
         db_user = await self.db.get_user(user) if user else None
         enabled = bool(db_user.get("totp_enabled")) if db_user else False
         return web.json_response({"enabled": enabled, "user": user})
