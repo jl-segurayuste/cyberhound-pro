@@ -57,7 +57,7 @@ CyberHound Pro es una herramienta todo-en-uno de ciberseguridad para entornos Li
 
 ## Capturas
 
-> Capturas de la interfaz actual tomadas sobre una instancia local con **datos de ejemplo ficticios** (red `10.10.0.0/24`, dominio `ejemplo-demo.es`).
+> Capturas de la interfaz actual tomadas sobre una instancia local con **datos de ejemplo ficticios** (red `10.10.0.0/24`, dominio `ejemplo-demo.es`). Se regeneran con `scripts/e2e/capturas.py`.
 
 <img src="docs/img/capturas/dashboard.png" alt="Panel de inicio">
 

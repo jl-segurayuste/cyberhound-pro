@@ -24,7 +24,16 @@ CH_PYTHON=.venv/bin/python E2E_PYTHON=/tmp/pw/bin/python scripts/e2e/run.sh
 - Puertos: `CH_E2E_PORT` (18443; la instancia multi-tenant usa el siguiente), `CH_E2E_WEB_PORT` (18080) y
   `CH_E2E_SSH_PORT` (18022).
 
-Termina con código 0 si todo pasa. Los objetivos controlados los genera `targets.py` en un directorio
+Termina con código 0 si todo pasa.
+
+Las capturas del README (`docs/img/capturas/`) se rehacen con las mismas instancias de demo y el
+WebSocket simulado (no lanza análisis reales):
+
+```bash
+CH_PYTHON=.venv/bin/python /tmp/pw/bin/python scripts/e2e/capturas.py
+```
+
+Usa el Chrome del sistema (o `CH_E2E_CHROME`) y el puerto `CH_E2E_PORT` (18443) y el siguiente. Los objetivos controlados los genera `targets.py` en un directorio
 temporal (una webshell, secretos falsos y una web con `.git`/`.env`), y `seed.py` siembra el historial
 de demo. `sshd.py` es un servidor SSH de pruebas (asyncssh, solo en 127.0.0.1) con usuario `auditor` y una
 contraseña aleatoria de cada ejecución; acepta además las claves que la batería escribe en su

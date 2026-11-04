@@ -16,6 +16,8 @@ release en GitHub, con la imagen Docker correspondiente en GHCR.
 ### Documentación
 - README: número de tests y versiones de Python del CI, `scap_baseline` en la arquitectura, ruta por
   defecto del certificado (`CH_TLS_DIR`). Manual: YARA y el caso «arranca en HTTP».
+- Capturas del README y del manual regeneradas con la interfaz actual (nuevas pestañas de
+  Configuración y ámbito por organización). Nuevo `scripts/e2e/capturas.py` para rehacerlas.
 
 ## [6.8.3] — 2026-11-04
 
