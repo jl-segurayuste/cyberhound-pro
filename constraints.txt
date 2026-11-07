@@ -14,7 +14,7 @@ cffi==2.1.1
 colorama==0.4.6
 cryptography==50.0.2
 defusedxml==0.7.1
-dnspython==2.9.1
+dnspython==2.9.2
 fonttools==4.68.0
 fpdf2==2.9.0
 frozenlist==1.8.0
